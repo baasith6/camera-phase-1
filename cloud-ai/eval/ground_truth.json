@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "description": "Ground-truth labels for ONEVO Phase 1A camera evaluation. Drop clips into cloud-ai/eval/clips/ and label them here. label: 'shoplifting' (positive) or 'normal' (negative).",
+  "alert_threshold": 70,
+  "default_zone": {
+    "name": "Whole Frame (High Value)",
+    "zoneType": "HighValue",
+    "polygon": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+  },
+  "clips": [
+    { "id": "example_positive", "file": "clips/example_positive.mp4", "label": "shoplifting" },
+    { "id": "example_negative", "file": "clips/example_negative.mp4", "label": "normal" }
+  ]
+}

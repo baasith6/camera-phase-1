@@ -1,0 +1,6 @@
+ultralytics>=8.3.0,<9
+opencv-python-headless>=4.9,<5
+numpy>=1.26
+redis>=5.0
+requests>=2.31
+minio>=7.2

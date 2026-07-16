@@ -1,0 +1,5 @@
+# Optional dependency for the RF-DETR backend (CLOUD_AI_MODEL_BACKEND=rfdetr).
+# RF-DETR is Apache-2.0 and benefits from a GPU. Install on top of requirements.txt:
+#   pip install -r requirements.txt -r requirements-rfdetr.txt
+rfdetr>=1.0
+supervision>=0.22
