@@ -1,4 +1,4 @@
-"""HTTP client for the ONEVO backend (registration, clips, heartbeat)."""
+"""HTTP client for the ONEVO backend (registration, clips, heartbeat, ONVIF device info)."""
 import requests
 
 
@@ -67,3 +67,23 @@ class BackendClient:
             timeout=15,
         )
         r.raise_for_status()
+
+    def update_device_info(self, camera_id: str, info: dict) -> None:
+        """Push ONVIF device metadata to the backend camera record (best-effort)."""
+        r = requests.put(
+            f"{self.base}/api/cameras/{camera_id}/device-info",
+            headers=self._auth_headers(),
+            json=info,
+            timeout=15,
+        )
+        r.raise_for_status()
+
+    def get_cameras(self) -> list[dict]:
+        """Fetch all cameras assigned to this connector's store."""
+        r = requests.get(
+            f"{self.base}/api/connectors/cameras",
+            headers=self._auth_headers(),
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()

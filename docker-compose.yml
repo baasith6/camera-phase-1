@@ -83,6 +83,8 @@ services:
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD}
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
+      # CORS: allow both local dev and the Dockerized dashboard
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:80}
     ports:
       - "8081:8080"
 
@@ -109,6 +111,47 @@ services:
       CLOUD_AI_YOLOE_PROMPTS: ${CLOUD_AI_YOLOE_PROMPTS}
       CONNECTOR_BOOTSTRAP_KEY: ${CONNECTOR_BOOTSTRAP_KEY}
 
+  # Edge connector — runs on the same machine that sees the camera (or in Docker for dev/demo)
+  connector:
+    build: ./connector
+    depends_on:
+      backend:
+        condition: service_started
+    volumes:
+      - connector_data:/app/data
+      - connector_samples:/app/samples
+    environment:
+      CONNECTOR_BACKEND_URL: http://backend:8080
+      CONNECTOR_ADMIN_PORT: 8099
+      CONNECTOR_BOOTSTRAP_KEY: ${CONNECTOR_BOOTSTRAP_KEY}
+      CONNECTOR_STORE_ID: 11111111-1111-1111-1111-111111111111
+      CONNECTOR_CAMERA_ID: 
+      CONNECTOR_NAME: edge-connector-1
+      CONNECTOR_SOURCE: file://samples/test.mp4
+      CONNECTOR_LOOP: ${CONNECTOR_LOOP:-true}
+      # ONVIF (leave blank for file/manual RTSP mode)
+      CONNECTOR_ONVIF_HOST: ${CONNECTOR_ONVIF_HOST:-}
+      CONNECTOR_ONVIF_PORT: ${CONNECTOR_ONVIF_PORT:-80}
+      CONNECTOR_ONVIF_USER: ${CONNECTOR_ONVIF_USER:-admin}
+      CONNECTOR_ONVIF_PASS: ${CONNECTOR_ONVIF_PASS:-admin}
+      CONNECTOR_ONVIF_PROFILE: ${CONNECTOR_ONVIF_PROFILE:-auto}
+      CONNECTOR_RTSP_RECONNECT_MAX_SEC: ${CONNECTOR_RTSP_RECONNECT_MAX_SEC:-60}
+    ports:
+      - "8099:8099"
+    restart: unless-stopped
+
+  # Angular dashboard — served by nginx, proxies /api → backend
+  dashboard:
+    build: ./dashboard
+    depends_on:
+      - backend
+    ports:
+      - "4200:80"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:
+  connector_data:
+  connector_samples:
+

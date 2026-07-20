@@ -45,22 +45,25 @@ class Detection:
     cx: float   # normalized center x (0..1)
     cy: float   # normalized center y (0..1)
     conf: float
+    embedding: list[float] = None
 
 
 class DetectorBackend(Protocol):
     @property
     def version(self) -> str: ...
-    def track_clip(self, clip_path: str) -> tuple[float, list[list["Detection"]]]: ...
+    def track_clip(self, clip_path: str, reid_extractor=None) -> tuple[float, list[list["Detection"]]]: ...
 
 
 def _ultralytics_results_to_frames(
-    results, index_to_cue: Callable[[int], str | None]
+    results, index_to_cue: Callable[[int], str | None],
+    reid_extractor=None
 ) -> tuple[float, list[list[Detection]]]:
     """Shared conversion for Ultralytics streaming track results."""
     frames: list[list[Detection]] = []
     fps = 10.0
     for res in results:
         h, w = res.orig_shape if hasattr(res, "orig_shape") else (1, 1)
+        orig_img = res.orig_img if hasattr(res, "orig_img") else None
         dets: list[Detection] = []
         boxes = getattr(res, "boxes", None)
         if boxes is not None and boxes.xyxy is not None:
@@ -74,12 +77,26 @@ def _ultralytics_results_to_frames(
                 if cue is None:
                     continue
                 x1, y1, x2, y2 = xyxy[i]
+                
+                embedding = None
+                if cue == "person" and reid_extractor is not None and orig_img is not None:
+                    try:
+                        # Convert to normalized width/height logic for extraction
+                        cx = ((x1 + x2) / 2.0) / max(1, w)
+                        cy = ((y1 + y2) / 2.0) / max(1, h)
+                        box_w = (x2 - x1) / max(1, w)
+                        box_h = (y2 - y1) / max(1, h)
+                        embedding = reid_extractor.extract(orig_img, cx, cy, box_w, box_h)
+                    except Exception as e:
+                        print(f"ReID extraction failed: {e}")
+
                 dets.append(Detection(
                     cue=cue,
                     track_id=int(ids[i]) if i < len(ids) else -1,
                     cx=float(((x1 + x2) / 2.0) / max(1, w)),
                     cy=float(((y1 + y2) / 2.0) / max(1, h)),
                     conf=float(confs[i]) if i < len(confs) else 0.0,
+                    embedding=embedding,
                 ))
         frames.append(dets)
     return fps, frames
@@ -98,12 +115,12 @@ class YoloBackend:
     def version(self) -> str:
         return f"yolo:{self.model_path}"
 
-    def track_clip(self, clip_path: str):
+    def track_clip(self, clip_path: str, reid_extractor=None):
         results = self.model.track(
             source=clip_path, stream=True, persist=True, tracker="bytetrack.yaml",
             classes=list(COCO_TO_CUE.keys()), device=self.device, verbose=False,
         )
-        return _ultralytics_results_to_frames(results, lambda c: COCO_TO_CUE.get(c))
+        return _ultralytics_results_to_frames(results, lambda c: COCO_TO_CUE.get(c), reid_extractor=reid_extractor)
 
 
 class YoloeBackend:
@@ -128,12 +145,12 @@ class YoloeBackend:
             return self.prompt_to_cue.get(self.prompt_names[idx])
         return None
 
-    def track_clip(self, clip_path: str):
+    def track_clip(self, clip_path: str, reid_extractor=None):
         results = self.model.track(
             source=clip_path, stream=True, persist=True, tracker="bytetrack.yaml",
             device=self.device, verbose=False,
         )
-        return _ultralytics_results_to_frames(results, self._index_to_cue)
+        return _ultralytics_results_to_frames(results, self._index_to_cue, reid_extractor=reid_extractor)
 
 
 class RfDetrBackend:

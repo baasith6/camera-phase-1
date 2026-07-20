@@ -32,6 +32,7 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
 
     # Per person-track timeline: track_id -> [(idx, set(zone_types), {zone_type: zone_id})]
     per_track: dict[int, list[tuple[int, set, dict]]] = {}
+    track_embeddings: dict[int, list[float]] = {}
 
     # Bag-open signal (prefer explicit open_bag cue; fall back to generic bag).
     open_bag_zone: str | None = None
@@ -70,6 +71,8 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
                 types = {z.zone_type for z in containing}
                 by_type = {z.zone_type: z.id for z in containing}
                 per_track.setdefault(d.track_id, []).append((idx, types, by_type))
+                if d.embedding and d.track_id not in track_embeddings:
+                    track_embeddings[d.track_id] = d.embedding
                 if shelf_zones:
                     persons_in_shelf += 1
                     frame_shelf_zone = frame_shelf_zone or shelf_zones[0].id
@@ -192,10 +195,20 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
 
     # Exit without checkout, and its stronger "carried a product out" variant.
     if exit_no_checkout_zone is not None:
+        # Find the track ID that triggered this to grab the embedding
+        trigger_embedding = None
+        for track_id, timeline in per_track.items():
+            visited = set()
+            for (_, types, _) in timeline:
+                visited.update(types)
+            if EXIT in visited and CHECKOUT not in visited and bool(visited & SHELF_LIKE):
+                trigger_embedding = track_embeddings.get(track_id)
+                break
+
         if product_in_shelf:
-            events.append(_ev("ShelfPickupNoCheckout", exit_no_checkout_zone, 1.0, 0.7, now))
+            events.append(_ev("ShelfPickupNoCheckout", exit_no_checkout_zone, 1.0, 0.7, now, embedding=trigger_embedding))
         else:
-            events.append(_ev("ExitWithoutCheckout", exit_no_checkout_zone, 1.0, 0.7, now))
+            events.append(_ev("ExitWithoutCheckout", exit_no_checkout_zone, 1.0, 0.7, now, embedding=trigger_embedding))
 
     if blind_spot_zone is not None:
         events.append(_ev("BlindSpotMovement", blind_spot_zone, 1.0, 0.8, now))
@@ -207,10 +220,17 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
     if hv_activity >= 2:
         events.append(_ev("HighValueActivity", hv_zone_id, float(hv_activity), 0.8, now))
 
-    # Low-staff removal proxy: a product was removed at a shelf. The Risk Engine only
-    # scores this inside the configured low-staff time window (real staff-count is Phase 1B).
+    # Low-staff removal proxy: a product was removed at a shelf.
     if product_in_shelf:
-        events.append(_ev("LowStaffRemoval", handling_zone, 1.0, 0.6, now))
+        trigger_embedding = None
+        for track_id, timeline in per_track.items():
+            visited = set()
+            for (_, types, _) in timeline:
+                visited.update(types)
+            if bool(visited & SHELF_LIKE):
+                trigger_embedding = track_embeddings.get(track_id)
+                break
+        events.append(_ev("LowStaffRemoval", handling_zone, 1.0, 0.6, now, embedding=trigger_embedding))
 
     # Bag-open (prefer explicit open_bag cue; else generic bag near a shelf).
     if open_bag_zone is not None:
@@ -221,8 +241,8 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
     return events
 
 
-def _ev(event_type: str, zone_id: str | None, value: float, conf: float, ts: str) -> dict:
-    return {
+def _ev(event_type: str, zone_id: str | None, value: float, conf: float, ts: str, embedding: list[float] = None) -> dict:
+    ev = {
         "trackId": 0,
         "zoneId": zone_id,
         "eventType": event_type,
@@ -232,3 +252,6 @@ def _ev(event_type: str, zone_id: str | None, value: float, conf: float, ts: str
         "endTs": ts,
         "evidenceFrames": [],
     }
+    if embedding:
+        ev["embedding"] = embedding
+    return ev

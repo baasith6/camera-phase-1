@@ -14,6 +14,13 @@ export interface Camera {
   rtspUrl: string;
   status: string;
   lastSeen?: string;
+  // ONVIF metadata (populated after connector query)
+  onvifHost?: string;
+  onvifPort?: number;
+  cameraManufacturer?: string;
+  cameraModel?: string;
+  cameraSerial?: string;
+  cameraFirmware?: string;
 }
 
 export interface Zone {
@@ -61,6 +68,7 @@ export interface Connector {
   diskFreePct: number;
   uploadQueueDepth: number;
   degradedReason?: string;
+  rtspReconnects?: number;
 }
 
 export interface RiskConfig {

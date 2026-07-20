@@ -21,6 +21,19 @@ class RuntimeState:
         self.last_heartbeat: float | None = None
         self.started_at = time.time()
 
+        # RTSP reliability
+        self.rtsp_reconnects = 0
+
+        # ONVIF device metadata (populated after ONVIF connect)
+        self.camera_manufacturer: str | None = None
+        self.camera_model: str | None = None
+        self.camera_serial: str | None = None
+        self.camera_firmware: str | None = None
+        self.onvif_profiles: list[dict] = []
+        
+        # Last captured frame (JPEG bytes) per camera ID for the dashboard
+        self.last_frames: dict[str, bytes] = {}
+
     def log(self, msg: str) -> None:
         line = f"{time.strftime('%H:%M:%S')} {msg}"
         with self._lock:
@@ -42,5 +55,12 @@ class RuntimeState:
                 "degradedReason": self.degraded_reason,
                 "uptimeSec": round(time.time() - self.started_at, 1),
                 "lastHeartbeat": self.last_heartbeat,
+                "rtspReconnects": self.rtsp_reconnects,
+                "cameraManufacturer": self.camera_manufacturer,
+                "cameraModel": self.camera_model,
+                "cameraSerial": self.camera_serial,
+                "cameraFirmware": self.camera_firmware,
+                "onvifProfiles": self.onvif_profiles,
                 "logs": list(self.logs)[-50:],
             }
+

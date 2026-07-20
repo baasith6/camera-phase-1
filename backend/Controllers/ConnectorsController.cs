@@ -76,6 +76,31 @@ public class ConnectorsController : ControllerBase
         return Ok(await q.OrderBy(c => c.Name).ToListAsync());
     }
 
+    // Connector fetches its assigned cameras.
+    [AllowAnonymous]
+    [HttpGet("cameras")]
+    public async Task<IActionResult> GetCameras()
+    {
+        var connector = await AuthConnectorAsync();
+        if (connector is null) return Unauthorized();
+
+        var cameras = await _db.Cameras
+            .Where(c => c.StoreId == connector.StoreId)
+            .OrderBy(c => c.Name)
+            .Select(c => new
+            {
+                c.Id,
+                c.Name,
+                c.RtspUrl,
+                c.OnvifHost,
+                c.OnvifPort,
+                c.Status
+            })
+            .ToListAsync();
+            
+        return Ok(cameras);
+    }
+
     private async Task<Connector?> AuthConnectorAsync()
     {
         if (!Request.Headers.TryGetValue("X-Connector-Id", out var idVal) ||

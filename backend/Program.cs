@@ -24,6 +24,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(
         AbortOnConnectFail = false
     }));
 builder.Services.AddSingleton<ClipQueue>();
+builder.Services.AddSingleton<AlertChannel>();
 
 // ---- Object storage (MinIO / S3) ----
 var s3Opts = new S3Options
@@ -60,18 +61,39 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = jwtOpts.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOpts.SigningKey))
         };
+        // Allow JWT via ?access_token= query param for SSE (EventSource can't set headers).
+        o.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                var token = ctx.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(token) &&
+                    ctx.Request.Path.StartsWithSegments("/api/alerts/stream"))
+                {
+                    ctx.Token = token;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
 // ---- Risk engine (scoped: uses DbContext) ----
 builder.Services.AddScoped<RiskEngine>();
 
+// ---- Theft Orchestrator (Singleton: creates its own scopes) ----
+builder.Services.AddSingleton<TheftOrchestrator>();
+
 // ---- Web ----
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+// CORS — driven by CORS_ORIGINS env var (comma-separated list of allowed origins).
+// Falls back to http://localhost:4200 for local development.
+var allowedOrigins = (cfg["CORS_ORIGINS"] ?? "http://localhost:4200")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod()));
+    p.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
 

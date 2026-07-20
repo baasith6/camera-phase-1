@@ -31,6 +31,14 @@ public class Camera
     public DateTimeOffset? LastSeen { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    // ONVIF metadata (populated by connector after ONVIF query)
+    public string? OnvifHost { get; set; }
+    public int? OnvifPort { get; set; }
+    public string? CameraManufacturer { get; set; }
+    public string? CameraModel { get; set; }
+    public string? CameraSerial { get; set; }
+    public string? CameraFirmware { get; set; }
+
     public List<CameraZone> Zones { get; set; } = new();
 }
 
@@ -88,6 +96,7 @@ public class AiEvent
     public DateTimeOffset StartTs { get; set; }
     public DateTimeOffset EndTs { get; set; }
     public string EvidenceFramesJson { get; set; } = "[]";
+    public string? EmbeddingJson { get; set; }
     public string ModelVersion { get; set; } = "unknown";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -1,0 +1,19 @@
+# GPU override — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Requirements:
+#   - NVIDIA driver installed on host
+#   - nvidia-container-toolkit installed
+#   - docker run --gpus all nvidia/cuda:12.0-base nvidia-smi  (verify GPU access)
+
+services:
+  cloud-ai:
+    environment:
+      CLOUD_AI_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

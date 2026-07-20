@@ -39,7 +39,8 @@ public static class DbSeeder
             var mode = Enum.TryParse<AlertVisibilityMode>(cfg["Pilot:AlertVisibilityMode"], true, out var m)
                 ? m : AlertVisibilityMode.Silent;
 
-            var store = new Store { Name = "Demo Store", Organization = "demo", AlertVisibilityMode = mode };
+            var storeId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var store = new Store { Id = storeId, Name = "Demo Store", Organization = "demo", AlertVisibilityMode = mode };
             db.Stores.Add(store);
 
             var camera = new Camera
@@ -50,6 +51,15 @@ public static class DbSeeder
                 Status = CameraStatus.AnalyticsOnly
             };
             db.Cameras.Add(camera);
+
+            var camera2 = new Camera
+            {
+                StoreId = store.Id,
+                Name = "Aisle 2 - Electronics",
+                RtspUrl = "file://samples/test.mp4",
+                Status = CameraStatus.AnalyticsOnly
+            };
+            db.Cameras.Add(camera2);
 
             // Demo zones (normalized coords) so all Phase 1A patterns can fire out of the box.
             db.CameraZones.AddRange(
@@ -80,6 +90,27 @@ public static class DbSeeder
                     Name = "Blind Spot",
                     ZoneType = ZoneType.BlindSpot,
                     PolygonJson = "[[0.3,0.0],[0.48,0.0],[0.48,0.35],[0.3,0.35]]"
+                },
+                new CameraZone
+                {
+                    CameraId = camera2.Id,
+                    Name = "High-Value Shelf 2",
+                    ZoneType = ZoneType.HighValue,
+                    PolygonJson = "[[0.5,0.1],[0.95,0.1],[0.95,0.9],[0.5,0.9]]"
+                },
+                new CameraZone
+                {
+                    CameraId = camera2.Id,
+                    Name = "Checkout 2",
+                    ZoneType = ZoneType.Checkout,
+                    PolygonJson = "[[0.0,0.6],[0.25,0.6],[0.25,1.0],[0.0,1.0]]"
+                },
+                new CameraZone
+                {
+                    CameraId = camera2.Id,
+                    Name = "Exit 2",
+                    ZoneType = ZoneType.Exit,
+                    PolygonJson = "[[0.0,0.0],[0.15,0.0],[0.15,0.4],[0.0,0.4]]"
                 });
         }
 

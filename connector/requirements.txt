@@ -3,3 +3,6 @@ numpy>=1.26
 requests>=2.31
 fastapi>=0.110
 uvicorn>=0.29
+# ONVIF camera integration (optional — remove if not using IP cameras)
+onvif-zeep>=0.2.12
+wsdiscovery>=2.0

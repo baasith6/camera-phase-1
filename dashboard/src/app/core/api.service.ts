@@ -22,11 +22,22 @@ export class ApiService {
     const q = storeId ? `?storeId=${storeId}` : '';
     return this.http.get<Camera[]>(`${API_BASE}/api/cameras${q}`);
   }
-  createCamera(storeId: string, name: string, rtspUrl: string): Observable<Camera> {
-    return this.http.post<Camera>(`${API_BASE}/api/cameras`, { storeId, name, rtspUrl });
+  getCamera(id: string): Observable<Camera> {
+    return this.http.get<Camera>(`${API_BASE}/api/cameras/${id}`);
   }
-  updateCamera(id: string, body: { name?: string; rtspUrl?: string; status?: string }): Observable<Camera> {
+  createCamera(storeId: string, name: string, rtspUrl: string,
+               onvifHost?: string, onvifPort?: number): Observable<Camera> {
+    return this.http.post<Camera>(`${API_BASE}/api/cameras`,
+      { storeId, name, rtspUrl, onvifHost, onvifPort });
+  }
+  updateCamera(id: string, body: {
+    name?: string; rtspUrl?: string; status?: string;
+    onvifHost?: string; onvifPort?: number;
+  }): Observable<Camera> {
     return this.http.put<Camera>(`${API_BASE}/api/cameras/${id}`, body);
+  }
+  testStream(id: string): Observable<any> {
+    return this.http.post<any>(`${API_BASE}/api/cameras/${id}/test-stream`, {});
   }
 
   // Zones

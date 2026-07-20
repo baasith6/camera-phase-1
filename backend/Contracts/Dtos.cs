@@ -11,8 +11,16 @@ public record CreateStoreRequest(string Name, string? Organization);
 public record UpdateStoreRequest(string? Name, string? AlertVisibilityMode);
 
 // ---- Cameras ----
-public record CreateCameraRequest(Guid StoreId, string Name, string RtspUrl);
-public record UpdateCameraRequest(string? Name, string? RtspUrl, string? Status);
+public record CreateCameraRequest(Guid StoreId, string Name, string RtspUrl, string? OnvifHost, int? OnvifPort);
+public record UpdateCameraRequest(string? Name, string? RtspUrl, string? Status, string? OnvifHost, int? OnvifPort);
+public record UpdateDeviceInfoRequest(
+    string? Manufacturer,
+    string? Model,
+    string? Serial,
+    string? Firmware,
+    string? OnvifHost,
+    int? OnvifPort,
+    string? RtspUrl);
 
 // ---- Zones ----
 public record CreateZoneRequest(Guid CameraId, string Name, string ZoneType, string PolygonJson);
@@ -37,7 +45,8 @@ public record AiEventDto(
     double Confidence,
     DateTimeOffset StartTs,
     DateTimeOffset EndTs,
-    int[]? EvidenceFrames);
+    int[]? EvidenceFrames,
+    float[]? Embedding);
 
 public record AiEventsBatchRequest(Guid ClipId, string ModelVersion, List<AiEventDto> Events);
 

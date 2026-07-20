@@ -17,13 +17,16 @@ public class AiEventsController : ControllerBase
     private readonly IConfiguration _cfg;
     private readonly RiskEngine _risk;
     private readonly S3Service _s3;
+    private readonly AlertChannel _alertChannel;
 
-    public AiEventsController(OnevoDbContext db, IConfiguration cfg, RiskEngine risk, S3Service s3)
+    public AiEventsController(OnevoDbContext db, IConfiguration cfg, RiskEngine risk,
+        S3Service s3, AlertChannel alertChannel)
     {
         _db = db;
         _cfg = cfg;
         _risk = risk;
         _s3 = s3;
+        _alertChannel = alertChannel;
     }
 
     // Called by the cloud-ai worker. Authenticated with the shared service (bootstrap) key.
@@ -59,6 +62,7 @@ public class AiEventsController : ControllerBase
                 StartTs = e.StartTs,
                 EndTs = e.EndTs,
                 EvidenceFramesJson = JsonSerializer.Serialize(e.EvidenceFrames ?? Array.Empty<int>()),
+                EmbeddingJson = e.Embedding != null ? JsonSerializer.Serialize(e.Embedding) : null,
                 ModelVersion = req.ModelVersion
             };
             _db.AiEvents.Add(ev);
@@ -83,10 +87,10 @@ public class AiEventsController : ControllerBase
         });
 
         Alert? alert = null;
-        // 0-39 => event log only (RiskEvent). 40+ => create a reviewable/analytics alert.
         if (result.Score >= cfg.LowBand)
         {
-            var clipUrl = await _s3.PresignedGetAsync(clip.ObjectKey, 3600);
+            // Store the S3 ObjectKey — presigned URL is generated lazily on each GET.
+            // This prevents the 1-hour TTL from breaking later reviews.
             alert = new Alert
             {
                 StoreId = camera.StoreId,
@@ -97,7 +101,7 @@ public class AiEventsController : ControllerBase
                 RiskLevel = result.Level,
                 RiskScore = result.Score,
                 EvidenceJson = JsonSerializer.Serialize(result.Evidence),
-                ClipUrl = clipUrl,
+                ClipUrl = clip.ObjectKey,   // ObjectKey stored here; presigned on GET
                 ModelVersion = req.ModelVersion,
                 RuleVersion = RiskConfig.RuleVersion,
                 Status = AlertStatus.PendingReview
@@ -106,6 +110,23 @@ public class AiEventsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+
+        // Cross-camera theft orchestration!
+        if (saved.Any(e => e.EmbeddingJson != null && e.EmbeddingJson != "null"))
+        {
+            var orchestrator = HttpContext.RequestServices.GetRequiredService<TheftOrchestrator>();
+            _ = orchestrator.EvaluateCrossCameraTheftAsync(camera.StoreId, saved); // Run asynchronously without blocking
+        }
+
+        // Push real-time SSE event to connected dashboard clients.
+        if (alert is not null)
+        {
+            _alertChannel.Publish(new AlertSseEvent(
+                alert.Id, alert.AlertType, alert.RiskLevel.ToString(),
+                alert.RiskScore, alert.StoreId, alert.CreatedAt));
+        }
+
         return Ok(new { clipId = clip.Id, score = result.Score, level = result.Level.ToString(), alertId = alert?.Id });
     }
 }
+

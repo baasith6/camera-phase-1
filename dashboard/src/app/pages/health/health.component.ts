@@ -10,15 +10,33 @@ import { Connector } from '../../core/models';
   template: `
     <div class="header-row">
       <h2>Connector Health</h2>
-      <button class="ghost" (click)="load()">Refresh</button>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        @if (loading) { <span class="muted small">Refreshing…</span> }
+        <button class="ghost" (click)="load()">Refresh</button>
+      </div>
     </div>
 
-    @if (connectors.length === 0) {
+    @if (error) {
+      <div class="err-banner">
+        ⚠ {{ error }}
+        <button class="ghost small" (click)="load()">Retry</button>
+      </div>
+    }
+
+    @if (!error && connectors.length === 0 && !loading) {
       <div class="card"><p class="muted">No connectors registered yet.</p></div>
-    } @else {
+    } @else if (connectors.length > 0) {
       <table class="table">
         <thead>
-          <tr><th>Name</th><th>Status</th><th>Disk free</th><th>Queue</th><th>Last heartbeat</th><th>Degraded</th></tr>
+          <tr>
+            <th>Connector</th>
+            <th>Status</th>
+            <th>Disk free</th>
+            <th>Queue</th>
+            <th>RTSP reconnects</th>
+            <th>Last heartbeat</th>
+            <th>Degraded reason</th>
+          </tr>
         </thead>
         <tbody>
           @for (c of connectors; track c.id) {
@@ -27,6 +45,7 @@ import { Connector } from '../../core/models';
               <td><span class="badge" [class]="c.status.toLowerCase()">{{ c.status }}</span></td>
               <td [class.warn]="c.diskFreePct < 20" [class.crit]="c.diskFreePct < 10">{{ c.diskFreePct | number:'1.0-1' }}%</td>
               <td [class.warn]="c.uploadQueueDepth > 50">{{ c.uploadQueueDepth }}</td>
+              <td [class.warn]="(c.rtspReconnects || 0) > 0">{{ c.rtspReconnects ?? 0 }}</td>
               <td>{{ c.lastHeartbeat ? (c.lastHeartbeat | date:'short') : '—' }}</td>
               <td>{{ c.degradedReason || '—' }}</td>
             </tr>
@@ -36,17 +55,21 @@ import { Connector } from '../../core/models';
     }
   `,
   styles: [`
-    .header-row { display:flex; justify-content:space-between; align-items:center; }
+    .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
     .badge { padding:.15rem .5rem; border-radius:10px; font-size:.75rem; }
     .badge.healthy { background:#1e4a2a; color:#8ae0a0; }
     .badge.degraded { background:#5a4a1e; color:#ffe08a; }
     .badge.offline, .badge.unknown { background:#5a1e1e; color:#ff9f9f; }
     .warn { color:#ffe08a; } .crit { color:#ff6b6b; }
     .small { font-size:.75rem; }
+    .err-banner { background:#3a1a1a; color:#f07070; padding:.5rem .75rem; border-radius:6px;
+                  margin-bottom:.75rem; display:flex; justify-content:space-between; align-items:center; }
   `],
 })
 export class HealthComponent implements OnInit, OnDestroy {
   connectors: Connector[] = [];
+  loading = false;
+  error = '';
   private timer?: any;
 
   constructor(private api: ApiService) {}
@@ -54,5 +77,12 @@ export class HealthComponent implements OnInit, OnDestroy {
   ngOnInit(): void { this.load(); this.timer = setInterval(() => this.load(), 8000); }
   ngOnDestroy(): void { if (this.timer) clearInterval(this.timer); }
 
-  load(): void { this.api.listConnectors().subscribe((c) => (this.connectors = c)); }
+  load(): void {
+    this.loading = true;
+    this.api.listConnectors().subscribe({
+      next: (c) => { this.connectors = c; this.loading = false; this.error = ''; },
+      error: (e) => { this.loading = false; this.error = e?.error?.error || 'Failed to load connectors'; },
+    });
+  }
 }
+
