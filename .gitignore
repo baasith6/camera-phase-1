@@ -22,6 +22,7 @@ dashboard/dist/
 *.mp4
 !connector/samples/.gitkeep
 *.pt
+cloud-ai/*.ts
 connector/data/
 cloud-ai/models/
 *.sqlite

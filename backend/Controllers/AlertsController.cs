@@ -63,9 +63,13 @@ public class AlertsController : ControllerBase
         string? freshUrl = null;
         if (!string.IsNullOrEmpty(alert.ClipUrl) && !alert.ClipUrl.StartsWith("http"))
         {
-            // ClipUrl is an ObjectKey — generate fresh 24-hour presigned URL.
-            try { freshUrl = await _s3.PresignedGetAsync(alert.ClipUrl, 86400); }
-            catch { /* S3 unavailable — return null URL gracefully */ }
+            // ClipUrl is an ObjectKey — presign only if the object still exists in storage,
+            // so the UI can show "clip not available" instead of a broken player.
+            if (await _s3.ExistsAsync(alert.ClipUrl))
+            {
+                try { freshUrl = await _s3.PresignedGetAsync(alert.ClipUrl, 86400); }
+                catch { /* S3 unavailable — return null URL gracefully */ }
+            }
         }
         else
         {

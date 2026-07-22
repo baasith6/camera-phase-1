@@ -77,8 +77,12 @@ def main() -> None:
             try:
                 process_job(job, cfg, store, detector, backend, reid_extractor=reid_extractor)
             except Exception as job_err:  # noqa: BLE001
-                print(f"[cloud-ai] job error (attempt {attempt}/{MAX_RETRIES}): {job_err}", flush=True)
-                if attempt < MAX_RETRIES:
+                # A missing clip (NoSuchKey) will never appear — retrying just blocks the
+                # worker on back-off sleeps. Dead-letter it immediately instead.
+                missing_clip = "NoSuchKey" in str(job_err) or "does not exist" in str(job_err)
+                print(f"[cloud-ai] job error (attempt {attempt}/{MAX_RETRIES}"
+                      f"{'; missing clip, not retrying' if missing_clip else ''}): {job_err}", flush=True)
+                if attempt < MAX_RETRIES and not missing_clip:
                     # Re-queue the job for another attempt (push to left so it retries soon).
                     r.lpush(QUEUE_KEY, json.dumps(job))
                     time.sleep(2 ** attempt)   # 2s, 4s back-off

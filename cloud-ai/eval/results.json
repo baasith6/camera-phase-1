@@ -1,0 +1,18 @@
+{
+  "backend": "yolo26",
+  "model": "yolo26s.pt",
+  "alert_threshold": 70,
+  "num_scored": 0,
+  "num_skipped": 2,
+  "metrics": {
+    "tp": 0,
+    "fp": 0,
+    "tn": 0,
+    "fn": 0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "fpr": 0.0
+  },
+  "per_clip": []
+}

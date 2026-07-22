@@ -24,10 +24,19 @@ import { AuthService } from '../../core/auth.service';
   `,
   styles: [`
     .login-wrap { display:flex; justify-content:center; align-items:center; min-height:100vh; }
-    .login-card { width: 340px; display:flex; flex-direction:column; gap:.5rem; }
-    h1 { margin:0; }
+    .login-card {
+      width: 350px; display:flex; flex-direction:column; gap:.5rem;
+      border:1px solid var(--border-strong);
+      box-shadow: 0 0 40px rgba(139,92,246,.12), 0 8px 32px rgba(0,0,0,.4);
+      padding:1.75rem 1.5rem;
+    }
+    h1 {
+      margin:0; letter-spacing:.04em;
+      background:linear-gradient(120deg, var(--accent-2), var(--accent), #c4b5fd);
+      -webkit-background-clip:text; background-clip:text; color:transparent;
+    }
     .hint { font-size:.8rem; margin-top:.5rem; }
-    .error { color:#ff6b6b; }
+    .error { color:var(--danger); }
   `],
 })
 export class LoginComponent {

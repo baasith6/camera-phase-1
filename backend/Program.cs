@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -85,7 +86,13 @@ builder.Services.AddScoped<RiskEngine>();
 builder.Services.AddSingleton<TheftOrchestrator>();
 
 // ---- Web ----
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o =>
+    {
+        o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        // EF navigation properties (Alert.Reviews <-> Review.Alert) form cycles; ignore them.
+        o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 // CORS — driven by CORS_ORIGINS env var (comma-separated list of allowed origins).

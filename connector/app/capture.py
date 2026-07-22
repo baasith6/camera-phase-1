@@ -8,6 +8,7 @@ re-opens the stream with exponential back-off (2 s → 4 s → … up to
 cfg.rtsp_reconnect_max_sec) instead of crashing.  File sources loop as before.
 """
 import os
+import subprocess
 import time
 import uuid
 from collections import deque
@@ -108,13 +109,31 @@ class CapturePipeline:
         if not frames:
             return None
         os.makedirs(os.path.join(self.cfg.state_dir, "clips"), exist_ok=True)
-        path = os.path.join(self.cfg.state_dir, "clips", f"{uuid.uuid4().hex}.mp4")
+        clip_id = uuid.uuid4().hex
+        raw_path = os.path.join(self.cfg.state_dir, "clips", f"{clip_id}.raw.mp4")
+        path = os.path.join(self.cfg.state_dir, "clips", f"{clip_id}.mp4")
         h, w = frames[0].shape[:2]
+        # OpenCV's mp4v (MPEG-4 Part 2) isn't playable in browsers — write it here,
+        # then transcode to H.264 below so the dashboard's <video> tag can play it.
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(path, fourcc, fps, (w, h))
+        writer = cv2.VideoWriter(raw_path, fourcc, fps, (w, h))
         for f in frames:
             writer.write(f)
         writer.release()
+
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", raw_path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                 "-movflags", "+faststart", "-loglevel", "error", path],
+                check=True, timeout=60,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            self.state.log(f"WARNING: H.264 transcode failed ({exc}); uploading raw clip instead")
+            os.replace(raw_path, path)
+            return path
+        finally:
+            if os.path.exists(raw_path):
+                os.remove(raw_path)
         return path
 
     # ------------------------------------------------------------------

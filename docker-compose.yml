@@ -120,6 +120,8 @@ services:
     volumes:
       - connector_data:/app/data
       - connector_samples:/app/samples
+    extra_hosts:
+      - "localhost:host-gateway"
     environment:
       CONNECTOR_BACKEND_URL: http://backend:8080
       CONNECTOR_ADMIN_PORT: 8099
@@ -129,6 +131,14 @@ services:
       CONNECTOR_NAME: edge-connector-1
       CONNECTOR_SOURCE: file://samples/test.mp4
       CONNECTOR_LOOP: ${CONNECTOR_LOOP:-true}
+      # Test video loops forever, so motion fires constantly. Throttle clip cutting
+      # to mimic a real camera (event-driven) and keep the cloud-ai queue from growing.
+      # On CPU, cloud-ai YOLO takes ~50s for an 8s clip, so cooldown must exceed that
+      # for the queue to stay drained. (A real GPU deployment can use shorter cooldowns.)
+      CONNECTOR_PRE_SECONDS: ${CONNECTOR_PRE_SECONDS:-4}
+      CONNECTOR_POST_SECONDS: ${CONNECTOR_POST_SECONDS:-4}
+      CONNECTOR_COOLDOWN_SECONDS: ${CONNECTOR_COOLDOWN_SECONDS:-60}
+      CONNECTOR_MOTION_AREA_FRAC: ${CONNECTOR_MOTION_AREA_FRAC:-0.05}
       # ONVIF (leave blank for file/manual RTSP mode)
       CONNECTOR_ONVIF_HOST: ${CONNECTOR_ONVIF_HOST:-}
       CONNECTOR_ONVIF_PORT: ${CONNECTOR_ONVIF_PORT:-80}

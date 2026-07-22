@@ -180,39 +180,39 @@ import { Camera, Store, Zone } from '../../core/models';
   styles: [`
     .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
     .row-item { padding:.4rem .5rem; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; }
-    .row-item:hover { background:#1b2027; }
-    .row-item.sel { background:#22303f; }
+    .row-item:hover { background:var(--accent-soft); }
+    .row-item.sel { background:var(--accent-soft); border-left:2px solid var(--accent); }
     .add-row { display:flex; gap:.4rem; margin-top:.6rem; }
     .add-col { display:flex; flex-direction:column; gap:.4rem; }
     .field-row { display:flex; flex-direction:column; gap:.15rem; }
-    .field-row label { font-size:.75rem; color:#8ab4f8; }
-    .onvif-section { border:1px solid #2a3540; border-radius:6px; overflow:hidden; margin:.2rem 0; }
+    .field-row label { font-size:.75rem; color:var(--accent-2); }
+    .onvif-section { border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden; margin:.2rem 0; }
     .onvif-header { display:flex; justify-content:space-between; padding:.4rem .6rem;
-                    cursor:pointer; font-size:.8rem; color:#8ab4f8; background:#1b2027; }
-    .onvif-header:hover { background:#22303f; }
+                    cursor:pointer; font-size:.8rem; color:var(--accent-2); background:var(--surface-2); }
+    .onvif-header:hover { background:var(--accent-soft); }
     .toggle { font-size:.7rem; }
-    .onvif-fields { padding:.5rem .6rem; display:flex; flex-direction:column; gap:.4rem; background:#141820; }
-    .chip { display:inline-block; margin-left:.4rem; padding:.1rem .4rem; border-radius:10px;
-            font-size:.7rem; background:#1e2e3f; color:#8ab4f8; }
+    .onvif-fields { padding:.5rem .6rem; display:flex; flex-direction:column; gap:.4rem; background:var(--surface); }
+    .chip { display:inline-block; margin-left:.4rem; padding:.1rem .4rem; border-radius:999px;
+            font-size:.7rem; background:var(--info-soft); color:var(--accent-2); }
     .draw-toolbar { display:flex; gap:.5rem; margin-bottom:.5rem; align-items:center; flex-wrap:wrap; }
-    canvas { background:#0b0e12; border:1px solid #333; border-radius:6px; cursor:crosshair; }
+    canvas { background:var(--bg); border:1px solid var(--border-strong); border-radius:var(--radius-sm); cursor:crosshair; }
     .small { font-size:.8rem; }
     .cam-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
     .cam-detail-header h3 { margin:0; }
     .detail-grid { display:flex; flex-direction:column; gap:.3rem; }
     .detail-row { display:flex; gap:1rem; font-size:.85rem; }
-    .dk { min-width:140px; color:#8ab4f8; font-size:.8rem; }
-    .dv { color:#e6e6e6; word-break:break-all; }
-    .badge { padding:.15rem .5rem; border-radius:10px; font-size:.75rem; }
-    .badge.online { background:#1e4a2a; color:#8ae0a0; }
-    .badge.pending { background:#2a2a2a; color:#aaa; }
-    .badge.offline { background:#5a1e1e; color:#ff9f9f; }
-    .btn-link { display:inline-block; padding:.3rem .65rem; border-radius:6px; font-size:.78rem;
-                background:#1e2530; color:#8ab4f8; text-decoration:none; border:1px solid #2a3a50; }
-    .btn-link:hover { background:#2a3a50; }
-    .test-result { margin-top:.75rem; padding:.5rem .75rem; border-radius:6px; font-size:.82rem; }
-    .test-result.ok { background:#1a3a2a; color:#5cdb7f; }
-    .test-result.err { background:#3a1a1a; color:#f07070; }
+    .dk { min-width:140px; color:var(--accent-2); font-size:.8rem; }
+    .dv { color:var(--text); word-break:break-all; }
+    .badge { padding:.18rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
+    .badge.online { background:var(--success-soft); color:var(--success); border:1px solid rgba(52,211,153,.3); }
+    .badge.pending { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border-strong); }
+    .badge.offline { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
+    .btn-link { display:inline-block; padding:.3rem .65rem; border-radius:var(--radius-sm); font-size:.78rem;
+                background:var(--accent-soft); color:var(--accent-2); text-decoration:none; border:1px solid var(--border-strong); }
+    .btn-link:hover { background:rgba(139,92,246,.22); border-color:var(--accent); }
+    .test-result { margin-top:.75rem; padding:.5rem .75rem; border-radius:var(--radius-sm); font-size:.82rem; }
+    .test-result.ok { background:var(--success-soft); color:var(--success); }
+    .test-result.err { background:var(--danger-soft); color:var(--danger); }
   `],
 })
 export class SetupComponent implements OnInit, AfterViewInit {

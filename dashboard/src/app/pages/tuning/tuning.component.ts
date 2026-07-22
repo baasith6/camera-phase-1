@@ -41,35 +41,37 @@ const DEFAULT_CONFIG: RiskConfig = {
       </select>
     </div>
 
-    <div class="card">
-      <h3>Signal weights</h3>
-      <div class="kv">
-        <div class="k">High-value zone entry</div><input type="number" [(ngModel)]="cfg.weights['HighValueZoneEntry']" />
-        <div class="k">Dwell (max)</div><input type="number" [(ngModel)]="cfg.weights['Dwell']" />
-        <div class="k">Repeated handling</div><input type="number" [(ngModel)]="cfg.weights['RepeatedHandling']" />
-        <div class="k">Bag / open-bag near shelf</div><input type="number" [(ngModel)]="cfg.weights['BagOpen']" />
-        <div class="k">Concealment</div><input type="number" [(ngModel)]="cfg.weights['Concealment']" />
-        <div class="k">Exit without checkout</div><input type="number" [(ngModel)]="cfg.weights['ExitWithoutCheckout']" />
-        <div class="k">Shelf pickup, no checkout</div><input type="number" [(ngModel)]="cfg.weights['ShelfPickupNoCheckout']" />
-        <div class="k">Blind-spot movement</div><input type="number" [(ngModel)]="cfg.weights['BlindSpotMovement']" />
-        <div class="k">Group distraction</div><input type="number" [(ngModel)]="cfg.weights['GroupDistraction']" />
-        <div class="k">High-value zone activity</div><input type="number" [(ngModel)]="cfg.weights['HighValueActivity']" />
-        <div class="k">Low-staff removal</div><input type="number" [(ngModel)]="cfg.weights['LowStaffRemoval']" />
+    <div class="tuning-grid">
+      <div class="card">
+        <h3>Signal weights</h3>
+        <div class="kv">
+          <div class="k">High-value zone entry</div><input type="number" [(ngModel)]="cfg.weights['HighValueZoneEntry']" />
+          <div class="k">Dwell (max)</div><input type="number" [(ngModel)]="cfg.weights['Dwell']" />
+          <div class="k">Repeated handling</div><input type="number" [(ngModel)]="cfg.weights['RepeatedHandling']" />
+          <div class="k">Bag / open-bag near shelf</div><input type="number" [(ngModel)]="cfg.weights['BagOpen']" />
+          <div class="k">Concealment</div><input type="number" [(ngModel)]="cfg.weights['Concealment']" />
+          <div class="k">Exit without checkout</div><input type="number" [(ngModel)]="cfg.weights['ExitWithoutCheckout']" />
+          <div class="k">Shelf pickup, no checkout</div><input type="number" [(ngModel)]="cfg.weights['ShelfPickupNoCheckout']" />
+          <div class="k">Blind-spot movement</div><input type="number" [(ngModel)]="cfg.weights['BlindSpotMovement']" />
+          <div class="k">Group distraction</div><input type="number" [(ngModel)]="cfg.weights['GroupDistraction']" />
+          <div class="k">High-value zone activity</div><input type="number" [(ngModel)]="cfg.weights['HighValueActivity']" />
+          <div class="k">Low-staff removal</div><input type="number" [(ngModel)]="cfg.weights['LowStaffRemoval']" />
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <h3>Thresholds</h3>
-      <div class="kv">
-        <div class="k">Dwell threshold (s)</div><input type="number" [(ngModel)]="cfg.dwellThresholdSec" />
-        <div class="k">Dwell max (s)</div><input type="number" [(ngModel)]="cfg.dwellMaxSec" />
-        <div class="k">Repeated handling count</div><input type="number" [(ngModel)]="cfg.repeatedHandlingThreshold" />
-        <div class="k">Group size threshold</div><input type="number" [(ngModel)]="cfg.groupSizeThreshold" />
-        <div class="k">Low-staff start hour (0-23)</div><input type="number" [(ngModel)]="cfg.lowStaffStartHour" />
-        <div class="k">Low-staff end hour (0-23)</div><input type="number" [(ngModel)]="cfg.lowStaffEndHour" />
-        <div class="k">Low band (analytics ≥)</div><input type="number" [(ngModel)]="cfg.lowBand" />
-        <div class="k">Medium band (alert ≥)</div><input type="number" [(ngModel)]="cfg.mediumBand" />
-        <div class="k">High band (priority ≥)</div><input type="number" [(ngModel)]="cfg.highBand" />
+      <div class="card">
+        <h3>Thresholds</h3>
+        <div class="kv">
+          <div class="k">Dwell threshold (s)</div><input type="number" [(ngModel)]="cfg.dwellThresholdSec" />
+          <div class="k">Dwell max (s)</div><input type="number" [(ngModel)]="cfg.dwellMaxSec" />
+          <div class="k">Repeated handling count</div><input type="number" [(ngModel)]="cfg.repeatedHandlingThreshold" />
+          <div class="k">Group size threshold</div><input type="number" [(ngModel)]="cfg.groupSizeThreshold" />
+          <div class="k">Low-staff start hour (0-23)</div><input type="number" [(ngModel)]="cfg.lowStaffStartHour" />
+          <div class="k">Low-staff end hour (0-23)</div><input type="number" [(ngModel)]="cfg.lowStaffEndHour" />
+          <div class="k">Low band (analytics ≥)</div><input type="number" [(ngModel)]="cfg.lowBand" />
+          <div class="k">Medium band (alert ≥)</div><input type="number" [(ngModel)]="cfg.mediumBand" />
+          <div class="k">High band (priority ≥)</div><input type="number" [(ngModel)]="cfg.highBand" />
+        </div>
       </div>
     </div>
 
@@ -78,9 +80,11 @@ const DEFAULT_CONFIG: RiskConfig = {
   `,
   styles: [`
     .header-row { display:flex; justify-content:space-between; align-items:center; }
-    .kv { display:grid; grid-template-columns:220px 120px; gap:.4rem; align-items:center; }
-    .k { color:#8ab4f8; }
-    .ok { color:#7bd88f; }
+    .tuning-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; align-items:start; }
+    @media (max-width: 980px) { .tuning-grid { grid-template-columns:1fr; } }
+    .kv { display:grid; grid-template-columns:1fr 110px; gap:.45rem; align-items:center; }
+    .k { color:var(--accent-2); font-size:.88rem; }
+    .ok { color:var(--success); }
   `],
 })
 export class TuningComponent implements OnInit {
