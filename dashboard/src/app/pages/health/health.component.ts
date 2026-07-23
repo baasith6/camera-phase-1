@@ -56,13 +56,14 @@ import { Connector } from '../../core/models';
   `,
   styles: [`
     .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
-    .badge { padding:.15rem .5rem; border-radius:10px; font-size:.75rem; }
-    .badge.healthy { background:#1e4a2a; color:#8ae0a0; }
-    .badge.degraded { background:#5a4a1e; color:#ffe08a; }
-    .badge.offline, .badge.unknown { background:#5a1e1e; color:#ff9f9f; }
-    .warn { color:#ffe08a; } .crit { color:#ff6b6b; }
+    .badge { padding:.18rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
+    .badge.healthy { background:var(--success-soft); color:var(--success); border:1px solid rgba(52,211,153,.3); }
+    .badge.degraded { background:var(--warning-soft); color:var(--warning); border:1px solid rgba(251,191,36,.3); }
+    .badge.offline, .badge.unknown { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
+    .warn { color:var(--warning); } .crit { color:var(--danger); }
     .small { font-size:.75rem; }
-    .err-banner { background:#3a1a1a; color:#f07070; padding:.5rem .75rem; border-radius:6px;
+    .err-banner { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3);
+                  padding:.5rem .75rem; border-radius:var(--radius-sm);
                   margin-bottom:.75rem; display:flex; justify-content:space-between; align-items:center; }
   `],
 })
