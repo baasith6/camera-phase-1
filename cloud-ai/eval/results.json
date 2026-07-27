@@ -1,18 +1,75 @@
 {
-  "backend": "yolo26",
-  "model": "yolo26s.pt",
+  "backend": "yoloe",
+  "model": "yoloe-11s-seg.pt",
   "alert_threshold": 70,
-  "num_scored": 0,
-  "num_skipped": 2,
+  "num_scored": 4,
+  "num_skipped": 0,
   "metrics": {
-    "tp": 0,
+    "tp": 2,
     "fp": 0,
-    "tn": 0,
+    "tn": 2,
     "fn": 0,
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
     "fpr": 0.0
   },
-  "per_clip": []
+  "per_clip": [
+    {
+      "id": "normal_001",
+      "file": "clips/normal_001.mp4",
+      "gt_label": "normal",
+      "score": 0,
+      "predicted": "no_alert",
+      "events": [],
+      "elapsed_s": 64.94
+    },
+    {
+      "id": "normal_002",
+      "file": "clips/normal_002.mp4",
+      "gt_label": "normal",
+      "score": 60,
+      "predicted": "no_alert",
+      "events": [
+        "HighValueZoneEntry",
+        "Dwell",
+        "RepeatedHandling",
+        "HighValueActivity",
+        "BagOpen"
+      ],
+      "elapsed_s": 65.59
+    },
+    {
+      "id": "shoplifting_001",
+      "file": "clips/shoplifting_001.mp4",
+      "gt_label": "shoplifting",
+      "score": 70,
+      "predicted": "alert",
+      "events": [
+        "HighValueZoneEntry",
+        "Dwell",
+        "RepeatedHandling",
+        "GroupDistraction",
+        "HighValueActivity",
+        "BagOpen"
+      ],
+      "elapsed_s": 65.28
+    },
+    {
+      "id": "shoplifting_002",
+      "file": "clips/shoplifting_002.mp4",
+      "gt_label": "shoplifting",
+      "score": 70,
+      "predicted": "alert",
+      "events": [
+        "HighValueZoneEntry",
+        "Dwell",
+        "RepeatedHandling",
+        "GroupDistraction",
+        "HighValueActivity",
+        "BagOpen"
+      ],
+      "elapsed_s": 71.08
+    }
+  ]
 }
