@@ -1,0 +1,22 @@
+﻿<!-- ONEVO Connector WinSW service definition.
+     The XML basename must match onevo-connector-service.exe. -->
+
+<service>
+  <id>ONEVOConnector</id>
+  <name>ONEVO Local Connector</name>
+  <description>ONEVO edge connector â€” continuous camera monitoring, motion clip capture, and secure upload.</description>
+  <executable>%BASE%\onevo-connector.exe</executable>
+  <arguments>--service</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <env name="PATH" value="%BASE%;%BASE%\bin;%PATH%"/>
+  <env name="CONNECTOR_STATE_DIR" value="%ProgramData%\ONEVO\Connector\data"/>
+  <env name="FFMPEG_PATH" value="%BASE%\bin\ffmpeg.exe"/>
+</service>
+

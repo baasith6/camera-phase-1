@@ -122,8 +122,10 @@ class CapturePipeline:
         writer.release()
 
         try:
+            from .paths import resolve_ffmpeg
+            ffmpeg_bin = resolve_ffmpeg()
             subprocess.run(
-                ["ffmpeg", "-y", "-i", raw_path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                [ffmpeg_bin, "-y", "-i", raw_path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
                  "-movflags", "+faststart", "-loglevel", "error", path],
                 check=True, timeout=60,
             )

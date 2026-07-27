@@ -1,3 +1,5 @@
+import os
+import re
 import threading
 import time
 import copy
@@ -31,6 +33,17 @@ class StoreOrchestrator:
                 continue
 
             active_cam_ids = {c["id"] for c in cams}
+            capture_cams = [c for c in cams if c.get("rtspUrl")]
+            if len(capture_cams) == 1:
+                only = capture_cams[0]
+                self.state.camera_id = only["id"]
+                self.state.source = only.get("rtspUrl") or ""
+            elif len(capture_cams) > 1:
+                self.state.camera_id = None
+                self.state.source = f"{len(capture_cams)} configured camera sources"
+            else:
+                self.state.camera_id = None
+                self.state.source = ""
             
             # Start new cameras
             for cam in cams:
@@ -39,12 +52,20 @@ class StoreOrchestrator:
                     rtsp = cam.get("rtspUrl")
                     if not rtsp:
                         continue  # Needs RTSP URL to capture
+                    local_source = rtsp[7:] if rtsp.lower().startswith("file://") else rtsp
+                    if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", local_source):
+                        self.state.log(f"Orchestrator: skipping foreign Windows file source for camera {cid}")
+                        continue
                     self.state.log(f"Orchestrator: Starting pipeline for camera {cid}")
                     
                     # Create a copy of config for this specific pipeline
                     cam_cfg = copy.copy(self.base_cfg)
                     cam_cfg.camera_id = cid
                     cam_cfg.source = rtsp
+                    # Loop local/test file sources so continuous monitoring keeps firing motion.
+                    src_l = (rtsp or "").lower()
+                    if src_l.startswith("file://") or src_l.endswith(".mp4") or src_l.endswith(".avi"):
+                        cam_cfg.loop = True
                     if cam.get("onvifHost"):
                         cam_cfg.onvif_host = cam["onvifHost"]
                         cam_cfg.onvif_port = cam.get("onvifPort") or 80

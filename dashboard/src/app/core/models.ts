@@ -71,6 +71,20 @@ export interface Connector {
   rtspReconnects?: number;
 }
 
+export interface InstallerInfo {
+  version: string;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string;
+  downloadPath: string;
+}
+
+export interface SetupCodeResponse {
+  code: string;
+  storeId: string;
+  expiresAt: string;
+}
+
 export interface RiskConfig {
   weights: { [k: string]: number };
   dwellThresholdSec: number;

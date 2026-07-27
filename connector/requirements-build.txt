@@ -1,0 +1,2 @@
+# Build-time only (PyInstaller). Install after requirements.txt.
+pyinstaller>=6.3,<7
