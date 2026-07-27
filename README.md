@@ -94,7 +94,8 @@ python -m venv .venv
 pip install -r requirements.txt
 pip install -r requirements-build.txt
 # Place ffmpeg.exe + WinSW-x64.exe in installer/tools/ first
-.\installer\build.ps1 -BackendUrl http://localhost:8081
+# Use the HTTPS URL reachable from every shop PC.
+.\installer\build.ps1 -BackendUrl https://onevo.example.com
 ```
 
 Output lands in `connector/dist/` (mounted into the backend by docker-compose). On the

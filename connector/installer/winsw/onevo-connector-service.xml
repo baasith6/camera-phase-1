@@ -4,7 +4,7 @@
 <service>
   <id>ONEVOConnector</id>
   <name>ONEVO Local Connector</name>
-  <description>ONEVO edge connector â€” continuous camera monitoring, motion clip capture, and secure upload.</description>
+  <description>ONEVO edge connector - continuous camera monitoring, motion clip capture, and secure upload.</description>
   <executable>%BASE%\onevo-connector.exe</executable>
   <arguments>--service</arguments>
   <workingdirectory>%BASE%</workingdirectory>

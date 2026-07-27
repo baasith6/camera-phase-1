@@ -45,6 +45,10 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         <p class="muted small">Checking installer availability…</p>
       }
 
+      @if (installerActionError) {
+        <p class="err-text">{{ installerActionError }}</p>
+      }
+
       @if (setupCode) {
         <div class="code-box">
           <div>
@@ -319,6 +323,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   installerInfo: InstallerInfo | null = null;
   installerError = '';
+  installerActionError = '';
   downloadingInstaller = false;
   generatingCode = false;
   setupCode = '';
@@ -370,6 +375,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   downloadInstaller(): void {
     if (!this.installerInfo) return;
+    this.installerActionError = '';
     this.downloadingInstaller = true;
     this.api.downloadInstaller().subscribe({
       next: (blob) => {
@@ -383,13 +389,14 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
       },
       error: () => {
         this.downloadingInstaller = false;
-        this.installerError = 'Download failed';
+        this.installerActionError = 'Download failed';
       },
     });
   }
 
   generateSetupCode(): void {
     if (!this.storeId) return;
+    this.installerActionError = '';
     this.generatingCode = true;
     this.api.createSetupCode(this.storeId).subscribe({
       next: (res) => {
@@ -399,7 +406,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
       },
       error: (err) => {
         this.generatingCode = false;
-        this.installerError = err?.error?.error || 'Could not generate setup code';
+        this.installerActionError = err?.error?.error || 'Could not generate setup code';
       },
     });
   }

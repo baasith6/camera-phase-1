@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import shutil
 import threading
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from .backend_client import BackendClient
 from .paths import CameraSource, WizardConfig, load_wizard_config, media_dir, save_wizard_config
@@ -97,11 +99,11 @@ WIZARD_HTML = """<!DOCTYPE html>
 <body>
   <div class="wrap">
     <div class="brand">ONEVO</div>
-    <p class="sub">Local Connector setup â€” link this PC to your store, then add camera streams or a test video.</p>
+    <p class="sub">Local Connector setup - link this PC to your store, then add camera streams or a test video.</p>
     <div class="steps">
-      <span class="step-pill" id="p1">1 Â· Setup code</span>
-      <span class="step-pill" id="p2">2 Â· Sources</span>
-      <span class="step-pill" id="p3">3 Â· Done</span>
+      <span class="step-pill" id="p1">1 - Setup code</span>
+      <span class="step-pill" id="p2">2 - Sources</span>
+      <span class="step-pill" id="p3">3 - Done</span>
     </div>
 
     <div class="panel" id="panel-claim">
@@ -254,7 +256,7 @@ def build_wizard_app(
         w.setup_complete = False
         save_wizard_config(w)
         state.connector_id = cid
-        state.log(f"Wizard: claimed setup code â†’ connector {cid} store {store_id}")
+        state.log(f"Wizard: claimed setup code -> connector {cid} store {store_id}")
         return {"ok": True, "connectorId": cid, "storeId": store_id}
 
     @app.post("/wizard/sources")
@@ -274,9 +276,15 @@ def build_wizard_app(
             sources.append(CameraSource(name=f"Camera {i}", rtsp_url=url, loop=False))
 
         if file is not None and file.filename:
-            dest = media_dir() / "test-upload.mp4"
-            with dest.open("wb") as out:
-                shutil.copyfileobj(file.file, out)
+            if not file.filename.lower().endswith(".mp4"):
+                raise HTTPException(400, "Test video must be an MP4 file")
+            dest = media_dir() / f"test-upload-{uuid.uuid4().hex}.mp4"
+
+            def copy_upload() -> None:
+                with dest.open("wb") as out:
+                    shutil.copyfileobj(file.file, out)
+
+            await run_in_threadpool(copy_upload)
             sources.append(
                 CameraSource(
                     name="Test Video",
@@ -304,7 +312,9 @@ def build_wizard_app(
                 raise HTTPException(502, f"Failed to create camera '{src.name}': {exc}") from exc
 
         w = load_wizard_config() or WizardConfig()
-        w.sources = created
+        # The authenticated backend is the source of camera URLs after restart.
+        # Avoid retaining RTSP credentials in the local wizard config.
+        w.sources = []
         w.use_backend_cameras = True
         w.setup_complete = True
         save_wizard_config(w)

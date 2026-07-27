@@ -102,7 +102,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         if wizard.connector_name:
             connector_name = wizard.connector_name
         # Prefer multi-camera orchestrator when wizard saved backend cameras.
-        if wizard.use_backend_cameras and wizard.sources:
+        if wizard.use_backend_cameras:
             camera_id = ""  # orchestrator mode
         elif wizard.sources:
             first = wizard.sources[0]

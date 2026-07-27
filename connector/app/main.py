@@ -249,6 +249,10 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
         wizard.sources = created
         wizard.store_id = store_id
         wizard.setup_code = ""
+        for source in wizard.sources:
+            source.rtsp_url = ""
+            source.onvif_user = ""
+            source.onvif_pass = ""
         wizard.setup_complete = True
         from .paths import save_wizard_config
         save_wizard_config(wizard)

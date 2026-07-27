@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
@@ -32,7 +33,7 @@ public class ConnectorsController : ControllerBase
     }
 
     // Connector self-registration using the shared bootstrap key. Returns a per-connector API key
-    // (shown once). Only a scoped key is stored (hashed) â€” never broad storage credentials.
+    // (shown once). Only a scoped key is stored (hashed) - never broad storage credentials.
     [AllowAnonymous]
     [HttpPost("register")]
     public async Task<ActionResult<RegisterConnectorResponse>> Register(RegisterConnectorRequest req)
@@ -44,21 +45,16 @@ public class ConnectorsController : ControllerBase
             return BadRequest(new { error = "Unknown store" });
 
         var apiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-        var connector = await _db.Connectors
-            .Where(c => c.StoreId == req.StoreId)
-            .OrderByDescending(c => c.LastHeartbeat)
-            .FirstOrDefaultAsync();
-        if (connector is null)
+        var connector = new Connector
         {
-            connector = new Connector { StoreId = req.StoreId };
-            _db.Connectors.Add(connector);
-        }
-        connector.Name = req.Name;
-        connector.Version = req.Version;
-        connector.ApiKeyHash = BCrypt.Net.BCrypt.HashPassword(apiKey);
-        connector.Status = ConnectorStatus.Healthy;
-        connector.LastHeartbeat = DateTimeOffset.UtcNow;
-        connector.DegradedReason = null;
+            StoreId = req.StoreId,
+            Name = string.IsNullOrWhiteSpace(req.Name) ? "edge-connector-1" : req.Name.Trim(),
+            Version = req.Version,
+            ApiKeyHash = BCrypt.Net.BCrypt.HashPassword(apiKey),
+            Status = ConnectorStatus.Healthy,
+            LastHeartbeat = DateTimeOffset.UtcNow
+        };
+        _db.Connectors.Add(connector);
         await _db.SaveChangesAsync();
 
         return new RegisterConnectorResponse(connector.Id, apiKey);
@@ -66,6 +62,7 @@ public class ConnectorsController : ControllerBase
 
     /// <summary>Claim a short-lived setup code from the dashboard wizard.</summary>
     [AllowAnonymous]
+    [EnableRateLimiting("connector-claim")]
     [HttpPost("claim")]
     public async Task<ActionResult<ClaimSetupCodeResponse>> Claim(ClaimSetupCodeRequest req)
     {
@@ -73,47 +70,46 @@ public class ConnectorsController : ControllerBase
         if (string.IsNullOrWhiteSpace(code))
             return BadRequest(new { error = "setupCode is required" });
 
-        var candidates = await _db.ConnectorSetupCodes
-            .Where(c => c.UsedAt == null && c.ExpiresAt >= DateTimeOffset.UtcNow)
-            .ToListAsync();
-        var row = candidates.FirstOrDefault(c => BCrypt.Net.BCrypt.Verify(code, c.CodeHash));
-        if (row is null)
+        var lookup = ComputeSetupCodeLookup(code);
+        var now = DateTimeOffset.UtcNow;
+        await using var transaction = await _db.Database.BeginTransactionAsync(
+            HttpContext.RequestAborted);
+        var row = await _db.ConnectorSetupCodes
+            .SingleOrDefaultAsync(
+                c => c.CodeLookup == lookup && c.UsedAt == null && c.ExpiresAt >= now,
+                HttpContext.RequestAborted);
+        if (row is null || !BCrypt.Net.BCrypt.Verify(code, row.CodeHash))
             return BadRequest(new { error = "Invalid, used, or expired setup code" });
 
         var name = string.IsNullOrWhiteSpace(req.Name) ? "edge-connector-1" : req.Name.Trim();
         var version = string.IsNullOrWhiteSpace(req.Version) ? "1.0.0" : req.Version.Trim();
         var apiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-        var connector = await _db.Connectors
-            .Where(c => c.StoreId == row.StoreId)
-            .OrderByDescending(c => c.LastHeartbeat)
-            .FirstOrDefaultAsync();
-        if (connector is null)
+        var claimed = await _db.ConnectorSetupCodes
+            .Where(c => c.Id == row.Id && c.UsedAt == null && c.ExpiresAt >= now)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(c => c.UsedAt, now),
+                HttpContext.RequestAborted);
+        if (claimed != 1)
+            return BadRequest(new { error = "Invalid, used, or expired setup code" });
+
+        var connector = new Connector
         {
-            connector = new Connector { StoreId = row.StoreId };
-            _db.Connectors.Add(connector);
-        }
-        else
-        {
-            // A reinstall replaces this connector's configured sources without
-            // deleting historical cameras, clips, alerts, or review evidence.
-            await _db.Cameras
-                .Where(c => c.StoreId == row.StoreId && c.ConnectorId == connector.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(c => c.ConnectorId, (Guid?)null));
-        }
-        connector.Name = name;
-        connector.Version = version;
-        connector.ApiKeyHash = BCrypt.Net.BCrypt.HashPassword(apiKey);
-        connector.Status = ConnectorStatus.Healthy;
-        connector.LastHeartbeat = DateTimeOffset.UtcNow;
-        connector.DegradedReason = null;
-        row.UsedAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync();
+            StoreId = row.StoreId,
+            Name = name,
+            Version = version,
+            ApiKeyHash = BCrypt.Net.BCrypt.HashPassword(apiKey),
+            Status = ConnectorStatus.Healthy,
+            LastHeartbeat = now
+        };
+        _db.Connectors.Add(connector);
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        await transaction.CommitAsync(HttpContext.RequestAborted);
 
         return new ClaimSetupCodeResponse(connector.Id, apiKey, row.StoreId);
     }
 
     /// <summary>Generate a one-time setup code for the Windows installer wizard.</summary>
-    [Authorize(Roles = "Admin,Manager,Installer")]
+    [Authorize(Roles = "Admin")]
     [HttpPost("setup-codes")]
     public async Task<ActionResult<CreateSetupCodeResponse>> CreateSetupCode(CreateSetupCodeRequest req)
     {
@@ -128,6 +124,7 @@ public class ConnectorsController : ControllerBase
         var row = new ConnectorSetupCode
         {
             StoreId = req.StoreId,
+            CodeLookup = ComputeSetupCodeLookup(code),
             CodeHash = BCrypt.Net.BCrypt.HashPassword(code),
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(24),
             CreatedBy = createdBy
@@ -214,6 +211,8 @@ public class ConnectorsController : ControllerBase
         if (connector is null) return Unauthorized();
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "name is required" });
+        if (!TryValidateCameraUrl(req.RtspUrl, out var urlError))
+            return BadRequest(new { error = urlError });
 
         var cam = await _cameraProvisioning.ProvisionConnectorCameraAsync(
             connector,
@@ -263,5 +262,25 @@ public class ConnectorsController : ControllerBase
         var connector = await _db.Connectors.FindAsync(id);
         if (connector is null) return null;
         return BCrypt.Net.BCrypt.Verify(keyVal.ToString(), connector.ApiKeyHash) ? connector : null;
+    }
+
+    private string ComputeSetupCodeLookup(string code)
+    {
+        var key = _cfg["ConnectorInstaller:SetupCodeLookupKey"];
+        if (string.IsNullOrWhiteSpace(key))
+            throw new InvalidOperationException(
+                "ConnectorInstaller:SetupCodeLookupKey must be configured");
+        using var hmac = new HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));
+        return Convert.ToHexString(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(code)));
+    }
+
+    private static bool TryValidateCameraUrl(string? value, out string error)
+    {
+        error = "rtspUrl must be an absolute rtsp:// or file:// URL";
+        if (string.IsNullOrWhiteSpace(value) ||
+            !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri))
+            return false;
+        return uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase) ||
+               uri.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase);
     }
 }

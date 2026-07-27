@@ -64,6 +64,7 @@ class NativeProvisioningTests(unittest.TestCase):
             self.assertEqual(created[0]["rtspUrl"], f"file://{video}")
             self.assertTrue(created[0]["useDemoZones"])
             self.assertEqual(stored["connector_id"], "connector-id")
+            self.assertEqual(wizard.setup_code, "")
 
     def test_rtsp_camera_does_not_request_demo_zones(self):
         wizard = WizardConfig.from_dict({
@@ -86,6 +87,7 @@ class NativeProvisioningTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertFalse(created[0]["useDemoZones"])
+        self.assertEqual(wizard.sources[0].rtsp_url, "")
 
 
 if __name__ == "__main__":

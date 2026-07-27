@@ -45,6 +45,8 @@ public class OnevoDbContext : DbContext
         b.Entity<Clip>().HasIndex(c => c.Status);
         b.Entity<Alert>().HasIndex(a => a.Status);
         b.Entity<AiEvent>().HasIndex(e => e.ClipId);
+        b.Entity<ConnectorSetupCode>().HasIndex(c => c.CodeLookup).IsUnique();
+        b.Entity<Connector>().HasIndex(c => new { c.StoreId, c.Name });
         // Store enums as strings for readability in the DB.
         b.Entity<User>().Property(x => x.Role).HasConversion<string>();
         b.Entity<Store>().Property(x => x.AlertVisibilityMode).HasConversion<string>();

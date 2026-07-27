@@ -75,6 +75,7 @@ public class ConnectorSetupCode
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid StoreId { get; set; }
+    public string CodeLookup { get; set; } = string.Empty;
     public string CodeHash { get; set; } = string.Empty;
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? UsedAt { get; set; }

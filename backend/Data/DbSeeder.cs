@@ -19,6 +19,7 @@ public static class DbSeeder
             CREATE TABLE IF NOT EXISTS "ConnectorSetupCodes" (
                 "Id" uuid NOT NULL,
                 "StoreId" uuid NOT NULL,
+                "CodeLookup" text NOT NULL,
                 "CodeHash" text NOT NULL,
                 "ExpiresAt" timestamp with time zone NOT NULL,
                 "UsedAt" timestamp with time zone NULL,
@@ -28,6 +29,13 @@ public static class DbSeeder
             );
             CREATE INDEX IF NOT EXISTS "IX_ConnectorSetupCodes_ExpiresAt"
                 ON "ConnectorSetupCodes" ("ExpiresAt");
+            ALTER TABLE "ConnectorSetupCodes"
+                ADD COLUMN IF NOT EXISTS "CodeLookup" text NOT NULL DEFAULT '';
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ConnectorSetupCodes_CodeLookup"
+                ON "ConnectorSetupCodes" ("CodeLookup")
+                WHERE "CodeLookup" <> '';
+            CREATE INDEX IF NOT EXISTS "IX_Connectors_StoreId_Name"
+                ON "Connectors" ("StoreId", "Name");
             """
         );
 

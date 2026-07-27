@@ -35,8 +35,9 @@ Source: "tools\WinSW-x64.exe"; DestDir: "{app}"; DestName: "{#AppServiceExe}"; F
 Source: "winsw\onevo-connector-service.xml"; DestDir: "{app}"; DestName: "onevo-connector-service.xml"; Flags: ignoreversion
 
 [Dirs]
-Name: "{commonappdata}\ONEVO\Connector\data"; Permissions: users-modify
-Name: "{commonappdata}\ONEVO\Connector\media"; Permissions: users-modify
+Name: "{commonappdata}\ONEVO\Connector"; Permissions: admins-full system-full
+Name: "{commonappdata}\ONEVO\Connector\data"; Permissions: admins-full system-full
+Name: "{commonappdata}\ONEVO\Connector\media"; Permissions: admins-full system-full
 Name: "{app}\bin"
 
 [Icons]
@@ -208,5 +209,6 @@ begin
     '  "loop_file": true,' + #13#10 +
     '  "sources": []' + #13#10 +
     '}' + #13#10;
-  SaveStringToFile(ConfigPath, Json, False);
+  if not SaveStringToFile(ConfigPath, Json, False) then
+    RaiseException('Could not write the protected connector configuration.');
 end;
