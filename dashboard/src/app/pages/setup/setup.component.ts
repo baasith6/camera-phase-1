@@ -1,14 +1,72 @@
-import { AfterViewInit, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { DecimalPipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
-import { Camera, Store, Zone } from '../../core/models';
+import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models';
 
 @Component({
   selector: 'app-setup',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, DecimalPipe],
   template: `
     <h2>Setup &amp; Zones</h2>
+
+    <!-- Local Connector install -->
+    <div class="card connector-card">
+      <div class="conn-header">
+        <div>
+          <h3>ONEVO Local Connector</h3>
+          <p class="muted small">Install on the shop PC that can reach the cameras. The setup wizard asks for a code, then RTSP links or a test MP4.</p>
+        </div>
+        <div class="conn-status" [class.on]="storeConnectorOnline" [class.off]="!storeConnectorOnline">
+          <span class="dot"></span>
+          {{ storeConnectorOnline ? 'Installed · Online' : (storeConnectors.length ? 'Installed · Offline' : 'Not installed') }}
+        </div>
+      </div>
+
+      <div class="conn-actions">
+        <button (click)="downloadInstaller()" [disabled]="downloadingInstaller || !installerInfo">
+          {{ downloadingInstaller ? 'Downloading…' : 'Install' }}
+        </button>
+        <button class="ghost" (click)="generateSetupCode()" [disabled]="!storeId || generatingCode">
+          {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
+        </button>
+        <button class="ghost" (click)="refreshConnectors()" [disabled]="!storeId">Refresh status</button>
+      </div>
+
+      @if (installerInfo) {
+        <p class="muted small meta">
+          v{{ installerInfo.version }} · {{ installerInfo.sizeBytes / 1048576 | number:'1.1-1' }} MB
+          · sha256 {{ installerInfo.sha256.slice(0, 12) }}…
+        </p>
+      } @else if (installerError) {
+        <p class="err-text">{{ installerError }}</p>
+      } @else {
+        <p class="muted small">Checking installer availability…</p>
+      }
+
+      @if (setupCode) {
+        <div class="code-box">
+          <div>
+            <div class="code-label">Setup code (enter in the Windows wizard)</div>
+            <div class="code-value">{{ setupCode }}</div>
+            <div class="muted small">Expires {{ setupCodeExpires }}</div>
+          </div>
+          <button class="ghost small" (click)="copySetupCode()">Copy</button>
+        </div>
+      }
+
+      @if (storeConnectors.length) {
+        <div class="conn-list">
+          @for (c of storeConnectors; track c.id) {
+            <div class="conn-row">
+              <span>{{ c.name }} <span class="muted small">v{{ c.version }}</span></span>
+              <span class="badge" [class]="c.status.toLowerCase()">{{ c.status }}</span>
+            </div>
+          }
+        </div>
+      }
+    </div>
 
     <div class="grid3">
       <!-- Stores -->
@@ -170,8 +228,8 @@ import { Camera, Store, Zone } from '../../core/models';
           <button class="ghost" (click)="clearDraft()">Clear points</button>
           <button (click)="saveZone()" [disabled]="draftPoints.length < 3">Save zone ({{ draftPoints.length }} pts)</button>
         </div>
-        <canvas #cv width="480" height="270" 
-                (click)="onCanvasClick($event)" 
+        <canvas #cv width="480" height="270"
+                (click)="onCanvasClick($event)"
                 [style.background-image]="snapshotUrl"
                 style="background-size: cover; background-position: center;"></canvas>
       </div>
@@ -204,18 +262,37 @@ import { Camera, Store, Zone } from '../../core/models';
     .dk { min-width:140px; color:var(--accent-2); font-size:.8rem; }
     .dv { color:var(--text); word-break:break-all; }
     .badge { padding:.18rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
-    .badge.online { background:var(--success-soft); color:var(--success); border:1px solid rgba(52,211,153,.3); }
+    .badge.online, .badge.active, .badge.healthy { background:var(--success-soft); color:var(--success); border:1px solid rgba(52,211,153,.3); }
     .badge.pending { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border-strong); }
-    .badge.offline { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
+    .badge.offline, .badge.degraded, .badge.unknown { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
     .btn-link { display:inline-block; padding:.3rem .65rem; border-radius:var(--radius-sm); font-size:.78rem;
                 background:var(--accent-soft); color:var(--accent-2); text-decoration:none; border:1px solid var(--border-strong); }
     .btn-link:hover { background:rgba(139,92,246,.22); border-color:var(--accent); }
     .test-result { margin-top:.75rem; padding:.5rem .75rem; border-radius:var(--radius-sm); font-size:.82rem; }
     .test-result.ok { background:var(--success-soft); color:var(--success); }
     .test-result.err { background:var(--danger-soft); color:var(--danger); }
+    .connector-card { margin-bottom:1rem; }
+    .conn-header { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:.75rem; }
+    .conn-header h3 { margin:0 0 .25rem; }
+    .conn-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
+    .conn-status { display:flex; align-items:center; gap:.4rem; font-size:.82rem; font-weight:600; white-space:nowrap;
+                   padding:.35rem .65rem; border-radius:999px; border:1px solid var(--border-strong); }
+    .conn-status .dot { width:.55rem; height:.55rem; border-radius:50%; background:var(--text-muted); }
+    .conn-status.on { color:var(--success); border-color:rgba(52,211,153,.35); background:var(--success-soft); }
+    .conn-status.on .dot { background:var(--success); }
+    .conn-status.off { color:var(--text-muted); }
+    .meta { margin:.25rem 0 0; }
+    .err-text { color:var(--danger); font-size:.82rem; margin:.35rem 0 0; }
+    .code-box { margin-top:.75rem; display:flex; justify-content:space-between; align-items:center; gap:1rem;
+                padding:.75rem .9rem; border:1px dashed var(--border-strong); border-radius:var(--radius-sm);
+                background:var(--surface-2); }
+    .code-label { font-size:.75rem; color:var(--accent-2); margin-bottom:.2rem; }
+    .code-value { font-family:ui-monospace,Consolas,monospace; font-size:1.35rem; letter-spacing:.12em; font-weight:700; }
+    .conn-list { margin-top:.75rem; display:flex; flex-direction:column; gap:.35rem; }
+    .conn-row { display:flex; justify-content:space-between; align-items:center; font-size:.85rem; }
   `],
 })
-export class SetupComponent implements OnInit, AfterViewInit {
+export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('cv') canvasRef?: ElementRef<HTMLCanvasElement>;
 
   stores: Store[] = [];
@@ -240,27 +317,117 @@ export class SetupComponent implements OnInit, AfterViewInit {
   streamTestResult: { ok: boolean; message: string } | null = null;
   connectorAdminHost = 'localhost';
 
+  installerInfo: InstallerInfo | null = null;
+  installerError = '';
+  downloadingInstaller = false;
+  generatingCode = false;
+  setupCode = '';
+  setupCodeExpires = '';
+  storeConnectors: Connector[] = [];
+  private pollTimer?: ReturnType<typeof setInterval>;
+
   constructor(private api: ApiService) {}
 
   get snapshotUrl(): string {
     return this.cameraId ? `url(http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId})` : 'none';
   }
 
-  ngOnInit(): void { this.loadStores(); }
+  get storeConnectorOnline(): boolean {
+    const now = Date.now();
+    return this.storeConnectors.some((c) => {
+      if (!c.lastHeartbeat) return false;
+      const age = now - new Date(c.lastHeartbeat).getTime();
+      return age < 120_000 && (c.status === 'Healthy' || c.status === 'Degraded');
+    });
+  }
+
+  ngOnInit(): void {
+    this.loadStores();
+    this.loadInstallerInfo();
+    this.pollTimer = setInterval(() => {
+      if (this.storeId) this.refreshConnectors();
+    }, 15_000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+  }
+
   ngAfterViewInit(): void { this.redraw(); }
 
   loadStores(): void { this.api.listStores().subscribe((s) => (this.stores = s)); }
 
+  loadInstallerInfo(): void {
+    this.api.getInstallerInfo().subscribe({
+      next: (info) => { this.installerInfo = info; this.installerError = ''; },
+      error: (err) => {
+        this.installerInfo = null;
+        this.installerError = err?.error?.error
+          || 'Installer not available. Build with connector/installer/build.ps1 and ensure connector/dist is mounted.';
+      },
+    });
+  }
+
+  downloadInstaller(): void {
+    if (!this.installerInfo) return;
+    this.downloadingInstaller = true;
+    this.api.downloadInstaller().subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = this.installerInfo!.fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.downloadingInstaller = false;
+      },
+      error: () => {
+        this.downloadingInstaller = false;
+        this.installerError = 'Download failed';
+      },
+    });
+  }
+
+  generateSetupCode(): void {
+    if (!this.storeId) return;
+    this.generatingCode = true;
+    this.api.createSetupCode(this.storeId).subscribe({
+      next: (res) => {
+        this.setupCode = res.code;
+        this.setupCodeExpires = new Date(res.expiresAt).toLocaleString();
+        this.generatingCode = false;
+      },
+      error: (err) => {
+        this.generatingCode = false;
+        this.installerError = err?.error?.error || 'Could not generate setup code';
+      },
+    });
+  }
+
+  copySetupCode(): void {
+    if (!this.setupCode) return;
+    navigator.clipboard?.writeText(this.setupCode);
+  }
+
+  refreshConnectors(): void {
+    if (!this.storeId) { this.storeConnectors = []; return; }
+    this.api.listConnectors(this.storeId).subscribe({
+      next: (c) => (this.storeConnectors = c),
+      error: () => (this.storeConnectors = []),
+    });
+  }
+
   selectStore(id: string): void {
     this.storeId = id; this.cameraId = ''; this.zones = []; this.selectedCamera = null;
+    this.setupCode = ''; this.setupCodeExpires = '';
     this.api.listCameras(id).subscribe((c) => (this.cameras = c));
+    this.refreshConnectors();
   }
 
   selectCamera(id: string): void {
     this.cameraId = id;
     this.streamTestResult = null;
     this.selectedCamera = this.cameras.find(c => c.id === id) ?? null;
-    // Refresh full camera detail (includes ONVIF metadata from backend)
     this.api.getCamera(id).subscribe(cam => {
       this.selectedCamera = cam;
       if (cam.onvifHost) this.connectorAdminHost = cam.onvifHost;
@@ -330,13 +497,11 @@ export class SetupComponent implements OnInit, AfterViewInit {
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Existing zones.
     for (const z of this.zones) {
       let pts: [number, number][] = [];
       try { pts = JSON.parse(z.polygonJson); } catch { pts = []; }
       this.drawPoly(ctx, pts, w, h, z.zoneType === 'HighValue' ? 'rgba(255,120,120,0.35)' : 'rgba(120,160,255,0.3)');
     }
-    // Draft.
     this.drawPoly(ctx, this.draftPoints, w, h, 'rgba(255,220,120,0.5)', true);
   }
 
@@ -357,4 +522,3 @@ export class SetupComponent implements OnInit, AfterViewInit {
     }
   }
 }
-

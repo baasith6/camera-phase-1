@@ -30,6 +30,17 @@ public record UpdateZoneRequest(string? Name, string? ZoneType, string? PolygonJ
 public record RegisterConnectorRequest(Guid StoreId, string Name, string Version, string BootstrapKey);
 public record RegisterConnectorResponse(Guid ConnectorId, string ApiKey);
 public record HeartbeatRequest(double DiskFreePct, int UploadQueueDepth, string? DegradedReason, string Version);
+public record CreateSetupCodeRequest(Guid StoreId);
+public record CreateSetupCodeResponse(string Code, Guid StoreId, DateTimeOffset ExpiresAt);
+public record ClaimSetupCodeRequest(string SetupCode, string Name, string Version);
+public record ClaimSetupCodeResponse(Guid ConnectorId, string ApiKey, Guid StoreId);
+public record ConnectorCreateCameraRequest(
+    string Name,
+    string RtspUrl,
+    string? OnvifHost,
+    int? OnvifPort,
+    bool UseDemoZones = false);
+public record InstallerInfoResponse(string Version, string FileName, long SizeBytes, string Sha256, string DownloadPath);
 
 // ---- Clips ----
 public record UploadUrlRequest(Guid CameraId, double DurationSec, string? TriggerReason);

@@ -26,6 +26,36 @@ class BackendClient:
         self.api_key = data["apiKey"]
         return self.connector_id, self.api_key
 
+    def claim_setup_code(self, setup_code: str, name: str, version: str) -> tuple[str, str, str]:
+        """Claim a dashboard-generated setup code. Returns (connector_id, api_key, store_id)."""
+        r = requests.post(
+            f"{self.base}/api/connectors/claim",
+            json={"setupCode": setup_code, "name": name, "version": version},
+            timeout=20,
+        )
+        if not r.ok:
+            try:
+                detail = r.json().get("error") or r.json().get("detail") or r.text
+            except Exception:  # noqa: BLE001
+                detail = r.text
+            raise RuntimeError(detail or f"claim failed ({r.status_code})")
+        data = r.json()
+        self.connector_id = data["connectorId"]
+        self.api_key = data["apiKey"]
+        store_id = data.get("storeId") or data.get("store_id") or ""
+        return self.connector_id, self.api_key, store_id
+
+    def create_camera(self, body: dict) -> dict:
+        """Create a camera for this connector's store (connector auth)."""
+        r = requests.post(
+            f"{self.base}/api/connectors/cameras",
+            headers=self._auth_headers(),
+            json=body,
+            timeout=20,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def set_credentials(self, connector_id: str, api_key: str) -> None:
         self.connector_id = connector_id
         self.api_key = api_key

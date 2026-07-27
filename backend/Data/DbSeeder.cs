@@ -9,6 +9,27 @@ public static class DbSeeder
     public static async Task SeedAsync(OnevoDbContext db, IConfiguration cfg)
     {
         await db.Database.EnsureCreatedAsync();
+        // Legacy development databases were created with EnsureCreated, which does not
+        // add newly introduced tables. Keep this bootstrap idempotent for both existing
+        // installations and clean databases.
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ConnectorId" uuid NULL;
+            CREATE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId" ON "Cameras" ("ConnectorId");
+            CREATE TABLE IF NOT EXISTS "ConnectorSetupCodes" (
+                "Id" uuid NOT NULL,
+                "StoreId" uuid NOT NULL,
+                "CodeHash" text NOT NULL,
+                "ExpiresAt" timestamp with time zone NOT NULL,
+                "UsedAt" timestamp with time zone NULL,
+                "CreatedBy" uuid NOT NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                CONSTRAINT "PK_ConnectorSetupCodes" PRIMARY KEY ("Id")
+            );
+            CREATE INDEX IF NOT EXISTS "IX_ConnectorSetupCodes_ExpiresAt"
+                ON "ConnectorSetupCodes" ("ExpiresAt");
+            """
+        );
 
         // Seed admin user.
         var adminEmail = cfg["Seed:AdminEmail"] ?? "admin@onevo.local";
@@ -61,59 +82,12 @@ public static class DbSeeder
             };
             db.Cameras.Add(camera2);
 
-            // Demo zones (normalized coords) so all Phase 1A patterns can fire out of the box.
-            db.CameraZones.AddRange(
-                new CameraZone
-                {
-                    CameraId = camera.Id,
-                    Name = "High-Value Shelf",
-                    ZoneType = ZoneType.HighValue,
-                    PolygonJson = "[[0.5,0.1],[0.95,0.1],[0.95,0.9],[0.5,0.9]]"
-                },
-                new CameraZone
-                {
-                    CameraId = camera.Id,
-                    Name = "Checkout",
-                    ZoneType = ZoneType.Checkout,
-                    PolygonJson = "[[0.0,0.6],[0.25,0.6],[0.25,1.0],[0.0,1.0]]"
-                },
-                new CameraZone
-                {
-                    CameraId = camera.Id,
-                    Name = "Exit",
-                    ZoneType = ZoneType.Exit,
-                    PolygonJson = "[[0.0,0.0],[0.15,0.0],[0.15,0.4],[0.0,0.4]]"
-                },
-                new CameraZone
-                {
-                    CameraId = camera.Id,
-                    Name = "Blind Spot",
-                    ZoneType = ZoneType.BlindSpot,
-                    PolygonJson = "[[0.3,0.0],[0.48,0.0],[0.48,0.35],[0.3,0.35]]"
-                },
-                new CameraZone
-                {
-                    CameraId = camera2.Id,
-                    Name = "High-Value Shelf 2",
-                    ZoneType = ZoneType.HighValue,
-                    PolygonJson = "[[0.5,0.1],[0.95,0.1],[0.95,0.9],[0.5,0.9]]"
-                },
-                new CameraZone
-                {
-                    CameraId = camera2.Id,
-                    Name = "Checkout 2",
-                    ZoneType = ZoneType.Checkout,
-                    PolygonJson = "[[0.0,0.6],[0.25,0.6],[0.25,1.0],[0.0,1.0]]"
-                },
-                new CameraZone
-                {
-                    CameraId = camera2.Id,
-                    Name = "Exit 2",
-                    ZoneType = ZoneType.Exit,
-                    PolygonJson = "[[0.0,0.0],[0.15,0.0],[0.15,0.4],[0.0,0.4]]"
-                });
+            // Shared installer/seed templates keep test-video behavior identical.
+            db.CameraZones.AddRange(DemoZoneTemplates.Create(camera.Id));
+            db.CameraZones.AddRange(DemoZoneTemplates.Create(camera2.Id));
         }
 
         await db.SaveChangesAsync();
     }
 }
+

@@ -25,6 +25,7 @@ public class Camera
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid StoreId { get; set; }
     public Store? Store { get; set; }
+    public Guid? ConnectorId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string RtspUrl { get; set; } = string.Empty;
     public CameraStatus Status { get; set; } = CameraStatus.Pending;
@@ -66,6 +67,18 @@ public class Connector
     public double DiskFreePct { get; set; } = 100;
     public int UploadQueueDepth { get; set; } = 0;
     public string? DegradedReason { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Short-lived code generated on the dashboard for the Windows setup wizard.</summary>
+public class ConnectorSetupCode
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StoreId { get; set; }
+    public string CodeHash { get; set; } = string.Empty;
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? UsedAt { get; set; }
+    public Guid CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
