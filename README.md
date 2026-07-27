@@ -82,6 +82,25 @@ The connector registers, cuts event clips on motion, and uploads them via signed
 The cloud-ai worker picks up each clip, runs YOLO + tracking + zone mapping, and posts
 AI events; the backend Risk Engine scores them and (for score >= 40) creates an alert.
 
+### Windows installer (shop PC)
+
+Package the connector as `ONEVO-Connector-Setup-1.0.0.exe` (PyInstaller + Inno Setup + WinSW).
+Full steps: [`connector/installer/INSTALL.md`](connector/installer/INSTALL.md).
+
+```powershell
+cd connector
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+# Place ffmpeg.exe + WinSW-x64.exe in installer/tools/ first
+.\installer\build.ps1 -BackendUrl http://localhost:8081
+```
+
+Output lands in `connector/dist/` (mounted into the backend by docker-compose). On the
+dashboard **Setup & Zones** page: **Install** downloads the EXE; **Generate setup code**
+pairs the wizard to a store. After the connector heartbeats, status shows **Installed · Online**.
+
 > Note: the synthetic clip has no real people, so YOLO produces no retail cues and no
 > alert fires — it validates the full pipeline plumbing. Use real retail footage as the
 > `--source` for meaningful detections and alerts.

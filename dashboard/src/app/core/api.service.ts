@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { API_BASE } from './api.config';
-import { Alert, Camera, Connector, RiskConfig, Store, Zone } from './models';
+import { Alert, Camera, Connector, InstallerInfo, RiskConfig, SetupCodeResponse, Store, Zone } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -68,6 +68,21 @@ export class ApiService {
   listConnectors(storeId?: string): Observable<Connector[]> {
     const q = storeId ? `?storeId=${storeId}` : '';
     return this.http.get<Connector[]>(`${API_BASE}/api/connectors${q}`);
+  }
+
+  getInstallerInfo(): Observable<InstallerInfo> {
+    return this.http.get<InstallerInfo>(`${API_BASE}/api/connectors/installer`);
+  }
+
+  /** Trigger browser download of the Windows setup EXE (JWT via interceptor). */
+  downloadInstaller(): Observable<Blob> {
+    return this.http.get(`${API_BASE}/api/connectors/installer/download`, {
+      responseType: 'blob',
+    });
+  }
+
+  createSetupCode(storeId: string): Observable<SetupCodeResponse> {
+    return this.http.post<SetupCodeResponse>(`${API_BASE}/api/connectors/setup-codes`, { storeId });
   }
 
   // Rule configs

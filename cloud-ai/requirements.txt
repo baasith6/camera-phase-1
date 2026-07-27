@@ -4,3 +4,5 @@ numpy>=1.26
 redis>=5.0
 requests>=2.31
 minio>=7.2
+# Required by Ultralytics ByteTrack; bake it into the image to avoid runtime auto-install stalls.
+lap>=0.5.12,<1

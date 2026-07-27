@@ -28,6 +28,11 @@ cloud-ai/models/
 *.sqlite
 *.db
 
+# Connector Windows installer build artifacts & local tool binaries
+connector/dist/**
+!connector/dist/.gitkeep
+connector/installer/tools/*.exe
+
 # IDE
 .vs/
 .idea/

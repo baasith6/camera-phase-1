@@ -12,6 +12,7 @@ public class OnevoDbContext : DbContext
     public DbSet<Camera> Cameras => Set<Camera>();
     public DbSet<CameraZone> CameraZones => Set<CameraZone>();
     public DbSet<Connector> Connectors => Set<Connector>();
+    public DbSet<ConnectorSetupCode> ConnectorSetupCodes => Set<ConnectorSetupCode>();
     public DbSet<Clip> Clips => Set<Clip>();
     public DbSet<AiEvent> AiEvents => Set<AiEvent>();
     public DbSet<RiskEvent> RiskEvents => Set<RiskEvent>();
@@ -44,7 +45,6 @@ public class OnevoDbContext : DbContext
         b.Entity<Clip>().HasIndex(c => c.Status);
         b.Entity<Alert>().HasIndex(a => a.Status);
         b.Entity<AiEvent>().HasIndex(e => e.ClipId);
-
         // Store enums as strings for readability in the DB.
         b.Entity<User>().Property(x => x.Role).HasConversion<string>();
         b.Entity<Store>().Property(x => x.AlertVisibilityMode).HasConversion<string>();
