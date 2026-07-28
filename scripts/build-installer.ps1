@@ -1,7 +1,8 @@
 # Wrapper for connector/installer/build.ps1 — builds ONEVO-Connector-Setup EXE.
 param(
   [Parameter(Mandatory = $true)]
-  [string]$BackendUrl
+  [string]$BackendUrl,
+  [switch]$AllowHttp
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +14,11 @@ if (-not (Test-Path $buildScript)) {
 }
 
 Write-Host "Building ONEVO connector installer for $BackendUrl ..."
-& $buildScript -BackendUrl $BackendUrl
+if ($AllowHttp) {
+  & $buildScript -BackendUrl $BackendUrl -AllowHttp
+} else {
+  & $buildScript -BackendUrl $BackendUrl
+}
 
 $dist = Join-Path $root "connector\dist"
 Get-ChildItem $dist -Filter "ONEVO-Connector-Setup-*.exe" | ForEach-Object {

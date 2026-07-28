@@ -71,6 +71,7 @@ class WizardConfig:
     # When True and no local sources, use multi-cam orchestrator (backend camera list).
     use_backend_cameras: bool = True
     setup_code: str = ""
+    activation_error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +80,7 @@ class WizardConfig:
             "connector_name": self.connector_name,
             "use_backend_cameras": self.use_backend_cameras,
             "setup_code": self.setup_code,
+            "activation_error": self.activation_error,
             "sources": [asdict(s) for s in self.sources],
         }
 
@@ -140,6 +142,7 @@ class WizardConfig:
             connector_name=str(data.get("connector_name") or "edge-connector-1"),
             use_backend_cameras=bool(data.get("use_backend_cameras", True)),
             setup_code=str(data.get("setup_code") or ""),
+            activation_error=str(data.get("activation_error") or ""),
             sources=sources,
         )
 

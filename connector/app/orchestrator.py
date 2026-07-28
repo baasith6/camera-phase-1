@@ -93,6 +93,7 @@ class StoreOrchestrator:
                     
                     self.pipelines[cid] = pipeline
                     self.threads[cid] = t
+                    self.state.pipelines[cid] = pipeline
 
             # Stop removed cameras
             for cid in list(self.pipelines.keys()):

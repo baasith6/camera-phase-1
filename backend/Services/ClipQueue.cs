@@ -6,6 +6,7 @@ namespace Onevo.Api.Services;
 public class ClipQueue
 {
     public const string QueueKey = "onevo:clip-jobs";
+    public const string FailedQueueKey = "onevo:clip-jobs:failed";
     private readonly IConnectionMultiplexer _redis;
 
     public ClipQueue(IConnectionMultiplexer redis) => _redis = redis;

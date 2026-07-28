@@ -31,11 +31,12 @@ pip install -r requirements-build.txt
 
 .\installer\build.ps1 -BackendUrl https://api.your-domain.example
 .\installer\build.ps1 -BackendUrl http://localhost:8081
+.\installer\build.ps1 -BackendUrl http://20.193.69.220:8081 -AllowHttp
 ```
 
 **Rule:** `-BackendUrl` must be `https://`, or `http://localhost:*` /
-`http://127.0.0.1:*`. Any other plain-HTTP URL throws an error — no
-exceptions. This URL gets compiled into the `.exe`; the shop owner never
+`http://127.0.0.1:*`. For MVP pilots without TLS, pass `-AllowHttp` with your
+HTTP API URL. This URL gets compiled into the `.exe`; the shop owner never
 sees or enters it.
 
 ### What happens during build
@@ -53,11 +54,13 @@ connector/dist/ONEVO-Connector-Setup-1.0.0.exe
 ## 3. What the installer does on a shop PC
 
 1. Installs under `Program Files\ONEVO\Connector`
-2. Registers a Windows service via WinSW (`ONEVO Local Connector`)
-3. Opens the **Setup Wizard** (`--wizard`)
-4. Shop owner pastes a **setup code** from the dashboard
-5. Adds one/more **RTSP** URLs and/or uploads a local **MP4** test video
-6. Service continuously monitors → motion clips → signed MinIO upload → backend
+2. Writes `config.json` under `%ProgramData%\ONEVO\Connector\` (setup code + camera source)
+3. Registers and starts a Windows service via WinSW (`ONEVO Local Connector`)
+4. Waits for `http://localhost:8099/health` before opening the local status page
+5. Service claims the setup code, registers cameras on the cloud backend, then monitors continuously
+6. Motion clips upload via signed URLs to the backend
+
+If activation fails, the service **still** keeps the admin UI running at `http://localhost:8099/` with logs and a **Retry setup** link at `/setup`. Generate a new setup code in the dashboard before retrying.
 
 ## 4. Publish it
 
@@ -93,3 +96,21 @@ Mismatch = backend looks for a filename that doesn't exist =
 | `Production requires HTTPS...` | `-BackendUrl` isn't https/localhost |
 | `Inno Setup 6 (ISCC.exe) was not found` | Inno Setup not installed / not on PATH |
 | `PyInstaller build failed` | Check `pip install -r requirements-build.txt` ran in the active venv |
+| `localhost:8099` refused after install | Check `ONEVO Local Connector` service in `services.msc`; read `onevo-connector-service.out.log` in the install folder; verify setup code is fresh; open `/setup` to retry |
+| Setup code already used | Generate a new code in the dashboard, then open `http://localhost:8099/setup` or reinstall |
+| Upload timeout to `:9000` | ONEVO admin must open Azure NSG port **9000** and set `S3_PUBLIC_ENDPOINT=http://<VM_IP>:9000`; from shop PC run `Test-NetConnection <VM_IP> -Port 9000` |
+| `disk_critical` / `disk_warning` | Free space on C: (connector checks the whole drive); pause monitoring at http://localhost:8099 and use **Clear local clips** |
+| Clips queue but Uploads OK stays 0 | Check logs for `:9000` timeout; fix MinIO reachability first, then restart ONEVO Connector service |
+| Theft MP4 did not alert | Motion cuts may miss the theft moment — use **Upload full source file** on http://localhost:8099; check dashboard **Clips** for risk score (needs ≥ 40) |
+
+## 7. Connector admin controls (http://localhost:8099)
+
+| Action | When to use |
+|---|---|
+| **Pause monitoring** | Stop new motion clips without stopping the Windows service |
+| **Clear local clips** | Free disk after test uploads (`data\clips\` cache) |
+| **Upload full source file** | Test a known theft MP4 end-to-end (no motion cutting) |
+| **Clip window (pre/post)** | Widen motion cuts (try 30s + 30s for pilot demos) |
+| **Cut clip now** | Manual trigger for live RTSP when you see suspicious activity |
+
+To fully stop the connector, use Windows Services (`net stop ONEVO-Connector` or Services.msc).

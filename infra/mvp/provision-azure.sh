@@ -47,7 +47,7 @@ az vm create \
 VM_IP=$(az vm show -d --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_VM_NAME" --query publicIps -o tsv)
 echo "    VM public IP: $VM_IP"
 
-echo "==> NSG rules (SSH, HTTP, HTTPS)"
+echo "==> NSG rules (SSH, HTTP, HTTPS, app ports, MinIO)"
 az network nsg rule create \
   --resource-group "$AZURE_RESOURCE_GROUP" \
   --nsg-name "${AZURE_VM_NAME}NSG" \
@@ -64,6 +64,37 @@ az network nsg rule create \
   --name allow-https \
   --priority 1002 \
   --destination-port-ranges 443 \
+  --access Allow \
+  --protocol Tcp \
+  --output none 2>/dev/null || true
+
+az network nsg rule create \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --nsg-name "${AZURE_VM_NAME}NSG" \
+  --name allow-backend \
+  --priority 1003 \
+  --destination-port-ranges 8081 \
+  --access Allow \
+  --protocol Tcp \
+  --output none 2>/dev/null || true
+
+az network nsg rule create \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --nsg-name "${AZURE_VM_NAME}NSG" \
+  --name allow-dashboard \
+  --priority 1004 \
+  --destination-port-ranges 4200 \
+  --access Allow \
+  --protocol Tcp \
+  --output none 2>/dev/null || true
+
+# Shop connectors upload clips via presigned MinIO URLs (S3_PUBLIC_ENDPOINT).
+az network nsg rule create \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --nsg-name "${AZURE_VM_NAME}NSG" \
+  --name allow-minio \
+  --priority 1005 \
+  --destination-port-ranges 9000 \
   --access Allow \
   --protocol Tcp \
   --output none 2>/dev/null || true

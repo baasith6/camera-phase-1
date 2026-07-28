@@ -72,4 +72,18 @@ public class S3Service
             return false;
         }
     }
+
+    public async Task DeleteAsync(string objectKey)
+    {
+        try
+        {
+            await _internal.RemoveObjectAsync(new RemoveObjectArgs()
+                .WithBucket(_opts.Bucket)
+                .WithObject(objectKey));
+        }
+        catch
+        {
+            // Best-effort — object may already be gone.
+        }
+    }
 }

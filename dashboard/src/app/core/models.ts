@@ -106,6 +106,58 @@ export interface SetupCodeResponse {
   expiresAt: string;
 }
 
+export interface ClipListItem {
+  id: string;
+  cameraId: string;
+  cameraName: string;
+  storeId: string;
+  storeName: string;
+  status: string;
+  durationSec: number;
+  triggerReason: string;
+  createdAt: string;
+  analyzedAt?: string | null;
+  eventCount: number;
+  riskScore?: number | null;
+  alertId?: string | null;
+}
+
+export interface ClipAiEvent {
+  eventType: string;
+  zoneName?: string | null;
+  value: number;
+  confidence: number;
+  startTs: string;
+  endTs: string;
+  modelVersion: string;
+}
+
+export interface ClipDetail {
+  id: string;
+  cameraId: string;
+  cameraName: string;
+  storeId: string;
+  storeName: string;
+  status: string;
+  durationSec: number;
+  triggerReason: string;
+  createdAt: string;
+  analyzedAt?: string | null;
+  clipUrl?: string | null;
+  eventCount: number;
+  riskScore?: number | null;
+  riskDetails?: string | null;
+  alertId?: string | null;
+  modelVersion?: string | null;
+  analysisNote?: string | null;
+  aiEvents: ClipAiEvent[];
+}
+
+export interface PipelineHealth {
+  redisQueueDepth: number;
+  failedJobs: number;
+}
+
 export interface RiskConfig {
   weights: { [k: string]: number };
   dwellThresholdSec: number;

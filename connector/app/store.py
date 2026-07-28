@@ -95,3 +95,25 @@ class LocalStore:
     def pending_count(self) -> int:
         cur = self._conn.execute("SELECT COUNT(*) FROM upload_queue WHERE state IN ('pending','uploading')")
         return int(cur.fetchone()[0])
+
+    def list_queue_jobs(self, limit: int = 200) -> list[QueueJob]:
+        cur = self._conn.execute(
+            "SELECT id, clip_path, camera_id, duration_sec, trigger, retries, last_error, state "
+            "FROM upload_queue ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [QueueJob(*row) for row in cur.fetchall()]
+
+    def cancel_all_pending(self) -> int:
+        cur = self._conn.execute(
+            "UPDATE upload_queue SET state='cancelled' WHERE state IN ('pending','uploading')"
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def purge_done_failed(self) -> int:
+        cur = self._conn.execute(
+            "DELETE FROM upload_queue WHERE state IN ('done','failed','cancelled')"
+        )
+        self._conn.commit()
+        return cur.rowcount
