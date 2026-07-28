@@ -7,3 +7,5 @@ uvicorn>=0.29
 onvif-zeep>=0.2.12
 wsdiscovery>=2.0
 python-multipart>=0.0.9,<1
+pystray>=0.19.5,<1
+Pillow>=10,<13

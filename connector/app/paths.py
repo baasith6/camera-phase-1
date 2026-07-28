@@ -47,6 +47,10 @@ def config_path() -> Path:
     return program_data_root() / "config.json"
 
 
+def source_update_path() -> Path:
+    return program_data_root() / "source-update.json"
+
+
 @dataclass
 class CameraSource:
     name: str
@@ -163,6 +167,25 @@ def save_wizard_config(cfg: WizardConfig) -> Path:
     path = config_path()
     path.write_text(json.dumps(cfg.to_dict(), indent=2), encoding="utf-8")
     return path
+
+
+def apply_pending_source_update(cfg: WizardConfig) -> bool:
+    """Apply installer source changes without replacing connector identity."""
+    path = source_update_path()
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        update = WizardConfig.from_dict({"sources": data.get("sources") or []})
+        if not update.sources:
+            return False
+        cfg.sources = update.sources
+        cfg.setup_complete = False
+        save_wizard_config(cfg)
+        path.unlink()
+        return True
+    except Exception:
+        return False
 
 
 def resolve_ffmpeg() -> str:

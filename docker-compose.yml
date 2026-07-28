@@ -83,9 +83,9 @@ services:
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD}
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
-      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.0}
+      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.5}
       ConnectorInstaller__Path: /app/connector-dist
-      ConnectorInstaller__DownloadUrl: ${CONNECTOR_INSTALLER_URL:-https://installer-site-one.vercel.app/ONEVO-Connector-Setup-1.1.0.exe}
+      ConnectorInstaller__DownloadUrl: ${CONNECTOR_INSTALLER_URL:-https://installer-site-one.vercel.app/ONEVO-Connector-Setup-1.1.5.exe}
       ConnectorInstaller__SizeBytes: ${CONNECTOR_INSTALLER_SIZE_BYTES:-98067717}
       ConnectorInstaller__Sha256: ${CONNECTOR_INSTALLER_SHA256:-4612e540532d54ae5940e24e62d207a60e4d3d1cc74bcad14f91c6b5e86cb7c4}
       # CORS: allow both local dev and the Dockerized dashboard

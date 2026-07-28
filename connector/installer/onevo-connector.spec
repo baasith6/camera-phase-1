@@ -9,12 +9,13 @@ block_cipher = None
 root = Path(SPECPATH).resolve().parent  # connector/
 app_dir = root / "app"
 launcher = root / "onevo_launcher.py"
+icon_file = root / "installer" / "assets" / "onevo.ico"
 
 a = Analysis(
     [str(launcher)],
     pathex=[str(root)],
     binaries=[],
-    datas=[],
+    datas=[(str(icon_file), "assets")],
     hiddenimports=[
         "uvicorn.logging",
         "uvicorn.loops",
@@ -33,6 +34,10 @@ a = Analysis(
         "onvif",
         "zeep",
         "wsdiscovery",
+        "pystray",
+        "pystray._win32",
+        "PIL",
+        "PIL.Image",
     ],
     hookspath=[],
     hooksconfig={},
@@ -66,5 +71,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon=str(icon_file),
 )

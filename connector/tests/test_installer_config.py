@@ -5,11 +5,40 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.main import _provision_native_installer
-from app.paths import CameraSource, WizardConfig
+from app.paths import (
+    CameraSource,
+    WizardConfig,
+    apply_pending_source_update,
+    load_wizard_config,
+    save_wizard_config,
+)
 from app.provisioning import provision_sources, source_key_for
 
 
 class InstallerConfigParsingTests(unittest.TestCase):
+    def test_source_update_preserves_connector_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            original = WizardConfig(
+                setup_complete=True,
+                store_id="store-id",
+                connector_name="Existing Connector",
+                sources=[CameraSource(name="Old", rtsp_url="rtsp://old/live")],
+            )
+            with patch("app.paths.program_data_root", return_value=root):
+                save_wizard_config(original)
+                (root / "source-update.json").write_text(
+                    '{"sources":[{"name":"New","rtsp_url":"rtsp://new/live"}]}',
+                    encoding="utf-8",
+                )
+                self.assertTrue(apply_pending_source_update(original))
+                updated = load_wizard_config()
+
+            self.assertEqual(updated.store_id, "store-id")
+            self.assertEqual(updated.connector_name, "Existing Connector")
+            self.assertEqual(updated.sources[0].rtsp_url, "rtsp://new/live")
+            self.assertFalse(updated.setup_complete)
+
     def test_parses_multiple_rtsp_urls(self):
         cfg = WizardConfig.from_dict({
             "rtsp_text": "rtsp://camera-1/live; rtsp://camera-2/live",
@@ -34,8 +63,47 @@ class InstallerConfigParsingTests(unittest.TestCase):
         )
         self.assertTrue(all(source.onvif_user == "installer" for source in cfg.sources))
 
+    def test_parses_multiple_local_videos_from_sources_list(self):
+        cfg = WizardConfig.from_dict({
+            "sources": [
+                {"name": "Video 1", "source_file": r"C:\videos\one.mp4", "loop": True},
+                {"name": "Video 2", "source_file": r"C:\videos\two.mp4", "loop": True},
+            ],
+        })
+
+        self.assertEqual(len(cfg.sources), 2)
+        self.assertEqual(cfg.sources[1].source_file, r"C:\videos\two.mp4")
+        self.assertTrue(all(source.loop for source in cfg.sources))
+
 
 class NativeProvisioningTests(unittest.TestCase):
+    def test_native_installer_can_skip_camera_sources(self):
+        wizard = WizardConfig.from_dict({
+            "setup_code": "ABCD-EFGH",
+            "connector_name": "Store Connector",
+            "sources": [],
+        })
+        client = SimpleNamespace(
+            claim_setup_code=lambda *_: ("connector-id", "api-key", "store-id"),
+            set_credentials=lambda *_: None,
+            finalize_setup=lambda *_: self.fail("skip must not finalize an empty camera set"),
+        )
+        stored = {}
+        store = SimpleNamespace(
+            get_cred=lambda key: stored.get(key),
+            set_cred=lambda key, value: stored.__setitem__(key, value),
+        )
+        state = SimpleNamespace(connector_id=None, log=lambda *_: None)
+        runtime_cfg = SimpleNamespace(version="1.0.0")
+
+        with patch("app.paths.save_wizard_config"):
+            ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
+
+        self.assertTrue(ok)
+        self.assertTrue(wizard.setup_complete)
+        self.assertEqual(wizard.sources, [])
+        self.assertEqual(stored["connector_id"], "connector-id")
+
     def test_selected_mp4_is_created_and_setup_is_completed(self):
         with tempfile.TemporaryDirectory() as temp:
             video = Path(temp) / "selected.mp4"

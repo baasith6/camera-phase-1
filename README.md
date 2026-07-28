@@ -84,7 +84,7 @@ AI events; the backend Risk Engine scores them and (for score >= 40) creates an 
 
 ### Windows installer (shop PC)
 
-Package the connector as `ONEVO-Connector-Setup-1.1.0.exe` (PyInstaller + Inno Setup + WinSW).
+Package the connector as `ONEVO-Connector-Setup-1.1.5.exe` (PyInstaller + Inno Setup + WinSW).
 Full steps: [`connector/installer/INSTALL.md`](connector/installer/INSTALL.md).
 
 ```powershell

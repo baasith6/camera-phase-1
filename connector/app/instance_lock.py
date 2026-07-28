@@ -8,8 +8,8 @@ from typing import BinaryIO
 
 
 class InstanceLock:
-    def __init__(self, state_dir: str):
-        self.path = Path(state_dir) / "connector.lock"
+    def __init__(self, state_dir: str, filename: str = "connector.lock"):
+        self.path = Path(state_dir) / filename
         self._file: BinaryIO | None = None
 
     def acquire(self) -> bool:
