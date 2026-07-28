@@ -23,6 +23,11 @@ public class OnevoDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<User>().HasIndex(u => u.Email).IsUnique();
+        b.Entity<User>()
+            .HasOne(u => u.Store)
+            .WithMany(s => s.Users)
+            .HasForeignKey(u => u.StoreId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         b.Entity<Camera>()
             .HasOne(c => c.Store)

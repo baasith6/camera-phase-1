@@ -1,16 +1,30 @@
 import { Routes } from '@angular/router';
+import { adminGuard } from './core/admin.guard';
 import { authGuard } from './core/auth.guard';
 import { ShellComponent } from './shell/shell.component';
 import { LoginComponent } from './pages/login/login.component';
+import { WelcomeComponent } from './pages/welcome/welcome.component';
 
 export const routes: Routes = [
+  { path: '', component: WelcomeComponent },
   { path: 'login', component: LoginComponent },
   {
-    path: '',
+    path: 'app',
     component: ShellComponent,
     canActivate: [authGuard],
     children: [
-      { path: '', redirectTo: 'alerts', pathMatch: 'full' },
+      { path: '', redirectTo: 'get-started', pathMatch: 'full' },
+      {
+        path: 'get-started',
+        loadComponent: () =>
+          import('./pages/get-started/get-started.component').then((m) => m.GetStartedComponent),
+      },
+      {
+        path: 'admin',
+        canActivate: [adminGuard],
+        loadComponent: () =>
+          import('./pages/admin-stores/admin-stores.component').then((m) => m.AdminStoresComponent),
+      },
       {
         path: 'alerts',
         loadComponent: () => import('./pages/alerts/alerts.component').then((m) => m.AlertsComponent),
@@ -19,6 +33,15 @@ export const routes: Routes = [
         path: 'alerts/:id',
         loadComponent: () =>
           import('./pages/alert-detail/alert-detail.component').then((m) => m.AlertDetailComponent),
+      },
+      {
+        path: 'clips',
+        loadComponent: () => import('./pages/clips/clips.component').then((m) => m.ClipsComponent),
+      },
+      {
+        path: 'clips/:id',
+        loadComponent: () =>
+          import('./pages/clip-detail/clip-detail.component').then((m) => m.ClipDetailComponent),
       },
       {
         path: 'setup',

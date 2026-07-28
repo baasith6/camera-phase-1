@@ -43,6 +43,20 @@ var s3Opts = new S3Options
 };
 builder.Services.AddSingleton(new S3Service(s3Opts));
 
+// ---- Email (Gmail SMTP) ----
+var smtpOpts = new SmtpOptions
+{
+    Enabled = bool.TryParse(cfg["Smtp:Enabled"], out var smtpOn) && smtpOn,
+    Host = cfg["Smtp:Host"] ?? "smtp.gmail.com",
+    Port = int.TryParse(cfg["Smtp:Port"], out var smtpPort) ? smtpPort : 587,
+    User = cfg["Smtp:User"] ?? "",
+    Password = cfg["Smtp:Password"] ?? "",
+    From = cfg["Smtp:From"] ?? cfg["Smtp:User"] ?? "",
+    DashboardBaseUrl = cfg["Smtp:DashboardBaseUrl"] ?? cfg["Dashboard:BaseUrl"] ?? "http://localhost:4200"
+};
+builder.Services.AddSingleton(smtpOpts);
+builder.Services.AddSingleton<EmailService>();
+
 // ---- Auth ----
 var jwtOpts = new JwtOptions
 {
@@ -124,11 +138,17 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-app.UseSwagger();
-app.UseSwaggerUI();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+
+var enableSwagger = cfg.GetValue("EnableSwagger", builder.Environment.IsDevelopment());
+if (enableSwagger)
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
 app.MapControllers();
 
 app.Run();

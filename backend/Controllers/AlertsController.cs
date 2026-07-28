@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Onevo.Api.Auth;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
@@ -30,14 +31,18 @@ public class AlertsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? storeId, [FromQuery] string? status)
     {
-        var role = CurrentRole();
+        var role = TenantAccess.CurrentRole(User);
 
         var query =
-            from a in _db.Alerts
+            from a in TenantAccess.ScopeAlerts(_db.Alerts, User)
             join s in _db.Stores on a.StoreId equals s.Id
             select new { a, s.AlertVisibilityMode };
 
-        if (storeId is not null) query = query.Where(x => x.a.StoreId == storeId);
+        if (storeId is not null)
+        {
+            if (!TenantAccess.CanAccessStore(User, storeId.Value)) return Forbid();
+            query = query.Where(x => x.a.StoreId == storeId);
+        }
         if (status is not null && Enum.TryParse<AlertStatus>(status, true, out var st))
             query = query.Where(x => x.a.Status == st);
 
@@ -57,6 +62,7 @@ public class AlertsController : ControllerBase
         var store = await _db.Stores.FindAsync(alert.StoreId);
         if (store is not null && !IsVisible(store.AlertVisibilityMode, CurrentRole()))
             return Forbid();
+        if (!TenantAccess.CanAccessStore(User, alert.StoreId)) return Forbid();
 
         // Lazy presign: regenerate URL on every GET so it never expires for reviewers.
         // ClipUrl stores the S3 ObjectKey; we return a temporary projected object.
@@ -158,6 +164,7 @@ public class AlertsController : ControllerBase
     {
         var alert = await _db.Alerts.FindAsync(id);
         if (alert is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, alert.StoreId)) return Forbid();
         if (!Enum.TryParse<ReviewAction>(req.Action, true, out var action))
             return BadRequest(new { error = "Invalid action" });
 
@@ -167,7 +174,7 @@ public class AlertsController : ControllerBase
         var review = new AlertReview
         {
             AlertId = alert.Id,
-            ReviewerId = CurrentUserId(),
+            ReviewerId = TenantAccess.CurrentUserId(User),
             Action = action,
             ReasonCode = req.ReasonCode,
             Notes = req.Notes
@@ -195,10 +202,6 @@ public class AlertsController : ControllerBase
         _ => role is UserRole.Admin
     };
 
-    private UserRole CurrentRole()
-        => Enum.TryParse<UserRole>(User.FindFirstValue(ClaimTypes.Role), true, out var r) ? r : UserRole.Reviewer;
-
-    private Guid CurrentUserId()
-        => Guid.TryParse(User.FindFirstValue("uid"), out var id) ? id : Guid.Empty;
+    private UserRole CurrentRole() => TenantAccess.CurrentRole(User);
 }
 

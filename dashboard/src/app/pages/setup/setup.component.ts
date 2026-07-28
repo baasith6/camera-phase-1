@@ -1,6 +1,9 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { DecimalPipe } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
 import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models';
 
 @Component({
@@ -78,10 +81,12 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             {{ s.name }} <span class="muted small">({{ s.alertVisibilityMode }})</span>
           </div>
         }
-        <div class="add-row">
-          <input placeholder="New store name" [(ngModel)]="newStoreName" />
-          <button (click)="addStore()">Add</button>
-        </div>
+        @if (auth.isAdmin()) {
+          <div class="add-row">
+            <input placeholder="New store name" [(ngModel)]="newStoreName" />
+            <button (click)="addStore()">Add</button>
+          </div>
+        }
       </div>
 
       <!-- Cameras -->
@@ -355,7 +360,11 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   installerError = '';
   private pollTimer?: ReturnType<typeof setInterval>;
 
-  constructor(private api: ApiService) {}
+  constructor(
+    private api: ApiService,
+    public auth: AuthService,
+    private route: ActivatedRoute,
+  ) {}
 
   get effectiveSnapshotUrl(): string {
     return this.cameraId ? `url(http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId})` : 'none';
@@ -379,6 +388,15 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnInit(): void {
     this.loadStores();
     this.loadInstallerInfo();
+    this.route.queryParamMap.subscribe((params) => {
+      const fromQuery = params.get('storeId');
+      const scoped = this.auth.storeId();
+      this.api.listStores().subscribe((s) => {
+        this.stores = s;
+        const pick = fromQuery || scoped || '';
+        if (pick && s.some((x) => x.id === pick)) this.selectStore(pick);
+      });
+    });
     this.pollTimer = setInterval(() => {
       if (this.storeId) this.refreshConnectors();
     }, 15_000);
@@ -390,7 +408,13 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void { this.redraw(); }
 
-  loadStores(): void { this.api.listStores().subscribe((s) => (this.stores = s)); }
+  loadStores(): void {
+    this.api.listStores().subscribe((s) => {
+      this.stores = s;
+      const scoped = this.auth.storeId();
+      if (scoped && !this.storeId && s.some((x) => x.id === scoped)) this.selectStore(scoped);
+    });
+  }
 
   loadInstallerInfo(): void {
     this.api.getInstallerInfo().subscribe({
@@ -479,8 +503,11 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   addStore(): void {
-    if (!this.newStoreName) return;
-    this.api.createStore(this.newStoreName).subscribe(() => { this.newStoreName = ''; this.loadStores(); });
+    if (!this.newStoreName || !this.auth.isAdmin()) return;
+    this.api.createStore({
+      name: this.newStoreName.trim(),
+      alertVisibilityMode: 'ManagerOnly',
+    }).subscribe(() => { this.newStoreName = ''; this.loadStores(); });
   }
 
   addCamera(): void {

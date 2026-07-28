@@ -19,9 +19,10 @@ import time
 
 from .admin import start_admin
 from .backend_client import BackendClient
-from .capture import CapturePipeline
+from .capture import CapturePipeline, validate_rtsp_stream
+from .clip_settings import ClipSettings, load_clip_settings, save_clip_settings
 from .config import load_config
-from .paths import apply_pending_source_update, load_wizard_config
+from .paths import apply_pending_source_update, load_wizard_config,save_wizard_config
 from .instance_lock import InstanceLock
 from .runtime import RuntimeState
 from .store import LocalStore
@@ -136,6 +137,7 @@ def _run_capture(cfg, client: BackendClient, store: LocalStore, state: RuntimeSt
                 state.log(f"WARNING: could not push device info: {exc}")
 
         pipeline = CapturePipeline(cfg, state)
+        state.pipeline = pipeline
 
         def on_clip(path: str, duration: float, trigger: str) -> None:
             store.enqueue(path, cfg.camera_id, duration, trigger)
@@ -181,6 +183,34 @@ def _run_wizard_only(cfg, state: RuntimeState, store: LocalStore) -> int:
     return 0
 
 
+def _preflight_rtsp(rtsp_url: str, source_name: str, state: RuntimeState) -> None:
+    """Validate that an RTSP URL is reachable before registering the camera."""
+    state.log(f"Preflight: validating RTSP for {source_name} …")
+    ok, msg = validate_rtsp_stream(rtsp_url)
+    if not ok:
+        raise ValueError(f"{source_name}: {msg}")
+    state.log(f"Preflight: {source_name} — {msg}")
+
+
+def _persist_provision_failure(
+    wizard,
+    claim_succeeded: bool,
+    error: Exception,
+    state: RuntimeState,
+) -> None:
+    """Clear a consumed setup code so the shop tech can retry via /setup."""
+    message = str(error) or "Installer activation failed"
+    wizard.activation_error = message
+    err_lower = message.lower()
+    if claim_succeeded or any(token in err_lower for token in ("invalid", "expired", "used")):
+        wizard.setup_code = ""
+    save_wizard_config(wizard)
+    state.degraded_reason = (
+        f"{message}. Generate a new setup code in the ONEVO dashboard, "
+        "then open http://localhost:8099/setup to retry."
+    )
+
+
 def _provision_native_installer(cfg, wizard, client: BackendClient, store: LocalStore, state: RuntimeState) -> bool:
     """Claim native-installer setup and create its configured camera sources once."""
     if not wizard or wizard.setup_complete:
@@ -211,11 +241,97 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
             # connector now and let sources be added later from localhost:8099.
             created = []
         complete_setup(wizard, created)
+    if not wizard.sources:
+        state.log("ERROR: installer configuration has no camera source")
+        _persist_provision_failure(
+            wizard,
+            claim_succeeded=False,
+            error=ValueError("installer configuration has no camera source"),
+            state=state,
+        )
+        return False
+
+    claim_succeeded = False
+    try:
+        for source in wizard.sources:
+            modes = sum(bool(value) for value in (
+                source.rtsp_url, source.source_file, source.onvif_host
+            ))
+            if modes != 1:
+                raise ValueError(f"{source.name}: configure exactly one source type")
+            if source.rtsp_url and not source.rtsp_url.lower().startswith("rtsp://"):
+                raise ValueError(f"{source.name}: RTSP URL must start with rtsp://")
+            if source.source_file and not Path(source.source_file).is_file():
+                raise ValueError(f"{source.name}: video file does not exist")
+            if source.onvif_host and not (1 <= int(source.onvif_port) <= 65535):
+                raise ValueError(f"{source.name}: invalid ONVIF port")
+
+        cid, key, store_id = client.claim_setup_code(
+            wizard.setup_code, wizard.connector_name, cfg.version
+        )
+        claim_succeeded = True
+        store.set_cred("connector_id", cid)
+        store.set_cred("api_key", key)
+        store.set_cred("store_id", store_id)
+        created = []
+        for source in wizard.sources:
+            rtsp_url = source.rtsp_url
+            device_info = None
+            if source.onvif_host:
+                from .onvif_client import OnvifCamera
+                onvif = OnvifCamera().connect(
+                    source.onvif_host,
+                    source.onvif_port,
+                    source.onvif_user or "admin",
+                    source.onvif_pass,
+                )
+                profile = None if source.onvif_profile == "auto" else source.onvif_profile
+                rtsp_url = onvif.get_rtsp_url(profile)
+                device_info = onvif.get_device_info()
+
+            if rtsp_url:
+                _preflight_rtsp(rtsp_url, source.name, state)
+
+            camera = client.create_camera({
+                "name": source.name,
+                "rtspUrl": rtsp_url or f"file://{source.source_file}",
+                "onvifHost": source.onvif_host or None,
+                "onvifPort": source.onvif_port if source.onvif_host else None,
+                "useDemoZones": bool(source.source_file),
+            })
+            source.camera_id = camera.get("id") or camera.get("Id") or ""
+            source.rtsp_url = rtsp_url
+            if device_info and source.camera_id:
+                try:
+                    client.update_device_info(source.camera_id, {
+                        "manufacturer": device_info.manufacturer,
+                        "model": device_info.model,
+                        "serial": device_info.serial,
+                        "firmware": device_info.firmware,
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    state.log(f"WARNING: ONVIF device info update failed: {exc}")
+            created.append(source)
+
+        wizard.sources = created
+        wizard.store_id = store_id
+        wizard.setup_code = ""
+        wizard.activation_error = ""
+        wizard.setup_complete = True
+        save_wizard_config(wizard)
+        client.set_credentials(cid, key)
         state.connector_id = cid
         state.log(f"Native installer provisioned {len(created)} camera source(s)")
         return True
     except Exception as exc:  # noqa: BLE001
         state.log(f"ERROR: native installer activation failed: {exc}")
+        _persist_provision_failure(wizard, claim_succeeded, exc, state)
+        if claim_succeeded:
+            cid = store.get_cred("connector_id")
+            key = store.get_cred("api_key")
+            if cid and key:
+                client.set_credentials(cid, key)
+                state.connector_id = cid
         return False
 
 # ---------------------------------------------------------------------------
@@ -224,6 +340,15 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
 
 def main() -> int:
     cfg = load_config()
+    clip_tuning = load_clip_settings(
+        ClipSettings(
+            pre_seconds=cfg.pre_seconds,
+            post_seconds=cfg.post_seconds,
+            cooldown_seconds=cfg.cooldown_seconds,
+        )
+    )
+    clip_tuning.apply_to_config(cfg)
+
     state = RuntimeState()
     state.source = cfg.source
     state.camera_id = cfg.camera_id
@@ -264,9 +389,23 @@ def main() -> int:
         state.camera_id = cfg.camera_id
         client = BackendClient(cfg.backend_url)
         state.degraded_reason = None
+    activation_failed = False
+    if cfg.service_mode and wizard and not wizard.setup_complete and wizard.setup_code:
+        if not _provision_native_installer(cfg, wizard, client, store, state):
+            activation_failed = True
+            state.log(
+                "ERROR: installer activation failed; admin UI stays up for troubleshooting "
+                "and setup retry at /setup"
+            )
+            wizard = load_wizard_config()
+        else:
+            cfg = load_config()
+            state.source = cfg.source
+            state.camera_id = cfg.camera_id
+            client = BackendClient(cfg.backend_url)
 
     # Service / normal: register if needed (wizard may already have claimed).
-    if not (store.get_cred("connector_id") and store.get_cred("api_key")):
+    if not activation_failed and not (store.get_cred("connector_id") and store.get_cred("api_key")):
         if not _ensure_registered(cfg, client, store, state):
             # Not registered yet Ã¢â‚¬â€ if installed, open wizard instead of failing hard.
             if cfg.service_mode or (wizard is None or not wizard.setup_complete):
@@ -275,12 +414,48 @@ def main() -> int:
                 while True:
                     time.sleep(15)
             return 2
-    else:
+    elif not activation_failed:
         client.set_credentials(store.get_cred("connector_id"), store.get_cred("api_key"))
         state.connector_id = client.connector_id
         state.log(f"Loaded existing connector credentials ({client.connector_id})")
 
     stop = threading.Event()
+    wizard_ready = threading.Event()
+
+    def _on_wizard_configured(_wizard_cfg) -> None:
+        wizard_ready.set()
+
+    start_admin(
+        state,
+        cfg,
+        cfg.admin_port,
+        store=store,
+        enable_setup_wizard=activation_failed,
+        on_wizard_configured=_on_wizard_configured if activation_failed else None,
+    )
+    state.log(f"Admin UI on http://localhost:{cfg.admin_port}")
+
+    if activation_failed:
+        try:
+            while not wizard_ready.is_set():
+                time.sleep(1)
+                current = load_wizard_config()
+                if current and current.setup_complete:
+                    wizard_ready.set()
+                    break
+        except KeyboardInterrupt:
+            stop.set()
+            return 0
+
+        cfg = load_config()
+        state.source = cfg.source
+        state.camera_id = cfg.camera_id
+        state.degraded_reason = None
+        client = BackendClient(cfg.backend_url)
+        client.set_credentials(store.get_cred("connector_id"), store.get_cred("api_key"))
+        state.connector_id = client.connector_id
+        state.log("Setup completed via /setup — starting monitoring")
+
     up = threading.Thread(target=run_uploader, args=(cfg, client, store, state, stop), daemon=True)
     hb = threading.Thread(target=run_heartbeat, args=(cfg, client, store, state, stop), daemon=True)
     up.start()

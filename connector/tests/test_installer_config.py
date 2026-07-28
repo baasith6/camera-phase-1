@@ -128,7 +128,7 @@ class NativeProvisioningTests(unittest.TestCase):
             state = SimpleNamespace(connector_id=None, log=lambda *_: None)
             runtime_cfg = SimpleNamespace(version="1.0.0")
 
-            with patch("app.paths.save_wizard_config"):
+            with patch("app.main.save_wizard_config"):
                 ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
             self.assertTrue(ok)
@@ -157,7 +157,9 @@ class NativeProvisioningTests(unittest.TestCase):
         state = SimpleNamespace(connector_id=None, log=lambda *_: None)
         runtime_cfg = SimpleNamespace(version="1.0.0")
 
-        with patch("app.paths.save_wizard_config"):
+        with patch("app.main.save_wizard_config"), patch(
+            "app.main.validate_rtsp_stream", return_value=(True, "RTSP stream OK")
+        ):
             ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
         self.assertTrue(ok)
@@ -254,6 +256,38 @@ class NativeProvisioningTests(unittest.TestCase):
             first = CameraSource(name="One", source_file=str(first_path))
             second = CameraSource(name="Two", source_file=str(second_path))
             self.assertEqual(source_key_for(first), source_key_for(second))
+
+    def test_partial_failure_clears_consumed_setup_code(self):
+        wizard = WizardConfig.from_dict({
+            "setup_code": "ABCD-EFGH",
+            "connector_name": "Store Connector",
+            "rtsp_text": "rtsp://camera-1/live",
+        })
+        client = SimpleNamespace(
+            claim_setup_code=lambda *_: ("connector-id", "api-key", "store-id"),
+            set_credentials=lambda *_: None,
+        )
+        def fail_create(_body):
+            raise RuntimeError("camera create failed")
+
+        client.create_camera = fail_create
+        stored = {}
+        store = SimpleNamespace(
+            set_cred=lambda key, value: stored.__setitem__(key, value),
+            get_cred=lambda key: stored.get(key),
+        )
+        state = SimpleNamespace(connector_id=None, log=lambda *_: None, degraded_reason=None)
+        runtime_cfg = SimpleNamespace(version="1.0.0")
+
+        with patch("app.main.save_wizard_config") as save_cfg, patch(
+            "app.main.validate_rtsp_stream", return_value=(True, "RTSP stream OK")
+        ):
+            ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
+
+        self.assertFalse(ok)
+        self.assertEqual(wizard.setup_code, "")
+        self.assertIn("camera create failed", wizard.activation_error)
+        save_cfg.assert_called_once()
 
 
 if __name__ == "__main__":

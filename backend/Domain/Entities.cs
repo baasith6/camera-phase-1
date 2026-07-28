@@ -6,6 +6,9 @@ public class User
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
     public UserRole Role { get; set; } = UserRole.Reviewer;
+    /// <summary>When set, Manager/Reviewer users are scoped to this store.</summary>
+    public Guid? StoreId { get; set; }
+    public Store? Store { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -14,11 +17,14 @@ public class Store
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public string Organization { get; set; } = "default";
-    public AlertVisibilityMode AlertVisibilityMode { get; set; } = AlertVisibilityMode.Silent;
+    public AlertVisibilityMode AlertVisibilityMode { get; set; } = AlertVisibilityMode.ManagerOnly;
+    /// <summary>Gmail or Workspace address for medium/high alert notifications.</summary>
+    public string? NotificationEmail { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public List<Camera> Cameras { get; set; } = new();
     public Connector? Connector { get; set; }
+    public List<User> Users { get; set; } = new();
 }
 
 public class Camera

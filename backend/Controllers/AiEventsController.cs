@@ -18,15 +18,17 @@ public class AiEventsController : ControllerBase
     private readonly RiskEngine _risk;
     private readonly S3Service _s3;
     private readonly AlertChannel _alertChannel;
+    private readonly EmailService _email;
 
     public AiEventsController(OnevoDbContext db, IConfiguration cfg, RiskEngine risk,
-        S3Service s3, AlertChannel alertChannel)
+        S3Service s3, AlertChannel alertChannel, EmailService email)
     {
         _db = db;
         _cfg = cfg;
         _risk = risk;
         _s3 = s3;
         _alertChannel = alertChannel;
+        _email = email;
     }
 
     // Called by the cloud-ai worker. Authenticated with the shared service (bootstrap) key.
@@ -124,6 +126,14 @@ public class AiEventsController : ControllerBase
             _alertChannel.Publish(new AlertSseEvent(
                 alert.Id, alert.AlertType, alert.RiskLevel.ToString(),
                 alert.RiskScore, alert.StoreId, alert.CreatedAt));
+
+            // Email medium/high alerts to the store notification address (Gmail SMTP).
+            if (result.Score >= cfg.MediumBand)
+            {
+                var store = await _db.Stores.FindAsync(camera.StoreId);
+                if (store is not null)
+                    _ = _email.SendAlertNotificationAsync(store, camera, alert);
+            }
         }
 
         return Ok(new { clipId = clip.Id, score = result.Score, level = result.Level.ToString(), alertId = alert?.Id });

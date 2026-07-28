@@ -2,6 +2,10 @@
 import threading
 import time
 from collections import deque
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .capture import CapturePipeline
 
 
 class RuntimeState:
@@ -12,6 +16,7 @@ class RuntimeState:
         self.camera_id: str | None = None
         self.source: str | None = None
         self.capturing = False
+        self.capture_paused = False
         self.clips_created = 0
         self.uploads_ok = 0
         self.uploads_failed = 0
@@ -30,15 +35,39 @@ class RuntimeState:
         self.camera_serial: str | None = None
         self.camera_firmware: str | None = None
         self.onvif_profiles: list[dict] = []
-        
+
         # Last captured frame (JPEG bytes) per camera ID for the dashboard
         self.last_frames: dict[str, bytes] = {}
+
+        # Active capture pipeline(s) — set from main.py / orchestrator for admin control
+        self.pipeline: CapturePipeline | None = None
+        self.pipelines: dict[str, Any] = {}
 
     def log(self, msg: str) -> None:
         line = f"{time.strftime('%H:%M:%S')} {msg}"
         with self._lock:
             self.logs.append(line)
         print(line, flush=True)
+
+    def set_paused(self, paused: bool) -> None:
+        with self._lock:
+            was = self.capture_paused
+            self.capture_paused = paused
+        if paused and not was:
+            self.log("Capture paused — no new motion clips")
+        elif not paused and was:
+            self.log("Capture resumed")
+
+    def request_trigger(self) -> bool:
+        """Ask the primary pipeline to cut a clip on the next frame."""
+        if self.pipeline is not None:
+            self.pipeline.request_trigger()
+            return True
+        triggered = False
+        for pipeline in self.pipelines.values():
+            pipeline.request_trigger()
+            triggered = True
+        return triggered
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -47,6 +76,7 @@ class RuntimeState:
                 "cameraId": self.camera_id,
                 "source": self.source,
                 "capturing": self.capturing,
+                "capturePaused": self.capture_paused,
                 "clipsCreated": self.clips_created,
                 "uploadsOk": self.uploads_ok,
                 "uploadsFailed": self.uploads_failed,
@@ -63,4 +93,3 @@ class RuntimeState:
                 "onvifProfiles": self.onvif_profiles,
                 "logs": list(self.logs)[-50:],
             }
-

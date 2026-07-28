@@ -192,6 +192,77 @@ end;
 // registered, was left in a broken state, or the exe was launched by
 // hand for testing - so re-running Setup always "just updates"
 // instead of requiring a manual uninstall first. ---
+function TryConnectorHealth(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(
+    'powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -Uri ''http://127.0.0.1:8099/health'' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := (ResultCode = 0);
+end;
+
+function WaitForConnectorHealth(MaxSeconds: Integer): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to MaxSeconds do
+  begin
+    if TryConnectorHealth() then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Sleep(1000);
+  end;
+end;
+
+procedure WaitAndOpenStatus();
+var
+  ResultCode: Integer;
+begin
+  if WaitForConnectorHealth(60) then
+    ShellExec('open', 'http://localhost:8099/', '', '', SW_SHOW, ewNoWait, ResultCode)
+  else
+    MsgBox(
+      'The ONEVO connector service did not respond on http://localhost:8099/ within 60 seconds.' + #13#10 + #13#10 +
+      'Check Windows Services for "ONEVO Local Connector".' + #13#10 +
+      'Review logs in the install folder:' + #13#10 +
+      ExpandConstant('{app}\onevo-connector-service.out.log') + #13#10 +
+      'Saved config:' + #13#10 +
+      ExpandConstant('{commonappdata}\ONEVO\Connector\config.json') + #13#10 + #13#10 +
+      'If activation failed, open http://localhost:8099/setup after generating a new setup code.',
+      mbError, MB_OK);
+end;
+
+function ValidateRtspUrls(Value: String): Boolean;
+var
+  S, Part: String;
+  P: Integer;
+  Found: Boolean;
+begin
+  Result := False;
+  S := Trim(Value);
+  if S = '' then Exit;
+  Found := False;
+  repeat
+    P := Pos(';', S);
+    if P > 0 then begin
+      Part := Trim(Copy(S, 1, P - 1));
+      Delete(S, 1, P);
+    end else begin
+      Part := Trim(S);
+      S := '';
+    end;
+    if Part = '' then Continue;
+    Found := True;
+    if Pos('rtsp://', Lowercase(Part)) <> 1 then Exit;
+  until S = '';
+  Result := Found;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -601,6 +672,9 @@ begin
       SourceSetupSkipped := True;
       Result := True;
     end;
+  if (CurPageID = RtspPage.ID) and not ValidateRtspUrls(RtspPage.Values[0]) then begin
+    MsgBox('Enter one or more valid rtsp:// URLs separated by semicolons.', mbError, MB_OK);
+    Result := False;
   end;
   if CurPageID = OnvifPage.ID then begin
     ValidCount := 0;
@@ -662,6 +736,9 @@ var
   I, Base: Integer;
 begin
   if CurStep <> ssInstall then Exit;
+    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector'));
+    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\data'));
+    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\media'));
 
   if FreshInstallCleanup then
     DelTree(ExpandConstant('{commonappdata}\ONEVO\Connector'), True, True, True);
@@ -729,5 +806,40 @@ begin
     '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
     '  "sources": [' + SourcesJson + ']' + #13#10 +
     '}' + #13#10;
+    RtspText := '';
+    OnvifText := '';
+    OnvifUser := '';
+    OnvifPass := '';
+    OnvifPort := 80;
+    SourceFile := '';
+    if SourcePage.SelectedValueIndex = 0 then
+      RtspText := Trim(RtspPage.Values[0])
+    else if SourcePage.SelectedValueIndex = 1 then begin
+      OnvifText := Trim(OnvifPage.Values[0]);
+      OnvifPort := StrToIntDef(Trim(OnvifPage.Values[1]), 80);
+      OnvifUser := Trim(OnvifPage.Values[2]);
+      OnvifPass := OnvifPage.Values[3];
+    end
+    else begin
+      MediaPath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\installer-video.mp4');
+      if not CopyFile(FilePage.Values[0], MediaPath, False) then
+        RaiseException('Could not copy the selected MP4 video.');
+      SourceFile := MediaPath;
+    end;
+
+    ConfigPath := ExpandConstant('{commonappdata}\ONEVO\Connector\config.json');
+    Json := '{' + #13#10 +
+      '  "setup_complete": false,' + #13#10 +
+      '  "setup_code": "' + JsonEscape(Trim(IdentityPage.Values[0])) + '",' + #13#10 +
+      '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
+      '  "rtsp_text": "' + JsonEscape(RtspText) + '",' + #13#10 +
+      '  "onvif_text": "' + JsonEscape(OnvifText) + '",' + #13#10 +
+      '  "onvif_port": ' + IntToStr(OnvifPort) + ',' + #13#10 +
+      '  "onvif_user": "' + JsonEscape(OnvifUser) + '",' + #13#10 +
+      '  "onvif_pass": "' + JsonEscape(OnvifPass) + '",' + #13#10 +
+      '  "source_file": "' + JsonEscape(SourceFile) + '",' + #13#10 +
+      '  "loop_file": true,' + #13#10 +
+      '  "sources": []' + #13#10 +
+      '}' + #13#10;
   SaveStringToFile(ConfigPath, Json, False);
 end;

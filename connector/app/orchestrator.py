@@ -45,6 +45,17 @@ class StoreOrchestrator:
                 self.state.camera_id = None
                 self.state.source = ""
             
+            # Restart pipelines whose capture thread died (e.g. initial RTSP failure).
+            for cid in list(self.pipelines.keys()):
+                thread = self.threads.get(cid)
+                if thread is not None and thread.is_alive():
+                    continue
+                self.state.log(f"Orchestrator: restarting dead pipeline for camera {cid}")
+                self.pipelines[cid].stop()
+                del self.pipelines[cid]
+                if cid in self.threads:
+                    del self.threads[cid]
+
             # Start new cameras
             for cam in cams:
                 cid = cam["id"]
@@ -82,6 +93,7 @@ class StoreOrchestrator:
                     
                     self.pipelines[cid] = pipeline
                     self.threads[cid] = t
+                    self.state.pipelines[cid] = pipeline
 
             # Stop removed cameras
             for cid in list(self.pipelines.keys()):

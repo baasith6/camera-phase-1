@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { API_BASE } from './api.config';
-import { Alert, Camera, Connector, InstallerInfo, RiskConfig, SetupCodeResponse, Store, Zone } from './models';
+import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -10,11 +10,37 @@ export class ApiService {
 
   // Stores
   listStores(): Observable<Store[]> { return this.http.get<Store[]>(`${API_BASE}/api/stores`); }
-  createStore(name: string, organization?: string): Observable<Store> {
-    return this.http.post<Store>(`${API_BASE}/api/stores`, { name, organization });
+  listStoreOverview(): Observable<StoreOverview[]> {
+    return this.http.get<StoreOverview[]>(`${API_BASE}/api/stores/overview`);
   }
-  updateStore(id: string, body: { name?: string; alertVisibilityMode?: string }): Observable<Store> {
+  createStore(body: {
+    name: string;
+    organization?: string;
+    notificationEmail?: string;
+    alertVisibilityMode?: string;
+  }): Observable<Store> {
+    return this.http.post<Store>(`${API_BASE}/api/stores`, body);
+  }
+  updateStore(id: string, body: {
+    name?: string;
+    alertVisibilityMode?: string;
+    notificationEmail?: string;
+  }): Observable<Store> {
     return this.http.put<Store>(`${API_BASE}/api/stores/${id}`, body);
+  }
+
+  // Users (Admin)
+  listUsers(storeId?: string): Observable<UserAccount[]> {
+    const q = storeId ? `?storeId=${storeId}` : '';
+    return this.http.get<UserAccount[]>(`${API_BASE}/api/users${q}`);
+  }
+  createUser(body: {
+    email: string;
+    password: string;
+    role: string;
+    storeId?: string | null;
+  }): Observable<UserAccount> {
+    return this.http.post<UserAccount>(`${API_BASE}/api/users`, body);
   }
 
   // Cameras
@@ -64,10 +90,29 @@ export class ApiService {
     return this.http.put<Alert>(`${API_BASE}/api/alerts/${id}/review`, { action, reasonCode, notes });
   }
 
+  // Clips
+  listClips(storeId?: string, cameraId?: string): Observable<ClipListItem[]> {
+    const params: string[] = [];
+    if (storeId) params.push(`storeId=${storeId}`);
+    if (cameraId) params.push(`cameraId=${cameraId}`);
+    const q = params.length ? `?${params.join('&')}` : '';
+    return this.http.get<ClipListItem[]>(`${API_BASE}/api/clips${q}`);
+  }
+  getClip(id: string): Observable<ClipDetail> {
+    return this.http.get<ClipDetail>(`${API_BASE}/api/clips/${id}`);
+  }
+  deleteClip(id: string): Observable<{ ok: boolean; clipId: string }> {
+    return this.http.delete<{ ok: boolean; clipId: string }>(`${API_BASE}/api/clips/${id}`);
+  }
+
   // Connectors / health
   listConnectors(storeId?: string): Observable<Connector[]> {
     const q = storeId ? `?storeId=${storeId}` : '';
     return this.http.get<Connector[]>(`${API_BASE}/api/connectors${q}`);
+  }
+
+  getPipelineHealth(): Observable<PipelineHealth> {
+    return this.http.get<PipelineHealth>(`${API_BASE}/api/health/pipeline`);
   }
 
   getInstallerInfo(): Observable<InstallerInfo> {

@@ -85,9 +85,14 @@ services:
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
       ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.5}
       ConnectorInstaller__Path: /app/connector-dist
-      ConnectorInstaller__DownloadUrl: ${CONNECTOR_INSTALLER_URL:-https://installer-site-one.vercel.app/ONEVO-Connector-Setup-1.1.5.exe}
-      ConnectorInstaller__SizeBytes: ${CONNECTOR_INSTALLER_SIZE_BYTES:-98067717}
-      ConnectorInstaller__Sha256: ${CONNECTOR_INSTALLER_SHA256:-4612e540532d54ae5940e24e62d207a60e4d3d1cc74bcad14f91c6b5e86cb7c4}
+      Smtp__Enabled: ${SMTP_ENABLE:-false}
+      Smtp__Host: ${SMTP_HOST:-smtp.gmail.com}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__User: ${SMTP_USER:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__From: ${SMTP_FROM:-}
+      Smtp__DashboardBaseUrl: ${DASHBOARD_BASE_URL:-http://localhost:4200}
+      EnableSwagger: ${ENABLE_SWAGGER:-true}
       # CORS: allow both local dev and the Dockerized dashboard
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:80}
     ports:

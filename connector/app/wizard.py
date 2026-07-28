@@ -16,6 +16,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .backend_client import BackendClient
+from .capture import validate_rtsp_stream
 from .paths import CameraSource, WizardConfig, load_wizard_config, media_dir, save_wizard_config
 from .provisioning import claim_setup, complete_setup, provision_sources
 
@@ -25,12 +26,35 @@ if TYPE_CHECKING:
     from .store import LocalStore
 
 
+def parse_rtsp_urls(rtsp_text: str) -> list[str]:
+    """Parse RTSP URLs from newline- or semicolon-separated text."""
+    return [
+        value.strip()
+        for value in rtsp_text.replace("\r", "\n").replace(";", "\n").splitlines()
+        if value.strip()
+    ]
+
+
+WIZARD_ROUTE_PREFIX = "/setup"
+
+
+def wizard_page_html(route_prefix: str = "") -> str:
+    """HTML for the setup wizard; route_prefix is '' for standalone or '/setup' when mounted."""
+    prefix = route_prefix.rstrip("/")
+    base_href = f"{prefix}/" if prefix else "/"
+    html = WIZARD_HTML.replace("__WIZARD_BASE__", base_href)
+    if prefix:
+        html = html.replace("/wizard/", f"{prefix}/wizard/")
+    return html
+
+
 WIZARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>ONEVO Connector Setup</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <base href="__WIZARD_BASE__">
   <style>
     :root {
       --bg: #0e141b;
@@ -157,7 +181,7 @@ WIZARD_HTML = """<!DOCTYPE html>
       el.textContent = text;
     }
     async function boot() {
-      const s = await (await fetch('/wizard/status')).json();
+      const s = await (await fetch('wizard/status')).json();
       if (s.setupComplete) { setStep(2); return; }
       if (s.claimed) { setStep(1); return; }
       setStep(0);
@@ -168,7 +192,7 @@ WIZARD_HTML = """<!DOCTYPE html>
       const name = document.getElementById('connName').value.trim() || 'edge-connector-1';
       if (!code) { show(msg, false, 'Enter a setup code'); return; }
       try {
-        const r = await fetch('/wizard/claim', {
+        const r = await fetch('wizard/claim', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ setupCode: code, name })
@@ -189,7 +213,7 @@ WIZARD_HTML = """<!DOCTYPE html>
       if (fileInput.files && fileInput.files[0]) fd.append('file', fileInput.files[0]);
       fd.append('loop_file', document.getElementById('loopFile').checked ? 'true' : 'false');
       try {
-        const r = await fetch('/wizard/sources', { method: 'POST', body: fd });
+        const r = await fetch('wizard/sources', { method: 'POST', body: fd });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || data.error || 'Save failed');
         document.getElementById('doneText').textContent =
@@ -204,13 +228,19 @@ WIZARD_HTML = """<!DOCTYPE html>
 """
 
 
-def build_wizard_app(
+def attach_wizard_routes(
+    app: FastAPI,
     state: "RuntimeState",
     cfg: "Config",
     store: "LocalStore",
+    *,
+    route_prefix: str = "",
     on_configured=None,
-) -> FastAPI:
-    app = FastAPI(title="ONEVO Connector Setup Wizard")
+) -> None:
+    """Register setup wizard routes on an existing FastAPI app."""
+    prefix = route_prefix.rstrip("/")
+    page_path = prefix or "/"
+    api_prefix = f"{prefix}/wizard" if prefix else "/wizard"
     client = BackendClient(cfg.backend_url)
 
     def _reload_creds() -> bool:
@@ -221,11 +251,11 @@ def build_wizard_app(
             return True
         return False
 
-    @app.get("/", response_class=HTMLResponse)
-    def index():
-        return WIZARD_HTML
+    @app.get(page_path, response_class=HTMLResponse)
+    def wizard_index():
+        return wizard_page_html(prefix)
 
-    @app.get("/wizard/status")
+    @app.get(f"{api_prefix}/status")
     def wizard_status():
         w = load_wizard_config()
         claimed = bool(store.get_cred("connector_id") and store.get_cred("api_key"))
@@ -234,9 +264,10 @@ def build_wizard_app(
             "claimed": claimed,
             "backendUrl": cfg.backend_url,
             "version": cfg.version,
+            "activationError": (w.activation_error if w else "") or "",
         }
 
-    @app.post("/wizard/claim")
+    @app.post(f"{api_prefix}/claim")
     def wizard_claim(body: dict):
         code = (body.get("setupCode") or body.get("setup_code") or "").strip()
         name = (body.get("name") or cfg.connector_name or "edge-connector-1").strip()
@@ -251,9 +282,21 @@ def build_wizard_app(
             raise HTTPException(400, str(exc)) from exc
         state.connector_id = cid
         state.log(f"Wizard: claimed setup code → connector {cid} store {store_id}")
+        store.set_cred("connector_id", cid)
+        store.set_cred("api_key", key)
+        store.set_cred("store_id", store_id)
+        w = load_wizard_config() or WizardConfig()
+        w.store_id = store_id
+        w.connector_name = name
+        w.setup_complete = False
+        w.activation_error = ""
+        save_wizard_config(w)
+        state.connector_id = cid
+        state.degraded_reason = None
+        state.log(f"Wizard: claimed setup code -> connector {cid} store {store_id}")
         return {"ok": True, "connectorId": cid, "storeId": store_id}
 
-    @app.post("/wizard/sources")
+    @app.post(f"{api_prefix}/sources")
     async def wizard_sources(
         rtsp_text: str = Form(default=""),
         file: UploadFile | None = File(default=None),
@@ -263,10 +306,13 @@ def build_wizard_app(
             raise HTTPException(400, "Claim a setup code first")
 
         sources: list[CameraSource] = []
-        lines = [ln.strip() for ln in (rtsp_text or "").splitlines() if ln.strip()]
+        lines = parse_rtsp_urls(rtsp_text or "")
         for i, url in enumerate(lines, start=1):
             if not url.lower().startswith("rtsp://"):
                 raise HTTPException(400, f"Invalid RTSP URL (line {i}): must start with rtsp://")
+            ok, msg = validate_rtsp_stream(url)
+            if not ok:
+                raise HTTPException(400, f"RTSP preflight failed for '{url}': {msg}")
             sources.append(CameraSource(name=f"Camera {i}", rtsp_url=url, loop=False))
 
         if file is not None and file.filename:
@@ -301,6 +347,27 @@ def build_wizard_app(
             raise HTTPException(502, f"Failed to configure cameras: {exc}") from exc
 
         complete_setup(w, created)
+        created = []
+        for src in sources:
+            body = {
+                "name": src.name,
+                "rtspUrl": src.rtsp_url or f"file://{src.source_file}",
+                "useDemoZones": bool(src.source_file),
+            }
+            try:
+                cam = client.create_camera(body)
+                src.camera_id = cam.get("id") or cam.get("Id") or ""
+                created.append(src)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(502, f"Failed to create camera '{src.name}': {exc}") from exc
+
+        w = load_wizard_config() or WizardConfig()
+        w.sources = created
+        w.use_backend_cameras = True
+        w.setup_complete = True
+        w.setup_code = ""
+        w.activation_error = ""
+        save_wizard_config(w)
         state.log(f"Wizard: configured {len(created)} source(s)")
 
         if on_configured:
@@ -311,6 +378,22 @@ def build_wizard_app(
 
         return {"ok": True, "cameraCount": len(created)}
 
+
+def build_wizard_app(
+    state: "RuntimeState",
+    cfg: "Config",
+    store: "LocalStore",
+    on_configured=None,
+) -> FastAPI:
+    app = FastAPI(title="ONEVO Connector Setup Wizard")
+    attach_wizard_routes(
+        app,
+        state,
+        cfg,
+        store,
+        route_prefix="",
+        on_configured=on_configured,
+    )
     return app
 
 

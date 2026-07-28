@@ -1,10 +1,31 @@
-export interface LoginResponse { token: string; email: string; role: string; }
+export interface LoginResponse { token: string; email: string; role: string; storeId?: string | null; }
 
 export interface Store {
   id: string;
   name: string;
   organization: string;
   alertVisibilityMode: string;
+  notificationEmail?: string | null;
+}
+
+export interface StoreOverview {
+  id: string;
+  name: string;
+  alertVisibilityMode: string;
+  notificationEmail?: string | null;
+  cameraCount: number;
+  connectorCount: number;
+  onlineConnectorCount: number;
+  pendingAlertCount: number;
+  lastAlertAt?: string | null;
+}
+
+export interface UserAccount {
+  id: string;
+  email: string;
+  role: string;
+  storeId?: string | null;
+  createdAt: string;
 }
 
 export interface Camera {
@@ -83,6 +104,58 @@ export interface SetupCodeResponse {
   code: string;
   storeId: string;
   expiresAt: string;
+}
+
+export interface ClipListItem {
+  id: string;
+  cameraId: string;
+  cameraName: string;
+  storeId: string;
+  storeName: string;
+  status: string;
+  durationSec: number;
+  triggerReason: string;
+  createdAt: string;
+  analyzedAt?: string | null;
+  eventCount: number;
+  riskScore?: number | null;
+  alertId?: string | null;
+}
+
+export interface ClipAiEvent {
+  eventType: string;
+  zoneName?: string | null;
+  value: number;
+  confidence: number;
+  startTs: string;
+  endTs: string;
+  modelVersion: string;
+}
+
+export interface ClipDetail {
+  id: string;
+  cameraId: string;
+  cameraName: string;
+  storeId: string;
+  storeName: string;
+  status: string;
+  durationSec: number;
+  triggerReason: string;
+  createdAt: string;
+  analyzedAt?: string | null;
+  clipUrl?: string | null;
+  eventCount: number;
+  riskScore?: number | null;
+  riskDetails?: string | null;
+  alertId?: string | null;
+  modelVersion?: string | null;
+  analysisNote?: string | null;
+  aiEvents: ClipAiEvent[];
+}
+
+export interface PipelineHealth {
+  redisQueueDepth: number;
+  failedJobs: number;
 }
 
 export interface RiskConfig {

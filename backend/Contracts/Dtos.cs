@@ -4,11 +4,29 @@ namespace Onevo.Api.Contracts;
 
 // ---- Auth ----
 public record LoginRequest(string Email, string Password);
-public record LoginResponse(string Token, string Email, string Role);
+public record LoginResponse(string Token, string Email, string Role, Guid? StoreId);
+
+// ---- Users ----
+public record CreateUserRequest(string Email, string Password, string Role, Guid? StoreId);
+public record UserResponse(Guid Id, string Email, string Role, Guid? StoreId, DateTimeOffset CreatedAt);
 
 // ---- Stores ----
-public record CreateStoreRequest(string Name, string? Organization);
-public record UpdateStoreRequest(string? Name, string? AlertVisibilityMode);
+public record CreateStoreRequest(
+    string Name,
+    string? Organization,
+    string? NotificationEmail,
+    string? AlertVisibilityMode);
+public record UpdateStoreRequest(string? Name, string? AlertVisibilityMode, string? NotificationEmail);
+public record StoreOverviewResponse(
+    Guid Id,
+    string Name,
+    string AlertVisibilityMode,
+    string? NotificationEmail,
+    int CameraCount,
+    int ConnectorCount,
+    int OnlineConnectorCount,
+    int PendingAlertCount,
+    DateTimeOffset? LastAlertAt);
 
 // ---- Cameras ----
 public record CreateCameraRequest(Guid StoreId, string Name, string RtspUrl, string? OnvifHost, int? OnvifPort);
@@ -48,6 +66,52 @@ public record InstallerInfoResponse(string Version, string FileName, long SizeBy
 public record UploadUrlRequest(Guid CameraId, double DurationSec, string? TriggerReason);
 public record UploadUrlResponse(Guid ClipId, string ObjectKey, string UploadUrl, int ExpirySeconds);
 public record CompleteClipRequest(Guid ClipId);
+
+public record ClipListItemResponse(
+    Guid Id,
+    Guid CameraId,
+    string CameraName,
+    Guid StoreId,
+    string StoreName,
+    string Status,
+    double DurationSec,
+    string TriggerReason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? AnalyzedAt,
+    int EventCount,
+    int? RiskScore,
+    Guid? AlertId);
+
+public record ClipAiEventItemResponse(
+    string EventType,
+    string? ZoneName,
+    double Value,
+    double Confidence,
+    DateTimeOffset StartTs,
+    DateTimeOffset EndTs,
+    string ModelVersion);
+
+public record ClipDetailResponse(
+    Guid Id,
+    Guid CameraId,
+    string CameraName,
+    Guid StoreId,
+    string StoreName,
+    string Status,
+    double DurationSec,
+    string TriggerReason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? AnalyzedAt,
+    string? ClipUrl,
+    int EventCount,
+    int? RiskScore,
+    string? RiskDetails,
+    Guid? AlertId,
+    string? ModelVersion,
+    string? AnalysisNote,
+    List<ClipAiEventItemResponse> AiEvents);
+
+public record PipelineHealthResponse(int RedisQueueDepth, int FailedJobs);
 
 // ---- AI events (posted by cloud-ai worker) ----
 public record AiEventDto(
