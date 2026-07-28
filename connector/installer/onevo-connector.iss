@@ -672,6 +672,7 @@ begin
       SourceSetupSkipped := True;
       Result := True;
     end;
+  end;
   if (CurPageID = RtspPage.ID) and not ValidateRtspUrls(RtspPage.Values[0]) then begin
     MsgBox('Enter one or more valid rtsp:// URLs separated by semicolons.', mbError, MB_OK);
     Result := False;
@@ -806,40 +807,5 @@ begin
     '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
     '  "sources": [' + SourcesJson + ']' + #13#10 +
     '}' + #13#10;
-    RtspText := '';
-    OnvifText := '';
-    OnvifUser := '';
-    OnvifPass := '';
-    OnvifPort := 80;
-    SourceFile := '';
-    if SourcePage.SelectedValueIndex = 0 then
-      RtspText := Trim(RtspPage.Values[0])
-    else if SourcePage.SelectedValueIndex = 1 then begin
-      OnvifText := Trim(OnvifPage.Values[0]);
-      OnvifPort := StrToIntDef(Trim(OnvifPage.Values[1]), 80);
-      OnvifUser := Trim(OnvifPage.Values[2]);
-      OnvifPass := OnvifPage.Values[3];
-    end
-    else begin
-      MediaPath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\installer-video.mp4');
-      if not CopyFile(FilePage.Values[0], MediaPath, False) then
-        RaiseException('Could not copy the selected MP4 video.');
-      SourceFile := MediaPath;
-    end;
-
-    ConfigPath := ExpandConstant('{commonappdata}\ONEVO\Connector\config.json');
-    Json := '{' + #13#10 +
-      '  "setup_complete": false,' + #13#10 +
-      '  "setup_code": "' + JsonEscape(Trim(IdentityPage.Values[0])) + '",' + #13#10 +
-      '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
-      '  "rtsp_text": "' + JsonEscape(RtspText) + '",' + #13#10 +
-      '  "onvif_text": "' + JsonEscape(OnvifText) + '",' + #13#10 +
-      '  "onvif_port": ' + IntToStr(OnvifPort) + ',' + #13#10 +
-      '  "onvif_user": "' + JsonEscape(OnvifUser) + '",' + #13#10 +
-      '  "onvif_pass": "' + JsonEscape(OnvifPass) + '",' + #13#10 +
-      '  "source_file": "' + JsonEscape(SourceFile) + '",' + #13#10 +
-      '  "loop_file": true,' + #13#10 +
-      '  "sources": []' + #13#10 +
-      '}' + #13#10;
   SaveStringToFile(ConfigPath, Json, False);
 end;
