@@ -296,9 +296,14 @@ export class AdminStoresComponent implements OnInit {
   }
 
   downloadInstaller(): void {
-    if (!this.installerInfo) return;
+    if (!this.installerInfo?.downloadPath) return;
+    const path = this.installerInfo.downloadPath;
+    if (/^https?:\/\//i.test(path)) {
+      window.location.assign(path);
+      return;
+    }
     this.downloadingInstaller = true;
-    this.api.downloadInstaller().subscribe({
+    this.api.downloadInstaller(path).subscribe({
       next: (blob) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
