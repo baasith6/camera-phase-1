@@ -118,6 +118,7 @@ Manual deploy: Actions → **Deploy MVP (Azure)** → Run workflow.
 - [ ] Push to `main` — deploy workflow green
 - [ ] Login as Admin → **Get started** → installer download works
 - [ ] Shop PC: run EXE, setup code, RTSP URLs
+- [ ] Shop PC: `Test-NetConnection <VM_IP> -Port 9000` succeeds (MinIO clip uploads)
 - [ ] Connector online on Setup page
 - [ ] Test alert + email (`SMTP_ENABLE=true`)
 
@@ -130,6 +131,8 @@ Manual deploy: Actions → **Deploy MVP (Azure)** → Run workflow.
 | Installer 404 | Ensure `build-installer` job succeeded and EXE exists in `/opt/onevo/connector/dist/` |
 | CORS errors | Set `CORS_ORIGINS=https://app.yourdomain.example` in `.env` |
 | Deploy SSH fails | Verify `VM_SSH_KEY`, NSG allows SSH from GitHub Actions IPs (or use self-hosted runner in same VNet) |
+| Clip upload timeout (`:9000`) | NSG must allow **9000**; set `S3_PUBLIC_ENDPOINT=http://<VM_IP>:9000` in `.env`; test `curl http://<VM_IP>:9000/minio/health/live` from shop PC |
+| Connector `disk_critical` on shop PC | Free C: drive space; clear `%ProgramData%\ONEVO\Connector\data\clips` |
 
 ## 6. Files reference
 

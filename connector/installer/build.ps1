@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$BackendUrl
+    [string]$BackendUrl,
+    [switch]$AllowHttp
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,11 +15,12 @@ $IssFile = Join-Path $InstallerDir "onevo-connector.iss"
 $BakedFile = Join-Path $ConnectorRoot "app\baked_config.py"
 $WinSwConfig = Join-Path $InstallerDir "winsw\onevo-connector-service.xml"
 
-function Assert-BackendUrl([string]$Url) {
+function Assert-BackendUrl([string]$Url, [bool]$AllowHttp) {
     $u = $Url.Trim().TrimEnd("/")
     if ($u -match '^https://') { return $u }
     if ($u -match '^http://(localhost|127\.0\.0\.1)(:\d+)?(/.*)?$') { return $u }
-    throw "Production requires HTTPS (or http://localhost / http://127.0.0.1 for local builds). Got: $Url"
+    if ($AllowHttp -and $u -match '^http://') { return $u }
+    throw "Production requires HTTPS (or http://localhost / http://127.0.0.1 for local builds). Got: $Url. Use -AllowHttp for MVP pilot without TLS."
 }
 
 function Find-ISCC {
@@ -34,7 +36,7 @@ function Find-ISCC {
     return ($candidates | Select-Object -First 1)
 }
 
-$BackendUrl = Assert-BackendUrl $BackendUrl
+$BackendUrl = Assert-BackendUrl $BackendUrl $AllowHttp.IsPresent
 Write-Host "==> BackendUrl (baked): $BackendUrl"
 
 $ffmpeg = Join-Path $ToolsDir "ffmpeg.exe"

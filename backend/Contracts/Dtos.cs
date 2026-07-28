@@ -65,6 +65,52 @@ public record UploadUrlRequest(Guid CameraId, double DurationSec, string? Trigge
 public record UploadUrlResponse(Guid ClipId, string ObjectKey, string UploadUrl, int ExpirySeconds);
 public record CompleteClipRequest(Guid ClipId);
 
+public record ClipListItemResponse(
+    Guid Id,
+    Guid CameraId,
+    string CameraName,
+    Guid StoreId,
+    string StoreName,
+    string Status,
+    double DurationSec,
+    string TriggerReason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? AnalyzedAt,
+    int EventCount,
+    int? RiskScore,
+    Guid? AlertId);
+
+public record ClipAiEventItemResponse(
+    string EventType,
+    string? ZoneName,
+    double Value,
+    double Confidence,
+    DateTimeOffset StartTs,
+    DateTimeOffset EndTs,
+    string ModelVersion);
+
+public record ClipDetailResponse(
+    Guid Id,
+    Guid CameraId,
+    string CameraName,
+    Guid StoreId,
+    string StoreName,
+    string Status,
+    double DurationSec,
+    string TriggerReason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? AnalyzedAt,
+    string? ClipUrl,
+    int EventCount,
+    int? RiskScore,
+    string? RiskDetails,
+    Guid? AlertId,
+    string? ModelVersion,
+    string? AnalysisNote,
+    List<ClipAiEventItemResponse> AiEvents);
+
+public record PipelineHealthResponse(int RedisQueueDepth, int FailedJobs);
+
 // ---- AI events (posted by cloud-ai worker) ----
 public record AiEventDto(
     int TrackId,

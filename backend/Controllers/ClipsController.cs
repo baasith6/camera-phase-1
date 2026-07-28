@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Onevo.Api.Auth;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
@@ -72,15 +73,202 @@ public class ClipsController : ControllerBase
     }
 
     [Authorize]
-    [HttpGet("{id:guid}")]
-    public async Task<IActionResult> Get(Guid id)
+    [HttpGet]
+    public async Task<ActionResult<List<ClipListItemResponse>>> List(
+        [FromQuery] Guid? storeId,
+        [FromQuery] Guid? cameraId,
+        [FromQuery] int limit = 100)
     {
-        var clip = await _db.Clips.FindAsync(id);
-        if (clip is null) return NotFound();
+        limit = Math.Clamp(limit, 1, 500);
+
+        if (storeId is not null && !TenantAccess.CanAccessStore(User, storeId.Value))
+            return Forbid();
+
+        var cameraQuery = TenantAccess.ScopeCameras(_db.Cameras, User);
+        if (storeId is not null)
+            cameraQuery = cameraQuery.Where(c => c.StoreId == storeId);
+        if (cameraId is not null)
+            cameraQuery = cameraQuery.Where(c => c.Id == cameraId);
+
+        var rows = await (
+            from clip in _db.Clips
+            join cam in cameraQuery on clip.CameraId equals cam.Id
+            join store in _db.Stores on cam.StoreId equals store.Id
+            orderby clip.CreatedAt descending
+            select new { clip, cam, store }
+        ).Take(limit).ToListAsync();
+
+        if (rows.Count == 0)
+            return Ok(new List<ClipListItemResponse>());
+
+        var clipIds = rows.Select(r => r.clip.Id).ToList();
+
+        var eventCounts = await _db.AiEvents
+            .Where(e => clipIds.Contains(e.ClipId))
+            .GroupBy(e => e.ClipId)
+            .Select(g => new { ClipId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.ClipId, x => x.Count);
+
+        var riskScores = await _db.RiskEvents
+            .Where(r => clipIds.Contains(r.ClipId))
+            .GroupBy(r => r.ClipId)
+            .Select(g => new
+            {
+                ClipId = g.Key,
+                Score = g.OrderByDescending(r => r.CreatedAt).Select(r => r.Score).First()
+            })
+            .ToDictionaryAsync(x => x.ClipId, x => x.Score);
+
+        var alertIds = await _db.Alerts
+            .Where(a => clipIds.Contains(a.ClipId))
+            .Select(a => new { a.ClipId, a.Id })
+            .ToDictionaryAsync(x => x.ClipId, x => x.Id);
+
+        var items = rows.Select(r => new ClipListItemResponse(
+            r.clip.Id,
+            r.cam.Id,
+            r.cam.Name,
+            r.store.Id,
+            r.store.Name,
+            r.clip.Status.ToString(),
+            r.clip.DurationSec,
+            r.clip.TriggerReason,
+            r.clip.CreatedAt,
+            r.clip.AnalyzedAt,
+            eventCounts.GetValueOrDefault(r.clip.Id),
+            riskScores.TryGetValue(r.clip.Id, out var score) ? score : null,
+            alertIds.GetValueOrDefault(r.clip.Id)
+        )).ToList();
+
+        return Ok(items);
+    }
+
+    [Authorize]
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<ClipDetailResponse>> Get(Guid id)
+    {
+        var row = await (
+            from clip in _db.Clips
+            where clip.Id == id
+            join cam in TenantAccess.ScopeCameras(_db.Cameras, User) on clip.CameraId equals cam.Id
+            join store in _db.Stores on cam.StoreId equals store.Id
+            select new { clip, cam, store }
+        ).FirstOrDefaultAsync();
+
+        if (row is null) return NotFound();
+
         string? url = null;
-        if (clip.Status is ClipStatus.Uploaded or ClipStatus.Analyzed or ClipStatus.Processing)
-            url = await _s3.PresignedGetAsync(clip.ObjectKey, 3600);
-        return Ok(new { clip, clipUrl = url });
+        if (row.clip.Status is ClipStatus.Uploaded or ClipStatus.Analyzed or ClipStatus.Processing)
+        {
+            if (await _s3.ExistsAsync(row.clip.ObjectKey))
+            {
+                try { url = await _s3.PresignedGetAsync(row.clip.ObjectKey, 3600); }
+                catch { /* S3 unavailable — return null URL gracefully */ }
+            }
+        }
+
+        var aiEvents = await _db.AiEvents
+            .Where(e => e.ClipId == id)
+            .OrderBy(e => e.StartTs)
+            .ToListAsync();
+
+        var zoneIds = aiEvents.Where(e => e.ZoneId.HasValue).Select(e => e.ZoneId!.Value).Distinct().ToList();
+        var zoneNames = zoneIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.CameraZones
+                .Where(z => zoneIds.Contains(z.Id))
+                .ToDictionaryAsync(z => z.Id, z => z.Name);
+
+        var latestRisk = await _db.RiskEvents
+            .Where(r => r.ClipId == id)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        var alert = await _db.Alerts
+            .Where(a => a.ClipId == id)
+            .Select(a => new { a.Id })
+            .FirstOrDefaultAsync();
+
+        var modelVersion = aiEvents.FirstOrDefault()?.ModelVersion;
+        var eventCount = aiEvents.Count;
+        string? analysisNote = null;
+        if (row.clip.Status == ClipStatus.Analyzed && eventCount == 0)
+        {
+            analysisNote =
+                "No retail cues detected — common for test/synthetic video without visible shoppers.";
+        }
+        else if (row.clip.Status == ClipStatus.Uploaded)
+        {
+            analysisNote = "Uploaded — waiting for cloud-ai analysis (usually 30–60 seconds on CPU).";
+        }
+
+        return Ok(new ClipDetailResponse(
+            row.clip.Id,
+            row.cam.Id,
+            row.cam.Name,
+            row.store.Id,
+            row.store.Name,
+            row.clip.Status.ToString(),
+            row.clip.DurationSec,
+            row.clip.TriggerReason,
+            row.clip.CreatedAt,
+            row.clip.AnalyzedAt,
+            url,
+            eventCount,
+            latestRisk?.Score,
+            latestRisk?.DetailsJson,
+            alert?.Id,
+            modelVersion,
+            analysisNote,
+            aiEvents.Select(e => new ClipAiEventItemResponse(
+                e.EventType.ToString(),
+                e.ZoneId.HasValue && zoneNames.TryGetValue(e.ZoneId.Value, out var zn) ? zn : null,
+                e.Value,
+                e.Confidence,
+                e.StartTs,
+                e.EndTs,
+                e.ModelVersion
+            )).ToList()
+        ));
+    }
+
+    [Authorize(Roles = "Admin,Manager")]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var row = await (
+            from clip in _db.Clips
+            where clip.Id == id
+            join cam in TenantAccess.ScopeCameras(_db.Cameras, User) on clip.CameraId equals cam.Id
+            select new { clip, cam }
+        ).FirstOrDefaultAsync();
+
+        if (row is null) return NotFound();
+
+        var alert = await _db.Alerts
+            .Include(a => a.Reviews)
+            .FirstOrDefaultAsync(a => a.ClipId == id);
+
+        if (alert is not null && alert.Status == AlertStatus.Confirmed)
+            return Conflict(new { error = "Cannot delete clip linked to a confirmed alert" });
+
+        if (!string.IsNullOrEmpty(row.clip.ObjectKey))
+            await _s3.DeleteAsync(row.clip.ObjectKey);
+
+        var aiEvents = await _db.AiEvents.Where(e => e.ClipId == id).ToListAsync();
+        var riskEvents = await _db.RiskEvents.Where(r => r.ClipId == id).ToListAsync();
+        _db.AiEvents.RemoveRange(aiEvents);
+        _db.RiskEvents.RemoveRange(riskEvents);
+
+        if (alert is not null)
+        {
+            _db.AlertReviews.RemoveRange(alert.Reviews);
+            _db.Alerts.Remove(alert);
+        }
+
+        _db.Clips.Remove(row.clip);
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true, clipId = id });
     }
 
     private async Task<Connector?> AuthConnectorAsync()

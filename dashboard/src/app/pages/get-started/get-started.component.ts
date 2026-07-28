@@ -94,7 +94,7 @@ interface ChecklistStep {
 
     @if (allComplete) {
       <div class="card complete-box">
-        <p>Store setup looks complete. You can go to <a routerLink="/app/alerts">Alerts</a> for day-to-day review.</p>
+        <p>Store setup looks complete. You can go to <a routerLink="/app/clips">Clips</a> to review uploads or <a routerLink="/app/alerts">Alerts</a> for day-to-day review.</p>
       </div>
     }
   `,
@@ -333,6 +333,15 @@ export class GetStartedComponent implements OnInit {
         done: onlineConnectors > 0,
         actionLabel: 'Check status',
         actionLink: ['/app/setup'],
+        queryParams: storeQ,
+      },
+      {
+        id: 'clips',
+        title: 'Review uploaded clips',
+        detail: 'Open Clips to watch uploaded video and see AI analysis status, events, and risk scores.',
+        done: onlineConnectors > 0,
+        actionLabel: 'Open Clips',
+        actionLink: ['/app/clips'],
         queryParams: storeQ,
       },
       {

@@ -47,8 +47,7 @@ Name: "{autodesktop}\ONEVO Connector Status"; Filename: "http://localhost:8099/"
 [Run]
 Filename: "{app}\{#AppServiceExe}"; Parameters: "uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Check: ExistingService
 Filename: "{app}\{#AppServiceExe}"; Parameters: "install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Installing Windows service..."
-Filename: "{app}\{#AppServiceExe}"; Parameters: "start"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Activating connector and starting monitoring..."
-Filename: "http://localhost:8099/"; Description: "Open connector status"; Flags: postinstall shellexec skipifsilent nowait
+Filename: "{app}\{#AppServiceExe}"; Parameters: "start"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Activating connector and starting monitoring..."; AfterInstall: WaitAndOpenStatus
 
 [UninstallRun]
 Filename: "{app}\{#AppServiceExe}"; Parameters: "stop"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopSvc"
@@ -72,6 +71,51 @@ end;
 function ExistingService(): Boolean;
 begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ONEVOConnector');
+end;
+
+function TryConnectorHealth(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(
+    'powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -Uri ''http://127.0.0.1:8099/health'' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := (ResultCode = 0);
+end;
+
+function WaitForConnectorHealth(MaxSeconds: Integer): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to MaxSeconds do
+  begin
+    if TryConnectorHealth() then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Sleep(1000);
+  end;
+end;
+
+procedure WaitAndOpenStatus();
+var
+  ResultCode: Integer;
+begin
+  if WaitForConnectorHealth(60) then
+    ShellExec('open', 'http://localhost:8099/', '', '', SW_SHOW, ewNoWait, ResultCode)
+  else
+    MsgBox(
+      'The ONEVO connector service did not respond on http://localhost:8099/ within 60 seconds.' + #13#10 + #13#10 +
+      'Check Windows Services for "ONEVO Local Connector".' + #13#10 +
+      'Review logs in the install folder:' + #13#10 +
+      ExpandConstant('{app}\onevo-connector-service.out.log') + #13#10 +
+      'Saved config:' + #13#10 +
+      ExpandConstant('{commonappdata}\ONEVO\Connector\config.json') + #13#10 + #13#10 +
+      'If activation failed, open http://localhost:8099/setup after generating a new setup code.',
+      mbError, MB_OK);
 end;
 
 function ValidateRtspUrls(Value: String): Boolean;
@@ -193,45 +237,44 @@ var
   OnvifPort: Integer;
 begin
   if CurStep <> ssInstall then Exit;
+    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector'));
+    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\data'));
+    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\media'));
 
-  ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector'));
-  ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\data'));
-  ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\media'));
+    RtspText := '';
+    OnvifText := '';
+    OnvifUser := '';
+    OnvifPass := '';
+    OnvifPort := 80;
+    SourceFile := '';
+    if SourcePage.SelectedValueIndex = 0 then
+      RtspText := Trim(RtspPage.Values[0])
+    else if SourcePage.SelectedValueIndex = 1 then begin
+      OnvifText := Trim(OnvifPage.Values[0]);
+      OnvifPort := StrToIntDef(Trim(OnvifPage.Values[1]), 80);
+      OnvifUser := Trim(OnvifPage.Values[2]);
+      OnvifPass := OnvifPage.Values[3];
+    end
+    else begin
+      MediaPath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\installer-video.mp4');
+      if not CopyFile(FilePage.Values[0], MediaPath, False) then
+        RaiseException('Could not copy the selected MP4 video.');
+      SourceFile := MediaPath;
+    end;
 
-  RtspText := '';
-  OnvifText := '';
-  OnvifUser := '';
-  OnvifPass := '';
-  OnvifPort := 80;
-  SourceFile := '';
-  if SourcePage.SelectedValueIndex = 0 then
-    RtspText := Trim(RtspPage.Values[0])
-  else if SourcePage.SelectedValueIndex = 1 then begin
-    OnvifText := Trim(OnvifPage.Values[0]);
-    OnvifPort := StrToIntDef(Trim(OnvifPage.Values[1]), 80);
-    OnvifUser := Trim(OnvifPage.Values[2]);
-    OnvifPass := OnvifPage.Values[3];
-  end
-  else begin
-    MediaPath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\installer-video.mp4');
-    if not CopyFile(FilePage.Values[0], MediaPath, False) then
-      RaiseException('Could not copy the selected MP4 video.');
-    SourceFile := MediaPath;
-  end;
-
-  ConfigPath := ExpandConstant('{commonappdata}\ONEVO\Connector\config.json');
-  Json := '{' + #13#10 +
-    '  "setup_complete": false,' + #13#10 +
-    '  "setup_code": "' + JsonEscape(Trim(IdentityPage.Values[0])) + '",' + #13#10 +
-    '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
-    '  "rtsp_text": "' + JsonEscape(RtspText) + '",' + #13#10 +
-    '  "onvif_text": "' + JsonEscape(OnvifText) + '",' + #13#10 +
-    '  "onvif_port": ' + IntToStr(OnvifPort) + ',' + #13#10 +
-    '  "onvif_user": "' + JsonEscape(OnvifUser) + '",' + #13#10 +
-    '  "onvif_pass": "' + JsonEscape(OnvifPass) + '",' + #13#10 +
-    '  "source_file": "' + JsonEscape(SourceFile) + '",' + #13#10 +
-    '  "loop_file": true,' + #13#10 +
-    '  "sources": []' + #13#10 +
-    '}' + #13#10;
+    ConfigPath := ExpandConstant('{commonappdata}\ONEVO\Connector\config.json');
+    Json := '{' + #13#10 +
+      '  "setup_complete": false,' + #13#10 +
+      '  "setup_code": "' + JsonEscape(Trim(IdentityPage.Values[0])) + '",' + #13#10 +
+      '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
+      '  "rtsp_text": "' + JsonEscape(RtspText) + '",' + #13#10 +
+      '  "onvif_text": "' + JsonEscape(OnvifText) + '",' + #13#10 +
+      '  "onvif_port": ' + IntToStr(OnvifPort) + ',' + #13#10 +
+      '  "onvif_user": "' + JsonEscape(OnvifUser) + '",' + #13#10 +
+      '  "onvif_pass": "' + JsonEscape(OnvifPass) + '",' + #13#10 +
+      '  "source_file": "' + JsonEscape(SourceFile) + '",' + #13#10 +
+      '  "loop_file": true,' + #13#10 +
+      '  "sources": []' + #13#10 +
+      '}' + #13#10;
   SaveStringToFile(ConfigPath, Json, False);
 end;

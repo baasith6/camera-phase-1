@@ -53,4 +53,9 @@ export class AuthService {
   isAdmin(): boolean {
     return (this.role() ?? '').toLowerCase() === 'admin';
   }
+
+  isManagerOrAdmin(): boolean {
+    const role = (this.role() ?? '').toLowerCase();
+    return role === 'admin' || role === 'manager';
+  }
 }

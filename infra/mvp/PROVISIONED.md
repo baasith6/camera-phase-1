@@ -15,6 +15,24 @@ Generated after Azure MCP / CLI provisioning. **Do not commit secrets** — fetc
 | VM size | `Standard_D2s_v5` (CPU — request GPU quota for production AI) |
 | VM public IP | `20.193.69.220` |
 | SSH user | `azureuser` |
+| NSG inbound | 22, 80, 443, 8081, 4200, **9000** (MinIO — required for shop PC clip uploads) |
+
+## Clip storage (MinIO) — shop PC uploads
+
+Connectors receive presigned PUT URLs pointing at `S3_PUBLIC_ENDPOINT`. For this MVP (no TLS):
+
+```env
+S3_PUBLIC_ENDPOINT=http://20.193.69.220:9000
+```
+
+Shop PCs must reach **port 9000** on the VM public IP. Verify from a shop PC:
+
+```powershell
+Test-NetConnection 20.193.69.220 -Port 9000
+Invoke-WebRequest http://20.193.69.220:9000/minio/health/live -UseBasicParsing
+```
+
+If uploads time out with `ConnectTimeoutError ... port=9000`, add NSG rule `allow-minio` (priority 1005).
 
 ## GitHub Actions secrets (production environment)
 
@@ -28,8 +46,8 @@ Set these in GitHub → Settings → Environments → **production**:
 | `ACR_PASSWORD` | Run: `az acr credential show -n onevoacrmvp --query passwords[0].value -o tsv` |
 | `VM_HOST` | `20.193.69.220` |
 | `VM_USER` | `azureuser` |
-| `VM_SSH_KEY` | Contents of your private key (`~/.ssh/id_rsa`) used at VM create |
-| `BACKEND_PUBLIC_URL` | `http://20.193.69.220:8081` until TLS/DNS configured |
+| `VM_SSH_KEY` | Your private key (`~/.ssh/id_rsa`) — **already set in GitHub production environment** |
+| `BACKEND_PUBLIC_URL` | `http://20.193.69.220:8081` |
 | `PRODUCTION_ENV` | Copy from `infra/mvp/.env.production.example` — set secrets, `CLOUD_AI_DEVICE=cpu` |
 
 Also create `AZURE_CREDENTIALS` service principal JSON (see [AZURE_MVP_DEPLOY.md](../../docs/AZURE_MVP_DEPLOY.md)).

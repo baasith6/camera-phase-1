@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { API_BASE } from './api.config';
-import { Alert, Camera, Connector, InstallerInfo, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone } from './models';
+import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -90,10 +90,29 @@ export class ApiService {
     return this.http.put<Alert>(`${API_BASE}/api/alerts/${id}/review`, { action, reasonCode, notes });
   }
 
+  // Clips
+  listClips(storeId?: string, cameraId?: string): Observable<ClipListItem[]> {
+    const params: string[] = [];
+    if (storeId) params.push(`storeId=${storeId}`);
+    if (cameraId) params.push(`cameraId=${cameraId}`);
+    const q = params.length ? `?${params.join('&')}` : '';
+    return this.http.get<ClipListItem[]>(`${API_BASE}/api/clips${q}`);
+  }
+  getClip(id: string): Observable<ClipDetail> {
+    return this.http.get<ClipDetail>(`${API_BASE}/api/clips/${id}`);
+  }
+  deleteClip(id: string): Observable<{ ok: boolean; clipId: string }> {
+    return this.http.delete<{ ok: boolean; clipId: string }>(`${API_BASE}/api/clips/${id}`);
+  }
+
   // Connectors / health
   listConnectors(storeId?: string): Observable<Connector[]> {
     const q = storeId ? `?storeId=${storeId}` : '';
     return this.http.get<Connector[]>(`${API_BASE}/api/connectors${q}`);
+  }
+
+  getPipelineHealth(): Observable<PipelineHealth> {
+    return this.http.get<PipelineHealth>(`${API_BASE}/api/health/pipeline`);
   }
 
   getInstallerInfo(): Observable<InstallerInfo> {

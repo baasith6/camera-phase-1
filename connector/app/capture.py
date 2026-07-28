@@ -10,6 +10,7 @@ RTSP reliability:
 """
 import os
 import subprocess
+import threading
 import time
 import uuid
 from collections import deque
@@ -78,6 +79,8 @@ class CapturePipeline:
         self.cfg = cfg
         self.state = state
         self._stop = False
+        self._trigger_requested = False
+        self._trigger_lock = threading.Lock()
         self._is_rtsp = cfg.source.lower().startswith("rtsp")
         self._person_hog = None
         if cfg.use_person_filter:
@@ -86,6 +89,22 @@ class CapturePipeline:
 
     def stop(self) -> None:
         self._stop = True
+
+    def request_trigger(self) -> None:
+        with self._trigger_lock:
+            self._trigger_requested = True
+
+    def _consume_trigger(self) -> bool:
+        with self._trigger_lock:
+            if self._trigger_requested:
+                self._trigger_requested = False
+                return True
+            return False
+
+    def _clip_window_frames(self, fps: float) -> tuple[int, int]:
+        pre_len = max(1, int(self.cfg.pre_seconds * fps))
+        post_len = max(1, int(self.cfg.post_seconds * fps))
+        return pre_len, post_len
 
     # ------------------------------------------------------------------
     # Stream open helpers
@@ -223,8 +242,7 @@ class CapturePipeline:
 
         src_fps = cap.get(cv2.CAP_PROP_FPS) or self.cfg.fps
         fps = self.cfg.fps if self.cfg.fps > 0 else (src_fps or 10)
-        pre_len = int(self.cfg.pre_seconds * fps)
-        post_len = int(self.cfg.post_seconds * fps)
+        pre_len, post_len = self._clip_window_frames(fps)
 
         rolling: deque = deque(maxlen=pre_len)
         bg = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=25, detectShadows=False)
@@ -266,6 +284,13 @@ class CapturePipeline:
             fgmask = bg.apply(frame)
             now = time.time()
 
+            # Live-apply pre/post window changes from admin settings.
+            new_pre, new_post = self._clip_window_frames(fps)
+            if new_pre != pre_len:
+                pre_len = new_pre
+                rolling = deque(list(rolling)[-pre_len:], maxlen=pre_len)
+            post_len = new_post
+
             # Save snapshot to state for the dashboard (max 1 per second)
             if now - getattr(self, "_last_snap", 0) > 1.0:
                 self._last_snap = now
@@ -274,12 +299,20 @@ class CapturePipeline:
                     if ret:
                         self.state.last_frames[self.cfg.camera_id] = jpeg.tobytes()
 
-            # ---- Motion / person gate -----------------------------------------------
-            if self._has_motion(fgmask) and (now - last_trigger) >= self.cfg.cooldown_seconds:
-                if not self._has_person(frame):
+            manual_trigger = self._consume_trigger()
+            if self.state.capture_paused and not manual_trigger:
+                continue
+
+            motion = self._has_motion(fgmask)
+            should_cut = manual_trigger or (
+                motion and (now - last_trigger) >= self.cfg.cooldown_seconds
+            )
+            if should_cut:
+                if not manual_trigger and not self._has_person(frame):
                     continue
                 last_trigger = now
-                self.state.log("Motion trigger -> cutting event clip")
+                reason = "manual-trigger" if manual_trigger else "motion"
+                self.state.log(f"{reason} -> cutting event clip")
 
                 # Collect post-event frames.
                 post_frames: list = []
@@ -301,7 +334,7 @@ class CapturePipeline:
                 path = self._write_clip(clip_frames, fps)
                 if path:
                     self.state.clips_created += 1
-                    on_clip(path, duration, "motion")
+                    on_clip(path, duration, reason)
                 rolling.clear()
 
         cap.release()
