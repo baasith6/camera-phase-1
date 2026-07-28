@@ -23,6 +23,7 @@ public class Store
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public List<Camera> Cameras { get; set; } = new();
+    public Connector? Connector { get; set; }
     public List<User> Users { get; set; } = new();
 }
 
@@ -32,6 +33,8 @@ public class Camera
     public Guid StoreId { get; set; }
     public Store? Store { get; set; }
     public Guid? ConnectorId { get; set; }
+    public Connector? Connector { get; set; }
+    public string? SourceKey { get; set; }
     public string Name { get; set; } = string.Empty;
     public string RtspUrl { get; set; } = string.Empty;
     public CameraStatus Status { get; set; } = CameraStatus.Pending;
@@ -65,6 +68,7 @@ public class Connector
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid StoreId { get; set; }
+    public Store? Store { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public string ApiKeyHash { get; set; } = string.Empty;
@@ -74,6 +78,7 @@ public class Connector
     public int UploadQueueDepth { get; set; } = 0;
     public string? DegradedReason { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<Camera> Cameras { get; set; } = new();
 }
 
 /// <summary>Short-lived code generated on the dashboard for the Windows setup wizard.</summary>

@@ -119,11 +119,9 @@ export class ApiService {
     return this.http.get<InstallerInfo>(`${API_BASE}/api/connectors/installer`);
   }
 
-  /** Trigger browser download of the Windows setup EXE (JWT via interceptor). */
-  downloadInstaller(): Observable<Blob> {
-    return this.http.get(`${API_BASE}/api/connectors/installer/download`, {
-      responseType: 'blob',
-    });
+  downloadInstaller(path: string): Observable<Blob> {
+    const url = path.startsWith('/') ? `${API_BASE}${path}` : path;
+    return this.http.get(url, { responseType: 'blob' });
   }
 
   createSetupCode(storeId: string): Observable<SetupCodeResponse> {

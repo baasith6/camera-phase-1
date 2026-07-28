@@ -28,6 +28,15 @@ public class ConnectorInstallerService
     public string FileName =>
         $"ONEVO-Connector-Setup-{Version}.exe";
 
+    public string? ExternalDownloadUrl =>
+        NormalizeHttpsUrl(_cfg["ConnectorInstaller:DownloadUrl"]);
+
+    public long ConfiguredSizeBytes =>
+        long.TryParse(_cfg["ConnectorInstaller:SizeBytes"], out var value) ? value : 0;
+
+    public string ConfiguredSha256 =>
+        (_cfg["ConnectorInstaller:Sha256"] ?? "").Trim().ToLowerInvariant();
+
     public string? ResolvePath()
     {
         var configured = _cfg["ConnectorInstaller:Path"];
@@ -77,6 +86,30 @@ public class ConnectorInstallerService
         }
     }
 
+    public bool TryGetPublishedInfo(
+        out long size,
+        out string sha256,
+        out string downloadUrl)
+    {
+        downloadUrl = ExternalDownloadUrl ?? "";
+        if (!string.IsNullOrWhiteSpace(downloadUrl))
+        {
+            size = ConfiguredSizeBytes;
+            sha256 = ConfiguredSha256;
+            return true;
+        }
+
+        if (TryGetInfo(out _, out size, out sha256))
+        {
+            downloadUrl = "/api/connectors/installer/download";
+            return true;
+        }
+
+        size = 0;
+        sha256 = "";
+        return false;
+    }
+
     public static string GenerateSetupCode()
     {
         const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -85,5 +118,16 @@ public class ConnectorInstallerService
         for (var i = 0; i < 8; i++)
             chars[i] = alphabet[bytes[i] % alphabet.Length];
         return $"{new string(chars, 0, 4)}-{new string(chars, 4, 4)}";
+    }
+
+    private static string? NormalizeHttpsUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) &&
+               uri.Scheme == Uri.UriSchemeHttps
+            ? uri.ToString()
+            : null;
     }
 }

@@ -15,7 +15,11 @@ public static class DbSeeder
         await db.Database.ExecuteSqlRawAsync(
             """
             ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ConnectorId" uuid NULL;
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "SourceKey" text NULL;
             CREATE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId" ON "Cameras" ("ConnectorId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId_SourceKey"
+                ON "Cameras" ("ConnectorId", "SourceKey")
+                WHERE "SourceKey" IS NOT NULL;
             CREATE TABLE IF NOT EXISTS "ConnectorSetupCodes" (
                 "Id" uuid NOT NULL,
                 "StoreId" uuid NOT NULL,
@@ -28,6 +32,123 @@ public static class DbSeeder
             );
             CREATE INDEX IF NOT EXISTS "IX_ConnectorSetupCodes_ExpiresAt"
                 ON "ConnectorSetupCodes" ("ExpiresAt");
+
+            -- Consolidate legacy duplicate connectors before enforcing the
+            -- one-store/one-connector invariant. Preserve camera and clip history
+            -- by moving references to the most recently active connector.
+            WITH ranked AS (
+                SELECT "Id", "StoreId",
+                       FIRST_VALUE("Id") OVER (
+                           PARTITION BY "StoreId"
+                           ORDER BY "LastHeartbeat" DESC NULLS LAST, "CreatedAt" DESC, "Id"
+                       ) AS keeper_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY "StoreId"
+                           ORDER BY "LastHeartbeat" DESC NULLS LAST, "CreatedAt" DESC, "Id"
+                       ) AS row_number
+                FROM "Connectors"
+            )
+            UPDATE "Cameras" AS camera
+            SET "ConnectorId" = ranked.keeper_id
+            FROM ranked
+            WHERE camera."ConnectorId" = ranked."Id" AND ranked.row_number > 1;
+
+            WITH ranked AS (
+                SELECT "Id",
+                       FIRST_VALUE("Id") OVER (
+                           PARTITION BY "StoreId"
+                           ORDER BY "LastHeartbeat" DESC NULLS LAST, "CreatedAt" DESC, "Id"
+                       ) AS keeper_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY "StoreId"
+                           ORDER BY "LastHeartbeat" DESC NULLS LAST, "CreatedAt" DESC, "Id"
+                       ) AS row_number
+                FROM "Connectors"
+            )
+            UPDATE "Clips" AS clip
+            SET "ConnectorId" = ranked.keeper_id
+            FROM ranked
+            WHERE clip."ConnectorId" = ranked."Id" AND ranked.row_number > 1;
+
+            WITH ranked AS (
+                SELECT "Id",
+                       ROW_NUMBER() OVER (
+                           PARTITION BY "StoreId"
+                           ORDER BY "LastHeartbeat" DESC NULLS LAST, "CreatedAt" DESC, "Id"
+                       ) AS row_number
+                FROM "Connectors"
+            )
+            DELETE FROM "Connectors" AS connector
+            USING ranked
+            WHERE connector."Id" = ranked."Id" AND ranked.row_number > 1;
+
+            -- Ensure a legacy non-unique FK index with this name cannot silently
+            -- defeat the one-connector-per-store invariant.
+            DROP INDEX IF EXISTS "IX_Connectors_StoreId";
+            CREATE UNIQUE INDEX "IX_Connectors_StoreId"
+                ON "Connectors" ("StoreId");
+
+            -- Detach dependants from orphan connectors, then remove those
+            -- connectors before enforcing Connectors(StoreId) -> Stores(Id).
+            UPDATE "Cameras" AS camera
+            SET "ConnectorId" = NULL
+            WHERE camera."ConnectorId" IN (
+                SELECT connector."Id"
+                FROM "Connectors" connector
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM "Stores" store
+                    WHERE store."Id" = connector."StoreId"
+                )
+            );
+
+            UPDATE "Clips" AS clip
+            SET "ConnectorId" = NULL
+            WHERE clip."ConnectorId" IN (
+                SELECT connector."Id"
+                FROM "Connectors" connector
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM "Stores" store
+                    WHERE store."Id" = connector."StoreId"
+                )
+            );
+
+            DELETE FROM "Connectors" AS connector
+            WHERE NOT EXISTS (
+                SELECT 1 FROM "Stores" store
+                WHERE store."Id" = connector."StoreId"
+            );
+
+            -- Remove any other invalid legacy camera assignments before adding the FK.
+            UPDATE "Cameras" AS camera
+            SET "ConnectorId" = NULL
+            WHERE camera."ConnectorId" IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM "Connectors" connector
+                  WHERE connector."Id" = camera."ConnectorId"
+              );
+
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'FK_Connectors_Stores_StoreId'
+                ) THEN
+                    ALTER TABLE "Connectors"
+                    ADD CONSTRAINT "FK_Connectors_Stores_StoreId"
+                    FOREIGN KEY ("StoreId") REFERENCES "Stores" ("Id")
+                    ON DELETE CASCADE;
+                END IF;
+
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'FK_Cameras_Connectors_ConnectorId'
+                ) THEN
+                    ALTER TABLE "Cameras"
+                    ADD CONSTRAINT "FK_Cameras_Connectors_ConnectorId"
+                    FOREIGN KEY ("ConnectorId") REFERENCES "Connectors" ("Id")
+                    ON DELETE SET NULL;
+                END IF;
+            END $$;
             ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "StoreId" uuid NULL;
             CREATE INDEX IF NOT EXISTS "IX_Users_StoreId" ON "Users" ("StoreId");
             ALTER TABLE "Stores" ADD COLUMN IF NOT EXISTS "NotificationEmail" text NULL;

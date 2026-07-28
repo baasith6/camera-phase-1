@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from .backend_client import BackendClient
 from .capture import validate_rtsp_stream
 from .paths import CameraSource, WizardConfig, load_wizard_config, media_dir, save_wizard_config
+from .provisioning import claim_setup, complete_setup, provision_sources
 
 if TYPE_CHECKING:
     from .config import Config
@@ -121,11 +122,11 @@ WIZARD_HTML = """<!DOCTYPE html>
 <body>
   <div class="wrap">
     <div class="brand">ONEVO</div>
-    <p class="sub">Local Connector setup â€” link this PC to your store, then add camera streams or a test video.</p>
+    <p class="sub">Local Connector setup — link this PC to your store, then add camera streams or a test video.</p>
     <div class="steps">
-      <span class="step-pill" id="p1">1 Â· Setup code</span>
-      <span class="step-pill" id="p2">2 Â· Sources</span>
-      <span class="step-pill" id="p3">3 Â· Done</span>
+      <span class="step-pill" id="p1">1 · Setup code</span>
+      <span class="step-pill" id="p2">2 · Sources</span>
+      <span class="step-pill" id="p3">3 · Done</span>
     </div>
 
     <div class="panel" id="panel-claim">
@@ -273,9 +274,14 @@ def attach_wizard_routes(
         if not code:
             raise HTTPException(400, "setupCode is required")
         try:
-            cid, key, store_id = client.claim_setup_code(code, name, cfg.version)
+            w = load_wizard_config() or WizardConfig()
+            w.setup_code = code
+            w.connector_name = name
+            cid, store_id = claim_setup(client, store, w, cfg.version)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, str(exc)) from exc
+        state.connector_id = cid
+        state.log(f"Wizard: claimed setup code → connector {cid} store {store_id}")
         store.set_cred("connector_id", cid)
         store.set_cred("api_key", key)
         store.set_cred("store_id", store_id)
@@ -324,6 +330,23 @@ def attach_wizard_routes(
         if not sources:
             raise HTTPException(400, "Add at least one RTSP URL or upload an MP4")
 
+        w = load_wizard_config() or WizardConfig()
+        w.sources = sources
+        w.setup_complete = False
+
+        def checkpoint(current_sources):
+            w.sources = current_sources
+            save_wizard_config(w)
+
+        try:
+            created = provision_sources(
+                client, sources, state, checkpoint=checkpoint
+            )
+            client.finalize_setup([source.source_key for source in created])
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Failed to configure cameras: {exc}") from exc
+
+        complete_setup(w, created)
         created = []
         for src in sources:
             body = {
@@ -392,7 +415,6 @@ def start_wizard(
 def open_wizard_browser(port: int) -> None:
     import webbrowser
     webbrowser.open(f"http://127.0.0.1:{port}/")
-
 
 
 

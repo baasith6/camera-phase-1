@@ -53,11 +53,13 @@ public record CreateSetupCodeResponse(string Code, Guid StoreId, DateTimeOffset 
 public record ClaimSetupCodeRequest(string SetupCode, string Name, string Version);
 public record ClaimSetupCodeResponse(Guid ConnectorId, string ApiKey, Guid StoreId);
 public record ConnectorCreateCameraRequest(
+    string SourceKey,
     string Name,
     string RtspUrl,
     string? OnvifHost,
     int? OnvifPort,
     bool UseDemoZones = false);
+public record FinalizeConnectorSetupRequest(List<string> SourceKeys);
 public record InstallerInfoResponse(string Version, string FileName, long SizeBytes, string Sha256, string DownloadPath);
 
 // ---- Clips ----

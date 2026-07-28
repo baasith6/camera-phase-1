@@ -16,14 +16,14 @@ Installer modes:
 import sys
 import threading
 import time
-from pathlib import Path
 
 from .admin import start_admin
 from .backend_client import BackendClient
 from .capture import CapturePipeline, validate_rtsp_stream
 from .clip_settings import ClipSettings, load_clip_settings, save_clip_settings
 from .config import load_config
-from .paths import load_wizard_config, save_wizard_config
+from .paths import apply_pending_source_update, load_wizard_config,save_wizard_config
+from .instance_lock import InstanceLock
 from .runtime import RuntimeState
 from .store import LocalStore
 from .workers import run_heartbeat, run_uploader
@@ -213,8 +213,34 @@ def _persist_provision_failure(
 
 def _provision_native_installer(cfg, wizard, client: BackendClient, store: LocalStore, state: RuntimeState) -> bool:
     """Claim native-installer setup and create its configured camera sources once."""
-    if not wizard or wizard.setup_complete or not wizard.setup_code:
+    if not wizard or wizard.setup_complete:
         return False
+    try:
+        from .provisioning import claim_setup, complete_setup, provision_sources
+        if wizard.setup_code:
+            cid, _ = claim_setup(client, store, wizard, cfg.version)
+        else:
+            cid = store.get_cred("connector_id")
+            api_key = store.get_cred("api_key")
+            if not (cid and api_key):
+                raise RuntimeError("pending setup has no connector credentials")
+            client.set_credentials(cid, api_key)
+        def checkpoint(sources):
+            wizard.sources = sources
+            wizard.setup_complete = False
+            from .paths import save_wizard_config
+            save_wizard_config(wizard)
+
+        if wizard.sources:
+            created = provision_sources(
+                client, wizard.sources, state, checkpoint=checkpoint
+            )
+            client.finalize_setup([source.source_key for source in created])
+        else:
+            # The installer allows camera setup to be skipped.  Pair the
+            # connector now and let sources be added later from localhost:8099.
+            created = []
+        complete_setup(wizard, created)
     if not wizard.sources:
         state.log("ERROR: installer configuration has no camera source")
         _persist_provision_failure(
@@ -328,14 +354,41 @@ def main() -> int:
     state.camera_id = cfg.camera_id
 
     store = LocalStore(cfg.state_dir)
-    client = BackendClient(cfg.backend_url)
 
     if cfg.wizard_mode:
         return _run_wizard_only(cfg, state, store)
 
+    instance_lock = InstanceLock(cfg.state_dir)
+    if not instance_lock.acquire():
+        state.log("ERROR: connector state is locked or unavailable")
+        return 3
+
+    client = BackendClient(cfg.backend_url)
+    # Keep localhost:8099 reachable while backend activation is pending.
+    start_admin(state, cfg, client, store, cfg.admin_port)
+    state.log(f"Admin UI on http://localhost:{cfg.admin_port}")
+
     # Native installer writes a pending setup config before starting the service.
     # It must take precedence over credentials left by an older installation.
     wizard = load_wizard_config()
+    if wizard and apply_pending_source_update(wizard):
+        wizard = load_wizard_config()
+        state.log("Installer source update applied; activation is pending")
+    if cfg.service_mode and wizard and not wizard.setup_complete:
+        while not _provision_native_installer(cfg, wizard, client, store, state):
+            state.degraded_reason = (
+                "Setup pending: check the backend connection or setup code."
+            )
+            state.log("Installer activation pending; retrying in 15 seconds")
+            time.sleep(15)
+            wizard = load_wizard_config()
+            if wizard is None:
+                break
+        cfg = load_config()
+        state.source = cfg.source
+        state.camera_id = cfg.camera_id
+        client = BackendClient(cfg.backend_url)
+        state.degraded_reason = None
     activation_failed = False
     if cfg.service_mode and wizard and not wizard.setup_complete and wizard.setup_code:
         if not _provision_native_installer(cfg, wizard, client, store, state):
@@ -356,8 +409,10 @@ def main() -> int:
         if not _ensure_registered(cfg, client, store, state):
             # Not registered yet Ã¢â‚¬â€ if installed, open wizard instead of failing hard.
             if cfg.service_mode or (wizard is None or not wizard.setup_complete):
-                state.log("Not configured yet Ã¢â‚¬â€ starting setup wizard")
-                return _run_wizard_only(cfg, state, store)
+                state.degraded_reason = "Connector pairing is incomplete."
+                state.log("Not configured yet; local admin remains available")
+                while True:
+                    time.sleep(15)
             return 2
     elif not activation_failed:
         client.set_credentials(store.get_cred("connector_id"), store.get_cred("api_key"))

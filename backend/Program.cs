@@ -28,6 +28,8 @@ builder.Services.AddSingleton<ClipQueue>();
 builder.Services.AddSingleton<AlertChannel>();
 builder.Services.AddSingleton<ConnectorInstallerService>();
 builder.Services.AddScoped<CameraProvisioningService>();
+builder.Services.AddScoped<ConnectorAuthenticationService>();
+builder.Services.AddScoped<ConnectorPairingService>();
 
 // ---- Object storage (MinIO / S3) ----
 var s3Opts = new S3Options
