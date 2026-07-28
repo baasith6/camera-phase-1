@@ -289,9 +289,6 @@ def main() -> int:
         return 3
 
     client = BackendClient(cfg.backend_url)
-    # Keep localhost:8099 reachable while backend activation is pending.
-    start_admin(state, cfg, client, store, cfg.admin_port)
-    state.log(f"Admin UI on http://localhost:{cfg.admin_port}")
 
     # Native installer writes a pending setup config before starting the service.
     # It must take precedence over credentials left by an older installation.
@@ -299,6 +296,25 @@ def main() -> int:
     if wizard and apply_pending_source_update(wizard):
         wizard = load_wizard_config()
         state.log("Installer source update applied; activation is pending")
+
+    stop = threading.Event()
+    wizard_ready = threading.Event()
+    pending_setup = bool(wizard and not wizard.setup_complete)
+
+    def _on_wizard_configured(_wizard_cfg) -> None:
+        wizard_ready.set()
+
+    # Keep localhost:8099 reachable while backend activation is pending.
+    start_admin(
+        state,
+        cfg,
+        cfg.admin_port,
+        store=store,
+        enable_setup_wizard=pending_setup,
+        on_wizard_configured=_on_wizard_configured if pending_setup else None,
+    )
+    state.log(f"Admin UI on http://localhost:{cfg.admin_port}")
+
     if cfg.service_mode and wizard and not wizard.setup_complete:
         while not _provision_native_installer(cfg, wizard, client, store, state):
             state.degraded_reason = (
@@ -343,22 +359,6 @@ def main() -> int:
         client.set_credentials(store.get_cred("connector_id"), store.get_cred("api_key"))
         state.connector_id = client.connector_id
         state.log(f"Loaded existing connector credentials ({client.connector_id})")
-
-    stop = threading.Event()
-    wizard_ready = threading.Event()
-
-    def _on_wizard_configured(_wizard_cfg) -> None:
-        wizard_ready.set()
-
-    start_admin(
-        state,
-        cfg,
-        cfg.admin_port,
-        store=store,
-        enable_setup_wizard=activation_failed,
-        on_wizard_configured=_on_wizard_configured if activation_failed else None,
-    )
-    state.log(f"Admin UI on http://localhost:{cfg.admin_port}")
 
     if activation_failed:
         try:
