@@ -30,6 +30,22 @@ public class OnevoDbContext : DbContext
             .HasForeignKey(c => c.StoreId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        b.Entity<Connector>()
+            .HasOne(c => c.Store)
+            .WithOne(s => s.Connector)
+            .HasForeignKey<Connector>(c => c.StoreId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.Entity<Connector>()
+            .HasIndex(c => c.StoreId)
+            .IsUnique();
+
+        b.Entity<Camera>()
+            .HasOne(c => c.Connector)
+            .WithMany(c => c.Cameras)
+            .HasForeignKey(c => c.ConnectorId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         b.Entity<CameraZone>()
             .HasOne(z => z.Camera)
             .WithMany(c => c.Zones)

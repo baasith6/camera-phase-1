@@ -16,13 +16,13 @@ Installer modes:
 import sys
 import threading
 import time
-from pathlib import Path
 
 from .admin import start_admin
 from .backend_client import BackendClient
 from .capture import CapturePipeline
 from .config import load_config
 from .paths import load_wizard_config
+from .instance_lock import InstanceLock
 from .runtime import RuntimeState
 from .store import LocalStore
 from .workers import run_heartbeat, run_uploader
@@ -185,74 +185,11 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
     """Claim native-installer setup and create its configured camera sources once."""
     if not wizard or wizard.setup_complete or not wizard.setup_code:
         return False
-    if not wizard.sources:
-        state.log("ERROR: installer configuration has no camera source")
-        return False
-
     try:
-        for source in wizard.sources:
-            modes = sum(bool(value) for value in (
-                source.rtsp_url, source.source_file, source.onvif_host
-            ))
-            if modes != 1:
-                raise ValueError(f"{source.name}: configure exactly one source type")
-            if source.rtsp_url and not source.rtsp_url.lower().startswith("rtsp://"):
-                raise ValueError(f"{source.name}: RTSP URL must start with rtsp://")
-            if source.source_file and not Path(source.source_file).is_file():
-                raise ValueError(f"{source.name}: video file does not exist")
-            if source.onvif_host and not (1 <= int(source.onvif_port) <= 65535):
-                raise ValueError(f"{source.name}: invalid ONVIF port")
-
-        cid, key, store_id = client.claim_setup_code(
-            wizard.setup_code, wizard.connector_name, cfg.version
-        )
-        store.set_cred("connector_id", cid)
-        store.set_cred("api_key", key)
-        store.set_cred("store_id", store_id)
-        created = []
-        for source in wizard.sources:
-            rtsp_url = source.rtsp_url
-            device_info = None
-            if source.onvif_host:
-                from .onvif_client import OnvifCamera
-                onvif = OnvifCamera().connect(
-                    source.onvif_host,
-                    source.onvif_port,
-                    source.onvif_user or "admin",
-                    source.onvif_pass,
-                )
-                profile = None if source.onvif_profile == "auto" else source.onvif_profile
-                rtsp_url = onvif.get_rtsp_url(profile)
-                device_info = onvif.get_device_info()
-
-            camera = client.create_camera({
-                "name": source.name,
-                "rtspUrl": rtsp_url or f"file://{source.source_file}",
-                "onvifHost": source.onvif_host or None,
-                "onvifPort": source.onvif_port if source.onvif_host else None,
-                "useDemoZones": bool(source.source_file),
-            })
-            source.camera_id = camera.get("id") or camera.get("Id") or ""
-            source.rtsp_url = rtsp_url
-            if device_info and source.camera_id:
-                try:
-                    client.update_device_info(source.camera_id, {
-                        "manufacturer": device_info.manufacturer,
-                        "model": device_info.model,
-                        "serial": device_info.serial,
-                        "firmware": device_info.firmware,
-                    })
-                except Exception as exc:  # noqa: BLE001
-                    state.log(f"WARNING: ONVIF device info update failed: {exc}")
-            created.append(source)
-
-        wizard.sources = created
-        wizard.store_id = store_id
-        wizard.setup_code = ""
-        wizard.setup_complete = True
-        from .paths import save_wizard_config
-        save_wizard_config(wizard)
-        client.set_credentials(cid, key)
+        from .provisioning import claim_setup, complete_setup, provision_sources
+        cid, store_id = claim_setup(client, store, wizard, cfg.version)
+        created = provision_sources(client, wizard.sources, state)
+        complete_setup(wizard, created)
         state.connector_id = cid
         state.log(f"Native installer provisioned {len(created)} camera source(s)")
         return True
@@ -269,6 +206,11 @@ def main() -> int:
     state = RuntimeState()
     state.source = cfg.source
     state.camera_id = cfg.camera_id
+
+    instance_lock = InstanceLock(cfg.state_dir)
+    if not instance_lock.acquire():
+        state.log("ERROR: another ONEVO connector instance is already running")
+        return 3
 
     store = LocalStore(cfg.state_dir)
     client = BackendClient(cfg.backend_url)

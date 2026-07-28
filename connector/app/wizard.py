@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from .backend_client import BackendClient
 from .paths import CameraSource, WizardConfig, load_wizard_config, media_dir, save_wizard_config
+from .provisioning import claim_setup, complete_setup, provision_sources
 
 if TYPE_CHECKING:
     from .config import Config
@@ -97,11 +98,11 @@ WIZARD_HTML = """<!DOCTYPE html>
 <body>
   <div class="wrap">
     <div class="brand">ONEVO</div>
-    <p class="sub">Local Connector setup â€” link this PC to your store, then add camera streams or a test video.</p>
+    <p class="sub">Local Connector setup — link this PC to your store, then add camera streams or a test video.</p>
     <div class="steps">
-      <span class="step-pill" id="p1">1 Â· Setup code</span>
-      <span class="step-pill" id="p2">2 Â· Sources</span>
-      <span class="step-pill" id="p3">3 Â· Done</span>
+      <span class="step-pill" id="p1">1 · Setup code</span>
+      <span class="step-pill" id="p2">2 · Sources</span>
+      <span class="step-pill" id="p3">3 · Done</span>
     </div>
 
     <div class="panel" id="panel-claim">
@@ -242,19 +243,14 @@ def build_wizard_app(
         if not code:
             raise HTTPException(400, "setupCode is required")
         try:
-            cid, key, store_id = client.claim_setup_code(code, name, cfg.version)
+            w = load_wizard_config() or WizardConfig()
+            w.setup_code = code
+            w.connector_name = name
+            cid, store_id = claim_setup(client, store, w, cfg.version)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, str(exc)) from exc
-        store.set_cred("connector_id", cid)
-        store.set_cred("api_key", key)
-        store.set_cred("store_id", store_id)
-        w = load_wizard_config() or WizardConfig()
-        w.store_id = store_id
-        w.connector_name = name
-        w.setup_complete = False
-        save_wizard_config(w)
         state.connector_id = cid
-        state.log(f"Wizard: claimed setup code â†’ connector {cid} store {store_id}")
+        state.log(f"Wizard: claimed setup code → connector {cid} store {store_id}")
         return {"ok": True, "connectorId": cid, "storeId": store_id}
 
     @app.post("/wizard/sources")
@@ -288,26 +284,13 @@ def build_wizard_app(
         if not sources:
             raise HTTPException(400, "Add at least one RTSP URL or upload an MP4")
 
-        # Register cameras on the backend so dashboard + orchestrator see them.
-        created = []
-        for src in sources:
-            body = {
-                "name": src.name,
-                "rtspUrl": src.rtsp_url or f"file://{src.source_file}",
-                "useDemoZones": bool(src.source_file),
-            }
-            try:
-                cam = client.create_camera(body)
-                src.camera_id = cam.get("id") or cam.get("Id") or ""
-                created.append(src)
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(502, f"Failed to create camera '{src.name}': {exc}") from exc
+        try:
+            created = provision_sources(client, sources, state)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Failed to configure cameras: {exc}") from exc
 
         w = load_wizard_config() or WizardConfig()
-        w.sources = created
-        w.use_backend_cameras = True
-        w.setup_complete = True
-        save_wizard_config(w)
+        complete_setup(w, created)
         state.log(f"Wizard: configured {len(created)} source(s)")
 
         if on_configured:
@@ -339,7 +322,6 @@ def start_wizard(
 def open_wizard_browser(port: int) -> None:
     import webbrowser
     webbrowser.open(f"http://127.0.0.1:{port}/")
-
 
 
 

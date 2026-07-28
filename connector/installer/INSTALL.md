@@ -1,7 +1,7 @@
 # ONEVO Connector — Installer Build Guide
 
 Connector runtime already works. This packages it into
-`ONEVO-Connector-Setup-1.0.0.exe`.
+`ONEVO-Connector-Setup-1.1.0.exe`.
 
 ## 1. Prerequisites (one-time)
 
@@ -47,16 +47,17 @@ sees or enters it.
 Output:
 
 ```
-connector/dist/ONEVO-Connector-Setup-1.0.0.exe
+connector/dist/ONEVO-Connector-Setup-1.1.0.exe
 ```
 
 ## 3. What the installer does on a shop PC
 
 1. Installs under `Program Files\ONEVO\Connector`
 2. Registers a Windows service via WinSW (`ONEVO Local Connector`)
-3. Opens the **Setup Wizard** (`--wizard`)
-4. Shop owner pastes a **setup code** from the dashboard
-5. Adds one/more **RTSP** URLs and/or uploads a local **MP4** test video
+3. Collects a dashboard-generated setup code in the native installer
+4. Collects one or more RTSP URLs, ONVIF cameras, or a local MP4 test video
+5. Writes pending configuration under `%ProgramData%\ONEVO\Connector`
+6. Starts the service; it claims the selected store and provisions its cameras
 6. Service continuously monitors → motion clips → signed MinIO upload → backend
 
 ## 4. Publish it
@@ -70,8 +71,8 @@ connector/dist/ONEVO-Connector-Setup-1.0.0.exe
 
 | File | Field |
 |---|---|
-| `connector/installer/onevo-connector.iss` | `#define AppVersion "1.0.0"` |
-| `connector/app/config.py` | `version="1.0.0"` |
+| `connector/installer/onevo-connector.iss` | `#define AppVersion "1.1.0"` |
+| `connector/app/config.py` | `version="1.1.0"` |
 | Backend env (`docker-compose.yml` / `.env`) | `ConnectorInstaller__Version` / `CONNECTOR_INSTALLER_VERSION` |
 
 Mismatch = backend looks for a filename that doesn't exist =

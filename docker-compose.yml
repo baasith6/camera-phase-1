@@ -83,15 +83,18 @@ services:
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD}
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
-      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.0.0}
+      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.0}
       ConnectorInstaller__Path: /app/connector-dist
+      ConnectorInstaller__DownloadUrl: ${CONNECTOR_INSTALLER_URL:-https://installer-site-one.vercel.app/ONEVO-Connector-Setup-1.1.0.exe}
+      ConnectorInstaller__SizeBytes: ${CONNECTOR_INSTALLER_SIZE_BYTES:-98067717}
+      ConnectorInstaller__Sha256: ${CONNECTOR_INSTALLER_SHA256:-4612e540532d54ae5940e24e62d207a60e4d3d1cc74bcad14f91c6b5e86cb7c4}
       # CORS: allow both local dev and the Dockerized dashboard
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:80}
     ports:
       - "8081:8080"
     volumes:
-      # Windows installer EXE (built by connector/installer/build.ps1) served via GET /api/connectors/installer
-      - ./connector/dist:/app/connector-dist:ro
+      # Windows installer EXE (built by connector/installer/build.ps1, moved to installer-site for Vercel deploy) served via GET /api/connectors/installer
+      - ./installer-site:/app/connector-dist:ro
 
   cloud-ai:
     build: ./cloud-ai
@@ -116,46 +119,6 @@ services:
       CLOUD_AI_YOLOE_PROMPTS: ${CLOUD_AI_YOLOE_PROMPTS}
       CONNECTOR_BOOTSTRAP_KEY: ${CONNECTOR_BOOTSTRAP_KEY}
 
-  # Edge connector â€” runs on the same machine that sees the camera (or in Docker for dev/demo)
-  connector:
-    build: ./connector
-    depends_on:
-      backend:
-        condition: service_started
-    volumes:
-      - connector_data:/app/data
-      - connector_samples:/app/samples
-    extra_hosts:
-      - "localhost:host-gateway"
-    environment:
-      CONNECTOR_BACKEND_URL: http://backend:8080
-      CONNECTOR_ADMIN_PORT: 8099
-      CONNECTOR_BOOTSTRAP_KEY: ${CONNECTOR_BOOTSTRAP_KEY}
-      CONNECTOR_STORE_ID: 11111111-1111-1111-1111-111111111111
-      CONNECTOR_CAMERA_ID: 
-      CONNECTOR_NAME: edge-connector-1
-      CONNECTOR_SOURCE: file://samples/test.mp4
-      CONNECTOR_LOOP: ${CONNECTOR_LOOP:-true}
-      # Test video loops forever, so motion fires constantly. Throttle clip cutting
-      # to mimic a real camera (event-driven) and keep the cloud-ai queue from growing.
-      # On CPU, cloud-ai YOLO takes ~50s for an 8s clip, so cooldown must exceed that
-      # for the queue to stay drained. (A real GPU deployment can use shorter cooldowns.)
-      CONNECTOR_PRE_SECONDS: ${CONNECTOR_PRE_SECONDS:-4}
-      CONNECTOR_POST_SECONDS: ${CONNECTOR_POST_SECONDS:-4}
-      CONNECTOR_COOLDOWN_SECONDS: ${CONNECTOR_COOLDOWN_SECONDS:-60}
-      CONNECTOR_MOTION_AREA_FRAC: ${CONNECTOR_MOTION_AREA_FRAC:-0.05}
-      # ONVIF (leave blank for file/manual RTSP mode)
-      CONNECTOR_ONVIF_HOST: ${CONNECTOR_ONVIF_HOST:-}
-      CONNECTOR_ONVIF_PORT: ${CONNECTOR_ONVIF_PORT:-80}
-      CONNECTOR_ONVIF_USER: ${CONNECTOR_ONVIF_USER:-admin}
-      CONNECTOR_ONVIF_PASS: ${CONNECTOR_ONVIF_PASS:-admin}
-      CONNECTOR_ONVIF_PROFILE: ${CONNECTOR_ONVIF_PROFILE:-auto}
-      CONNECTOR_RTSP_RECONNECT_MAX_SEC: ${CONNECTOR_RTSP_RECONNECT_MAX_SEC:-60}
-    ports:
-      # Keep 8099 free for the Windows-installed connector admin UI.
-      - "${CONNECTOR_DOCKER_ADMIN_PORT:-8109}:8099"
-    restart: unless-stopped
-
   # Angular dashboard â€” served by nginx, proxies /api â†’ backend
   dashboard:
     build: ./dashboard
@@ -168,6 +131,3 @@ services:
 volumes:
   pgdata:
   miniodata:
-  connector_data:
-  connector_samples:
-

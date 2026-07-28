@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
+using Onevo.Api.Services;
 
 namespace Onevo.Api.Controllers;
 
@@ -13,7 +14,12 @@ namespace Onevo.Api.Controllers;
 public class CamerasController : ControllerBase
 {
     private readonly OnevoDbContext _db;
-    public CamerasController(OnevoDbContext db) => _db = db;
+    private readonly ConnectorAuthenticationService _connectorAuth;
+    public CamerasController(OnevoDbContext db, ConnectorAuthenticationService connectorAuth)
+    {
+        _db = db;
+        _connectorAuth = connectorAuth;
+    }
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? storeId)
@@ -73,7 +79,11 @@ public class CamerasController : ControllerBase
         [FromHeader(Name = "X-Connector-Id")] string? connectorId,
         [FromHeader(Name = "X-Connector-Key")] string? connectorKey)
     {
-        // Minimal auth: connector must provide its own registered key.
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        if (!await _connectorAuth.OwnsCameraAsync(connector, id, HttpContext.RequestAborted))
+            return Forbid();
+
         var cam = await _db.Cameras.FindAsync(id);
         if (cam is null) return NotFound();
 

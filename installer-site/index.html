@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONEVO Connector Download</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 520px;
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 40px;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #111827;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            margin-bottom: 32px;
+            font-size: 15px;
+        }
+
+        .info {
+            border-top: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 24px 0;
+            margin-bottom: 32px;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            font-size: 15px;
+        }
+
+        .label {
+            color: #6b7280;
+        }
+
+        .value {
+            color: #111827;
+            font-weight: 600;
+        }
+
+        .download-btn {
+            display: block;
+            width: 100%;
+            text-align: center;
+            background: #2563eb;
+            color: #fff;
+            text-decoration: none;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            transition: .2s;
+        }
+
+        .download-btn:hover {
+            background: #1d4ed8;
+        }
+
+        .footer {
+            margin-top: 24px;
+            font-size: 13px;
+            color: #6b7280;
+            text-align: center;
+        }
+
+        @media(max-width:480px){
+            .card{
+                padding:28px;
+            }
+
+            .row{
+                flex-direction:column;
+                gap:4px;
+            }
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <div class="card">
+
+        <h1>ONEVO Connector</h1>
+
+        <p class="subtitle">
+            Download the latest Windows installer.
+        </p>
+
+        <div class="info">
+
+            <div class="row">
+                <span class="label">Version</span>
+                <span class="value">1.1.0</span>
+            </div>
+
+            <div class="row">
+                <span class="label">Platform</span>
+                <span class="value">Windows 10 / 11 (64-bit)</span>
+            </div>
+
+            <div class="row">
+                <span class="label">File</span>
+                <span class="value">ONEVO-Connector-Setup-1.1.0.exe</span>
+            </div>
+
+            <div class="row">
+                <span class="label">Size</span>
+                <span class="value">93.5 MB</span>
+            </div>
+
+        </div>
+
+        <a class="download-btn"
+            href="/ONEVO-Connector-Setup-1.1.0.exe"
+            download>
+            Download for Windows
+        </a>
+
+        <div class="footer">
+            © ONEVO. All rights reserved.
+        </div>
+
+    </div>
+
+</body>
+
+</html>

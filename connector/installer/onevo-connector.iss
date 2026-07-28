@@ -1,5 +1,5 @@
 #define AppName "ONEVO Local Connector"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "ONEVO"
 #define AppExeName "onevo-connector.exe"
 #define AppServiceExe "onevo-connector-service.exe"

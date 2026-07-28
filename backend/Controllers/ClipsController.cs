@@ -15,12 +15,18 @@ public class ClipsController : ControllerBase
     private readonly OnevoDbContext _db;
     private readonly S3Service _s3;
     private readonly ClipQueue _queue;
+    private readonly ConnectorAuthenticationService _connectorAuth;
 
-    public ClipsController(OnevoDbContext db, S3Service s3, ClipQueue queue)
+    public ClipsController(
+        OnevoDbContext db,
+        S3Service s3,
+        ClipQueue queue,
+        ConnectorAuthenticationService connectorAuth)
     {
         _db = db;
         _s3 = s3;
         _queue = queue;
+        _connectorAuth = connectorAuth;
     }
 
     // Connector requests a short-lived signed upload URL for a new candidate clip.
@@ -28,10 +34,10 @@ public class ClipsController : ControllerBase
     [HttpPost("upload-url")]
     public async Task<ActionResult<UploadUrlResponse>> UploadUrl(UploadUrlRequest req)
     {
-        var connector = await AuthConnectorAsync();
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
-        if (!await _db.Cameras.AnyAsync(c => c.Id == req.CameraId))
-            return BadRequest(new { error = "Unknown camera" });
+        if (!await _connectorAuth.OwnsCameraAsync(connector, req.CameraId, HttpContext.RequestAborted))
+            return Forbid();
 
         var clip = new Clip
         {
@@ -55,7 +61,7 @@ public class ClipsController : ControllerBase
     [HttpPost("{id:guid}/complete")]
     public async Task<IActionResult> Complete(Guid id, CompleteClipRequest req)
     {
-        var connector = await AuthConnectorAsync();
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
 
         var clip = await _db.Clips.FindAsync(id);
@@ -81,16 +87,5 @@ public class ClipsController : ControllerBase
         if (clip.Status is ClipStatus.Uploaded or ClipStatus.Analyzed or ClipStatus.Processing)
             url = await _s3.PresignedGetAsync(clip.ObjectKey, 3600);
         return Ok(new { clip, clipUrl = url });
-    }
-
-    private async Task<Connector?> AuthConnectorAsync()
-    {
-        if (!Request.Headers.TryGetValue("X-Connector-Id", out var idVal) ||
-            !Request.Headers.TryGetValue("X-Connector-Key", out var keyVal))
-            return null;
-        if (!Guid.TryParse(idVal, out var id)) return null;
-        var connector = await _db.Connectors.FindAsync(id);
-        if (connector is null) return null;
-        return BCrypt.Net.BCrypt.Verify(keyVal.ToString(), connector.ApiKeyHash) ? connector : null;
     }
 }

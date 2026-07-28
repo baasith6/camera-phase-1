@@ -1,13 +1,12 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DecimalPipe } from '@angular/common';
 import { ApiService } from '../../core/api.service';
 import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models';
 
 @Component({
   selector: 'app-setup',
   standalone: true,
-  imports: [FormsModule, DecimalPipe],
+  imports: [FormsModule],
   template: `
     <h2>Setup &amp; Zones</h2>
 
@@ -25,8 +24,8 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
       </div>
 
       <div class="conn-actions">
-        <button (click)="downloadInstaller()" [disabled]="downloadingInstaller || !installerInfo">
-          {{ downloadingInstaller ? 'Downloading…' : 'Install' }}
+        <button (click)="downloadInstaller()" [disabled]="!installerInfo">
+          Download Windows connector
         </button>
         <button class="ghost" (click)="generateSetupCode()" [disabled]="!storeId || generatingCode">
           {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
@@ -36,13 +35,15 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
 
       @if (installerInfo) {
         <p class="muted small meta">
-          v{{ installerInfo.version }} · {{ installerInfo.sizeBytes / 1048576 | number:'1.1-1' }} MB
-          · sha256 {{ installerInfo.sha256.slice(0, 12) }}…
+          Latest v{{ installerInfo.version }} · {{ installerSizeMb }} MB
+          @if (installerInfo.sha256) { · SHA-256 {{ installerInfo.sha256.slice(0, 12) }}… }
         </p>
       } @else if (installerError) {
         <p class="err-text">{{ installerError }}</p>
-      } @else {
-        <p class="muted small">Checking installer availability…</p>
+      }
+
+      @if (setupCodeError) {
+        <p class="err-text">{{ setupCodeError }}</p>
       }
 
       @if (setupCode) {
@@ -239,7 +240,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         </div>
 
         <div class="canvas-container">
-          <canvas #cv width="640" height="360"
+          <canvas #zoneCanvas width="640" height="360"
                   (mousedown)="onCanvasMouseDown($event)"
                   (mousemove)="onCanvasMouseMove($event)"
                   (mouseup)="onCanvasMouseUp($event)"
@@ -250,7 +251,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             💡 <strong>Tip:</strong> Click 2 opposite corners to draw a Box, or keep clicking to add points. Drag yellow dots to adjust points anytime!
           </div>
         </div>
-        <canvas #cv width="480" height="270"
+        <canvas #snapshotCanvas width="480" height="270"
                 (click)="onCanvasClick($event)"
                 [style.background-image]="snapshotUrl"
                 style="background-size: cover; background-position: center;"></canvas>
@@ -320,7 +321,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
   `],
 })
 export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
-  @ViewChild('cv') canvasRef?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('zoneCanvas') canvasRef?: ElementRef<HTMLCanvasElement>;
 
   stores: Store[] = [];
   cameras: Camera[] = [];
@@ -349,19 +350,23 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   streamTestResult: { ok: boolean; message: string } | null = null;
   connectorAdminHost = 'localhost';
 
-  installerInfo: InstallerInfo | null = null;
-  installerError = '';
-  downloadingInstaller = false;
   generatingCode = false;
+  setupCodeError = '';
   setupCode = '';
   setupCodeExpires = '';
   storeConnectors: Connector[] = [];
+  installerInfo: InstallerInfo | null = null;
+  installerError = '';
   private pollTimer?: ReturnType<typeof setInterval>;
 
   constructor(private api: ApiService) {}
 
   get effectiveSnapshotUrl(): string {
     return this.cameraId ? `url(http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId})` : 'none';
+  }
+
+  get snapshotUrl(): string {
+    return this.effectiveSnapshotUrl;
   }
 
   get storeConnectorOnline(): boolean {
@@ -371,6 +376,12 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
       const age = now - new Date(c.lastHeartbeat).getTime();
       return age < 120_000 && (c.status === 'Healthy' || c.status === 'Degraded');
     });
+  }
+
+  get installerSizeMb(): string {
+    return this.installerInfo?.sizeBytes
+      ? (this.installerInfo.sizeBytes / 1048576).toFixed(1)
+      : 'Unknown size';
   }
 
   ngOnInit(): void {
@@ -391,38 +402,26 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   loadInstallerInfo(): void {
     this.api.getInstallerInfo().subscribe({
-      next: (info) => { this.installerInfo = info; this.installerError = ''; },
+      next: (info) => {
+        this.installerInfo = info;
+        this.installerError = '';
+      },
       error: (err) => {
         this.installerInfo = null;
-        this.installerError = err?.error?.error
-          || 'Installer not available. Build with connector/installer/build.ps1 and ensure connector/dist is mounted.';
+        this.installerError = err?.error?.error || 'Installer information is unavailable';
       },
     });
   }
 
   downloadInstaller(): void {
-    if (!this.installerInfo) return;
-    this.downloadingInstaller = true;
-    this.api.downloadInstaller().subscribe({
-      next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = this.installerInfo!.fileName;
-        a.click();
-        URL.revokeObjectURL(url);
-        this.downloadingInstaller = false;
-      },
-      error: () => {
-        this.downloadingInstaller = false;
-        this.installerError = 'Download failed';
-      },
-    });
+    if (!this.installerInfo?.downloadPath) return;
+    window.location.assign(this.installerInfo.downloadPath);
   }
 
   generateSetupCode(): void {
     if (!this.storeId) return;
     this.generatingCode = true;
+    this.setupCodeError = '';
     this.api.createSetupCode(this.storeId).subscribe({
       next: (res) => {
         this.setupCode = res.code;
@@ -431,7 +430,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
       },
       error: (err) => {
         this.generatingCode = false;
-        this.installerError = err?.error?.error || 'Could not generate setup code';
+        this.setupCodeError = err?.error?.error || 'Could not generate setup code';
       },
     });
   }
@@ -522,8 +521,14 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     this.redraw();
   }
 
+  onCanvasClick(ev: MouseEvent): void {
+    ev.stopPropagation();
+    this.onCanvasMouseDown(ev);
+  }
+
   onCanvasMouseDown(ev: MouseEvent): void {
-    const canvas = this.canvasRef!.nativeElement;
+    const canvas = this.canvasRef?.nativeElement;
+    if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = Math.round(((ev.clientX - rect.left) / rect.width) * 1000) / 1000;
     const y = Math.round(((ev.clientY - rect.top) / rect.height) * 1000) / 1000;

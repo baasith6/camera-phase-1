@@ -18,17 +18,23 @@ public class ConnectorsController : ControllerBase
     private readonly IConfiguration _cfg;
     private readonly ConnectorInstallerService _installer;
     private readonly CameraProvisioningService _cameraProvisioning;
+    private readonly ConnectorAuthenticationService _connectorAuth;
+    private readonly ConnectorPairingService _pairing;
 
     public ConnectorsController(
         OnevoDbContext db,
         IConfiguration cfg,
         ConnectorInstallerService installer,
-        CameraProvisioningService cameraProvisioning)
+        CameraProvisioningService cameraProvisioning,
+        ConnectorAuthenticationService connectorAuth,
+        ConnectorPairingService pairing)
     {
         _db = db;
         _cfg = cfg;
         _installer = installer;
         _cameraProvisioning = cameraProvisioning;
+        _connectorAuth = connectorAuth;
+        _pairing = pairing;
     }
 
     // Connector self-registration using the shared bootstrap key. Returns a per-connector API key
@@ -43,23 +49,8 @@ public class ConnectorsController : ControllerBase
         if (!await _db.Stores.AnyAsync(s => s.Id == req.StoreId))
             return BadRequest(new { error = "Unknown store" });
 
-        var apiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-        var connector = await _db.Connectors
-            .Where(c => c.StoreId == req.StoreId)
-            .OrderByDescending(c => c.LastHeartbeat)
-            .FirstOrDefaultAsync();
-        if (connector is null)
-        {
-            connector = new Connector { StoreId = req.StoreId };
-            _db.Connectors.Add(connector);
-        }
-        connector.Name = req.Name;
-        connector.Version = req.Version;
-        connector.ApiKeyHash = BCrypt.Net.BCrypt.HashPassword(apiKey);
-        connector.Status = ConnectorStatus.Healthy;
-        connector.LastHeartbeat = DateTimeOffset.UtcNow;
-        connector.DegradedReason = null;
-        await _db.SaveChangesAsync();
+        var (connector, apiKey) = await _pairing.PairAsync(
+            req.StoreId, req.Name, req.Version, HttpContext.RequestAborted);
 
         return new RegisterConnectorResponse(connector.Id, apiKey);
     }
@@ -80,32 +71,8 @@ public class ConnectorsController : ControllerBase
         if (row is null)
             return BadRequest(new { error = "Invalid, used, or expired setup code" });
 
-        var name = string.IsNullOrWhiteSpace(req.Name) ? "edge-connector-1" : req.Name.Trim();
-        var version = string.IsNullOrWhiteSpace(req.Version) ? "1.0.0" : req.Version.Trim();
-        var apiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-        var connector = await _db.Connectors
-            .Where(c => c.StoreId == row.StoreId)
-            .OrderByDescending(c => c.LastHeartbeat)
-            .FirstOrDefaultAsync();
-        if (connector is null)
-        {
-            connector = new Connector { StoreId = row.StoreId };
-            _db.Connectors.Add(connector);
-        }
-        else
-        {
-            // A reinstall replaces this connector's configured sources without
-            // deleting historical cameras, clips, alerts, or review evidence.
-            await _db.Cameras
-                .Where(c => c.StoreId == row.StoreId && c.ConnectorId == connector.Id)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(c => c.ConnectorId, (Guid?)null));
-        }
-        connector.Name = name;
-        connector.Version = version;
-        connector.ApiKeyHash = BCrypt.Net.BCrypt.HashPassword(apiKey);
-        connector.Status = ConnectorStatus.Healthy;
-        connector.LastHeartbeat = DateTimeOffset.UtcNow;
-        connector.DegradedReason = null;
+        var (connector, apiKey) = await _pairing.PairAsync(
+            row.StoreId, req.Name, req.Version, HttpContext.RequestAborted);
         row.UsedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync();
 
@@ -129,7 +96,7 @@ public class ConnectorsController : ControllerBase
         {
             StoreId = req.StoreId,
             CodeHash = BCrypt.Net.BCrypt.HashPassword(code),
-            ExpiresAt = DateTimeOffset.UtcNow.AddHours(24),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
             CreatedBy = createdBy
         };
         _db.ConnectorSetupCodes.Add(row);
@@ -141,7 +108,7 @@ public class ConnectorsController : ControllerBase
     [HttpPost("heartbeat")]
     public async Task<IActionResult> Heartbeat(HeartbeatRequest req)
     {
-        var connector = await AuthConnectorAsync();
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
 
         connector.DiskFreePct = req.DiskFreePct;
@@ -169,11 +136,8 @@ public class ConnectorsController : ControllerBase
     [HttpGet("cameras")]
     public async Task<IActionResult> GetCameras()
     {
-        var connector = await AuthConnectorAsync();
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
-
-        var hasAssignedCameras = await _db.Cameras
-            .AnyAsync(c => c.StoreId == connector.StoreId && c.ConnectorId == connector.Id);
 
         // Self-heal MP4 cameras created by installer versions that predate
         // automatic demo-zone provisioning. Real RTSP/ONVIF cameras are untouched.
@@ -189,7 +153,7 @@ public class ConnectorsController : ControllerBase
 
         var cameras = await _db.Cameras
             .Where(c => c.StoreId == connector.StoreId &&
-                        (hasAssignedCameras ? c.ConnectorId == connector.Id : c.ConnectorId == null))
+                        c.ConnectorId == connector.Id)
             .OrderBy(c => c.Name)
             .Select(c => new
             {
@@ -210,7 +174,7 @@ public class ConnectorsController : ControllerBase
     [HttpPost("cameras")]
     public async Task<IActionResult> CreateCamera(ConnectorCreateCameraRequest req)
     {
-        var connector = await AuthConnectorAsync();
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "name is required" });
@@ -231,15 +195,15 @@ public class ConnectorsController : ControllerBase
     [HttpGet("installer")]
     public ActionResult<InstallerInfoResponse> InstallerInfo()
     {
-        if (!_installer.TryGetInfo(out _, out var size, out var sha))
-            return NotFound(new { error = "Installer not found. Build ONEVO-Connector-Setup and set ConnectorInstaller:Path." });
+        if (!_installer.TryGetPublishedInfo(out var size, out var sha, out var downloadUrl))
+            return NotFound(new { error = "Installer is not published." });
 
         return new InstallerInfoResponse(
             _installer.Version,
             _installer.FileName,
             size,
             sha,
-            "/api/connectors/installer/download");
+            downloadUrl);
     }
 
     /// <summary>Download the Windows setup EXE.</summary>
@@ -247,21 +211,12 @@ public class ConnectorsController : ControllerBase
     [HttpGet("installer/download")]
     public IActionResult DownloadInstaller()
     {
+        if (_installer.ExternalDownloadUrl is { } externalUrl)
+            return Redirect(externalUrl);
+
         if (!_installer.TryGetInfo(out var path, out _, out _))
             return NotFound(new { error = "Installer not found" });
 
         return PhysicalFile(path, "application/octet-stream", _installer.FileName);
-    }
-
-    private async Task<Connector?> AuthConnectorAsync()
-    {
-        if (!Request.Headers.TryGetValue("X-Connector-Id", out var idVal) ||
-            !Request.Headers.TryGetValue("X-Connector-Key", out var keyVal))
-            return null;
-        if (!Guid.TryParse(idVal, out var id)) return null;
-
-        var connector = await _db.Connectors.FindAsync(id);
-        if (connector is null) return null;
-        return BCrypt.Net.BCrypt.Verify(keyVal.ToString(), connector.ApiKeyHash) ? connector : null;
     }
 }

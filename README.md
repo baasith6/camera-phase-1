@@ -94,11 +94,12 @@ python -m venv .venv
 pip install -r requirements.txt
 pip install -r requirements-build.txt
 # Place ffmpeg.exe + WinSW-x64.exe in installer/tools/ first
-.\installer\build.ps1 -BackendUrl http://localhost:8081
+.\installer\build.ps1 -BackendUrl https://api.your-production-domain.example
 ```
 
-Output lands in `connector/dist/` (mounted into the backend by docker-compose). On the
-dashboard **Setup & Zones** page: **Install** downloads the EXE; **Generate setup code**
+Output lands in `connector/dist/`. Publish the versioned EXE plus `latest.json` to
+`installer-site/` / Vercel. The dashboard **Download Windows connector** action uses
+the configured Vercel URL; **Generate setup code**
 pairs the wizard to a store. After the connector heartbeats, status shows **Installed · Online**.
 
 > Note: the synthetic clip has no real people, so YOLO produces no retail cues and no
