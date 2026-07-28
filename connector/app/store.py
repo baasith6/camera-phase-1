@@ -23,7 +23,7 @@ class LocalStore:
     def __init__(self, state_dir: str):
         os.makedirs(state_dir, exist_ok=True)
         self.path = os.path.join(state_dir, "connector.sqlite")
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn: sqlite3.Connection | None = sqlite3.connect(self.path, check_same_thread=False)
         self._lock = threading.RLock()
         self._conn.execute("PRAGMA busy_timeout=5000;")
         self._conn.execute("PRAGMA journal_mode=WAL;")
@@ -127,3 +127,12 @@ class LocalStore:
         )
         self._conn.commit()
         return cur.rowcount
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
