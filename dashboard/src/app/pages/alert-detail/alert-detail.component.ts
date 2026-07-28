@@ -13,7 +13,7 @@ import { Alert } from '../../core/models';
     @if (alert) {
       <div class="header-row">
         <div class="title-wrap">
-          <button class="ghost back" routerLink="/alerts">← Alerts</button>
+          <button class="ghost back" routerLink="/app/alerts">← Alerts</button>
           <h2>{{ alert.alertType }}</h2>
         </div>
         <span class="badge" [class]="alert.riskLevel.toLowerCase()">{{ alert.riskLevel }} · {{ alert.riskScore }}</span>

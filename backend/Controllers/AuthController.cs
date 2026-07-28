@@ -29,6 +29,6 @@ public class AuthController : ControllerBase
             return Unauthorized(new { error = "Invalid credentials" });
 
         var token = _jwt.CreateToken(user);
-        return new LoginResponse(token, user.Email, user.Role.ToString());
+        return new LoginResponse(token, user.Email, user.Role.ToString(), user.StoreId);
     }
 }

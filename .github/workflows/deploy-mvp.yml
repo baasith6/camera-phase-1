@@ -1,0 +1,192 @@
+name: Deploy MVP (Azure)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mvp
+  cancel-in-progress: false
+
+env:
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-push:
+    name: Build and push to ACR
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      dashboard_image: ${{ steps.meta.outputs.dashboard_image }}
+      cloud_ai_image: ${{ steps.meta.outputs.cloud_ai_image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR login
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - id: meta
+        run: |
+          SERVER="${{ secrets.ACR_LOGIN_SERVER }}"
+          TAG="${{ github.sha }}"
+          echo "backend_image=${SERVER}/onevo-backend:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "dashboard_image=${SERVER}/onevo-dashboard:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "cloud_ai_image=${SERVER}/onevo-cloud-ai:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${SERVER}/onevo-backend:latest" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.backend_image }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/onevo-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push dashboard
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dashboard
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.dashboard_image }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/onevo-dashboard:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push cloud-ai
+        uses: docker/build-push-action@v6
+        with:
+          context: ./cloud-ai
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.cloud_ai_image }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/onevo-cloud-ai:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to GPU VM
+    needs: build-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync repository to VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+        run: |
+          rsync -avz --delete \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude dashboard/dist \
+            --exclude connector/dist/build \
+            -e ssh ./ "${VM_USER}@${VM_HOST}:/opt/onevo/"
+
+      - name: Write production .env and deploy
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          BACKEND_IMAGE: ${{ needs.build-push.outputs.backend_image }}
+          DASHBOARD_IMAGE: ${{ needs.build-push.outputs.dashboard_image }}
+          CLOUD_AI_IMAGE: ${{ needs.build-push.outputs.cloud_ai_image }}
+        run: |
+          ssh "${VM_USER}@${VM_HOST}" "mkdir -p /opt/onevo/connector/dist"
+          printf '%s\n' "${{ secrets.PRODUCTION_ENV }}" > /tmp/onevo.env
+          {
+            echo ""
+            echo "ONEVO_BACKEND_IMAGE=${BACKEND_IMAGE}"
+            echo "ONEVO_DASHBOARD_IMAGE=${DASHBOARD_IMAGE}"
+            echo "ONEVO_CLOUD_AI_IMAGE=${CLOUD_AI_IMAGE}"
+            echo "ACR_LOGIN_SERVER=${{ secrets.ACR_LOGIN_SERVER }}"
+            echo "ACR_USERNAME=${{ secrets.ACR_USERNAME }}"
+            echo "ACR_PASSWORD=${{ secrets.ACR_PASSWORD }}"
+          } >> /tmp/onevo.env
+          scp /tmp/onevo.env "${VM_USER}@${VM_HOST}:/opt/onevo/.env"
+          ssh "${VM_USER}@${VM_HOST}" "chmod +x /opt/onevo/infra/mvp/deploy.sh && /opt/onevo/infra/mvp/deploy.sh"
+
+      - name: Smoke test (public API)
+        env:
+          BACKEND_PUBLIC_URL: ${{ secrets.BACKEND_PUBLIC_URL }}
+        run: |
+          if [ -z "$BACKEND_PUBLIC_URL" ]; then
+            echo "Skipping smoke test — BACKEND_PUBLIC_URL not set."
+            exit 0
+          fi
+          curl -sf "${BACKEND_PUBLIC_URL}/api/health" | grep -q '"status":"ok"'
+
+  build-installer:
+    name: Build Windows installer
+    needs: deploy
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Download ffmpeg and WinSW
+        shell: pwsh
+        run: |
+          $tools = "connector/installer/tools"
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          $ffZip = "$env:RUNNER_TEMP/ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $ffZip
+          Expand-Archive -Path $ffZip -DestinationPath "$env:RUNNER_TEMP/ffmpeg" -Force
+          $ffmpeg = Get-ChildItem -Path "$env:RUNNER_TEMP/ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $ffmpeg.FullName "$tools/ffmpeg.exe"
+          Invoke-WebRequest -Uri "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe" -OutFile "$tools/WinSW-x64.exe"
+
+      - name: Build ONEVO-Connector-Setup EXE
+        shell: pwsh
+        run: |
+          pip install -r connector/requirements.txt
+          pip install -r connector/requirements-build.txt
+          $url = "${{ secrets.BACKEND_PUBLIC_URL }}"
+          if (-not $url) { throw "Set BACKEND_PUBLIC_URL secret (https://api.yourdomain.example)" }
+          ./scripts/build-installer.ps1 -BackendUrl $url
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ONEVO-Connector-Setup
+          path: connector/dist/ONEVO-Connector-Setup-*.exe
+          if-no-files-found: error
+
+      - name: Copy installer to VM
+        env:
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem connector/dist/ONEVO-Connector-Setup-*.exe | Select-Object -First 1
+          if (-not $exe) { throw "Installer EXE not found" }
+          $keyPath = "$env:RUNNER_TEMP/deploy_key"
+          Set-Content -Path $keyPath -Value $env:VM_SSH_KEY -NoNewline
+          scp -i $keyPath -o StrictHostKeyChecking=no $exe.FullName "${env:VM_USER}@${env:VM_HOST}:/opt/onevo/connector/dist/"
+          ssh -i $keyPath -o StrictHostKeyChecking=no "${env:VM_USER}@${env:VM_HOST}" "ls -la /opt/onevo/connector/dist/"

@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { API_BASE } from './api.config';
-import { Alert, Camera, Connector, InstallerInfo, RiskConfig, SetupCodeResponse, Store, Zone } from './models';
+import { Alert, Camera, Connector, InstallerInfo, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -10,11 +10,37 @@ export class ApiService {
 
   // Stores
   listStores(): Observable<Store[]> { return this.http.get<Store[]>(`${API_BASE}/api/stores`); }
-  createStore(name: string, organization?: string): Observable<Store> {
-    return this.http.post<Store>(`${API_BASE}/api/stores`, { name, organization });
+  listStoreOverview(): Observable<StoreOverview[]> {
+    return this.http.get<StoreOverview[]>(`${API_BASE}/api/stores/overview`);
   }
-  updateStore(id: string, body: { name?: string; alertVisibilityMode?: string }): Observable<Store> {
+  createStore(body: {
+    name: string;
+    organization?: string;
+    notificationEmail?: string;
+    alertVisibilityMode?: string;
+  }): Observable<Store> {
+    return this.http.post<Store>(`${API_BASE}/api/stores`, body);
+  }
+  updateStore(id: string, body: {
+    name?: string;
+    alertVisibilityMode?: string;
+    notificationEmail?: string;
+  }): Observable<Store> {
     return this.http.put<Store>(`${API_BASE}/api/stores/${id}`, body);
+  }
+
+  // Users (Admin)
+  listUsers(storeId?: string): Observable<UserAccount[]> {
+    const q = storeId ? `?storeId=${storeId}` : '';
+    return this.http.get<UserAccount[]>(`${API_BASE}/api/users${q}`);
+  }
+  createUser(body: {
+    email: string;
+    password: string;
+    role: string;
+    storeId?: string | null;
+  }): Observable<UserAccount> {
+    return this.http.post<UserAccount>(`${API_BASE}/api/users`, body);
   }
 
   // Cameras

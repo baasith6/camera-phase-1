@@ -74,6 +74,32 @@ begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ONEVOConnector');
 end;
 
+function ValidateRtspUrls(Value: String): Boolean;
+var
+  S, Part: String;
+  P: Integer;
+  Found: Boolean;
+begin
+  Result := False;
+  S := Trim(Value);
+  if S = '' then Exit;
+  Found := False;
+  repeat
+    P := Pos(';', S);
+    if P > 0 then begin
+      Part := Trim(Copy(S, 1, P - 1));
+      Delete(S, 1, P);
+    end else begin
+      Part := Trim(S);
+      S := '';
+    end;
+    if Part = '' then Continue;
+    Found := True;
+    if Pos('rtsp://', Lowercase(Part)) <> 1 then Exit;
+  until S = '';
+  Result := Found;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -140,8 +166,7 @@ begin
       Result := False;
     end;
   end;
-  if (CurPageID = RtspPage.ID) and
-     (Pos('rtsp://', Lowercase(Trim(RtspPage.Values[0]))) <> 1) then begin
+  if (CurPageID = RtspPage.ID) and not ValidateRtspUrls(RtspPage.Values[0]) then begin
     MsgBox('Enter one or more valid rtsp:// URLs separated by semicolons.', mbError, MB_OK);
     Result := False;
   end;

@@ -24,18 +24,20 @@ public class JwtTokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_opts.SigningKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
-            new Claim(ClaimTypes.Role, user.Role.ToString()),
-            new Claim("uid", user.Id.ToString())
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Email, user.Email),
+            new(ClaimTypes.Role, user.Role.ToString()),
+            new("uid", user.Id.ToString())
         };
+        if (user.StoreId is not null)
+            claims.Add(new Claim("storeId", user.StoreId.Value.ToString()));
 
         var token = new JwtSecurityToken(
             issuer: _opts.Issuer,
             audience: _opts.Audience,
-            claims: claims,
+            claims: claims.ToArray(),
             expires: DateTime.UtcNow.AddHours(_opts.ExpiryHours),
             signingCredentials: creds);
 

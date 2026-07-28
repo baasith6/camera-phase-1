@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .admin import start_admin
 from .backend_client import BackendClient
-from .capture import CapturePipeline
+from .capture import CapturePipeline, validate_rtsp_stream
 from .config import load_config
 from .paths import load_wizard_config
 from .runtime import RuntimeState
@@ -181,6 +181,15 @@ def _run_wizard_only(cfg, state: RuntimeState, store: LocalStore) -> int:
     return 0
 
 
+def _preflight_rtsp(rtsp_url: str, source_name: str, state: RuntimeState) -> None:
+    """Validate that an RTSP URL is reachable before registering the camera."""
+    state.log(f"Preflight: validating RTSP for {source_name} …")
+    ok, msg = validate_rtsp_stream(rtsp_url)
+    if not ok:
+        raise ValueError(f"{source_name}: {msg}")
+    state.log(f"Preflight: {source_name} — {msg}")
+
+
 def _provision_native_installer(cfg, wizard, client: BackendClient, store: LocalStore, state: RuntimeState) -> bool:
     """Claim native-installer setup and create its configured camera sources once."""
     if not wizard or wizard.setup_complete or not wizard.setup_code:
@@ -224,6 +233,9 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
                 profile = None if source.onvif_profile == "auto" else source.onvif_profile
                 rtsp_url = onvif.get_rtsp_url(profile)
                 device_info = onvif.get_device_info()
+
+            if rtsp_url:
+                _preflight_rtsp(rtsp_url, source.name, state)
 
             camera = client.create_camera({
                 "name": source.name,

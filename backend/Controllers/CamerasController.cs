@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Onevo.Api.Auth;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
@@ -18,8 +19,12 @@ public class CamerasController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? storeId)
     {
-        var q = _db.Cameras.AsQueryable();
-        if (storeId is not null) q = q.Where(c => c.StoreId == storeId);
+        var q = TenantAccess.ScopeCameras(_db.Cameras, User);
+        if (storeId is not null)
+        {
+            if (!TenantAccess.CanAccessStore(User, storeId.Value)) return Forbid();
+            q = q.Where(c => c.StoreId == storeId);
+        }
         return Ok(await q.OrderBy(c => c.Name).ToListAsync());
     }
 
@@ -27,13 +32,17 @@ public class CamerasController : ControllerBase
     public async Task<IActionResult> Get(Guid id)
     {
         var cam = await _db.Cameras.Include(c => c.Zones).FirstOrDefaultAsync(c => c.Id == id);
-        return cam is null ? NotFound() : Ok(cam);
+        if (cam is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
+        return Ok(cam);
     }
 
     [HttpPost]
     [Authorize(Roles = "Admin,Manager,Installer")]
     public async Task<IActionResult> Create(CreateCameraRequest req)
     {
+        if (!TenantAccess.CanAccessStore(User, req.StoreId))
+            return Forbid();
         if (!await _db.Stores.AnyAsync(s => s.Id == req.StoreId))
             return BadRequest(new { error = "Unknown store" });
 
@@ -56,6 +65,7 @@ public class CamerasController : ControllerBase
     {
         var cam = await _db.Cameras.FindAsync(id);
         if (cam is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
         if (req.Name is not null) cam.Name = req.Name;
         if (req.RtspUrl is not null) cam.RtspUrl = req.RtspUrl;
         if (req.OnvifHost is not null) cam.OnvifHost = req.OnvifHost;
@@ -97,6 +107,7 @@ public class CamerasController : ControllerBase
     {
         var cam = await _db.Cameras.FindAsync(id);
         if (cam is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
         return Ok(new
         {
             ok = true,

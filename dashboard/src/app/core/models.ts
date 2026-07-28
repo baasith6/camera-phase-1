@@ -1,10 +1,31 @@
-export interface LoginResponse { token: string; email: string; role: string; }
+export interface LoginResponse { token: string; email: string; role: string; storeId?: string | null; }
 
 export interface Store {
   id: string;
   name: string;
   organization: string;
   alertVisibilityMode: string;
+  notificationEmail?: string | null;
+}
+
+export interface StoreOverview {
+  id: string;
+  name: string;
+  alertVisibilityMode: string;
+  notificationEmail?: string | null;
+  cameraCount: number;
+  connectorCount: number;
+  onlineConnectorCount: number;
+  pendingAlertCount: number;
+  lastAlertAt?: string | null;
+}
+
+export interface UserAccount {
+  id: string;
+  email: string;
+  role: string;
+  storeId?: string | null;
+  createdAt: string;
 }
 
 export interface Camera {

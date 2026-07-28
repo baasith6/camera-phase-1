@@ -4,11 +4,29 @@ namespace Onevo.Api.Contracts;
 
 // ---- Auth ----
 public record LoginRequest(string Email, string Password);
-public record LoginResponse(string Token, string Email, string Role);
+public record LoginResponse(string Token, string Email, string Role, Guid? StoreId);
+
+// ---- Users ----
+public record CreateUserRequest(string Email, string Password, string Role, Guid? StoreId);
+public record UserResponse(Guid Id, string Email, string Role, Guid? StoreId, DateTimeOffset CreatedAt);
 
 // ---- Stores ----
-public record CreateStoreRequest(string Name, string? Organization);
-public record UpdateStoreRequest(string? Name, string? AlertVisibilityMode);
+public record CreateStoreRequest(
+    string Name,
+    string? Organization,
+    string? NotificationEmail,
+    string? AlertVisibilityMode);
+public record UpdateStoreRequest(string? Name, string? AlertVisibilityMode, string? NotificationEmail);
+public record StoreOverviewResponse(
+    Guid Id,
+    string Name,
+    string AlertVisibilityMode,
+    string? NotificationEmail,
+    int CameraCount,
+    int ConnectorCount,
+    int OnlineConnectorCount,
+    int PendingAlertCount,
+    DateTimeOffset? LastAlertAt);
 
 // ---- Cameras ----
 public record CreateCameraRequest(Guid StoreId, string Name, string RtspUrl, string? OnvifHost, int? OnvifPort);

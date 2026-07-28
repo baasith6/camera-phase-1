@@ -3,9 +3,10 @@
 The connector never runs the full retail-cue model. This is only a lightweight
 candidate selector (motion, optional person presence) to reduce useless uploads.
 
-RTSP reliability: on any read failure from an rtsp:// source the pipeline
-re-opens the stream with exponential back-off (2 s → 4 s → … up to
-cfg.rtsp_reconnect_max_sec) instead of crashing.  File sources loop as before.
+RTSP reliability:
+  - Initial open retries with exponential back-off before giving up.
+  - Mid-stream read failures re-open the stream with the same back-off.
+  File sources loop as before.
 """
 import os
 import subprocess
@@ -22,6 +23,54 @@ from .runtime import RuntimeState
 
 # OpenCV environment hints for lower-latency RTSP (set before any VideoCapture).
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+
+# Initial RTSP connect: up to 10 attempts (~2 min total with default max backoff).
+RTSP_INITIAL_MAX_ATTEMPTS = 10
+
+
+def _normalize_source(source: str) -> str:
+    if source.startswith("file://"):
+        return source[len("file://"):]
+    return source
+
+
+def _build_video_capture(source: str) -> cv2.VideoCapture:
+    """Open a video source with RTSP-friendly options when applicable."""
+    src = _normalize_source(source)
+    if source.lower().startswith("rtsp"):
+        cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        try:
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10_000)
+        except Exception:
+            pass
+        return cap
+    return cv2.VideoCapture(src)
+
+
+def validate_rtsp_stream(source: str, read_frame: bool = True) -> tuple[bool, str]:
+    """Preflight check: try to open an RTSP stream (and optionally read one frame).
+
+    Returns (ok, message). Safe to call from installer provisioning / wizard setup.
+    """
+    if not source.lower().startswith("rtsp"):
+        return True, "not an RTSP source"
+
+    cap = _build_video_capture(source)
+    try:
+        if not cap or not cap.isOpened():
+            return False, f"cannot open RTSP stream: {source}"
+        if read_frame:
+            ok, _frame = cap.read()
+            if not ok:
+                return False, f"RTSP stream opened but no frame received: {source}"
+        return True, "RTSP stream OK"
+    finally:
+        try:
+            cap.release()
+        except Exception:
+            pass
 
 
 class CapturePipeline:
@@ -44,23 +93,42 @@ class CapturePipeline:
 
     def _open(self) -> cv2.VideoCapture:
         """Open the configured video source with RTSP-friendly options."""
-        src = self.cfg.source
-        if src.startswith("file://"):
-            src = src[len("file://"):]
+        return _build_video_capture(self.cfg.source)
 
-        if self._is_rtsp:
-            # Force TCP transport — more reliable over WiFi / busy LANs.
-            cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)           # reduce latency
-            # Set a read timeout so a dead stream doesn't block indefinitely.
+    def _open_initial(self) -> cv2.VideoCapture | None:
+        """Open source; for RTSP, retry with exponential back-off before giving up."""
+        if not self._is_rtsp:
+            cap = self._open()
+            return cap if cap and cap.isOpened() else None
+
+        for attempt in range(RTSP_INITIAL_MAX_ATTEMPTS):
+            if self._stop:
+                return None
+            cap = self._open()
+            if cap and cap.isOpened():
+                if attempt > 0:
+                    self.state.log(
+                        f"RTSP initial connect OK on attempt {attempt + 1} [{self.cfg.source}]"
+                    )
+                return cap
             try:
-                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)
-                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10_000)
+                cap.release()
             except Exception:
-                pass  # older OpenCV versions don't have these properties
-            return cap
+                pass
 
-        return cv2.VideoCapture(src)
+            if attempt + 1 >= RTSP_INITIAL_MAX_ATTEMPTS:
+                break
+
+            backoff = min(2 ** attempt, self.cfg.rtsp_reconnect_max_sec)
+            self.state.log(
+                f"RTSP initial connect failed — retry {attempt + 2}/"
+                f"{RTSP_INITIAL_MAX_ATTEMPTS} in {backoff:.0f}s [{self.cfg.source}]"
+            )
+            deadline = time.time() + backoff
+            while not self._stop and time.time() < deadline:
+                time.sleep(0.5)
+
+        return None
 
     def _reconnect_rtsp(self, cap: cv2.VideoCapture, attempt: int) -> cv2.VideoCapture:
         """Release the old capture and re-open with exponential back-off."""
@@ -148,8 +216,8 @@ class CapturePipeline:
         For RTSP sources, read failures trigger automatic reconnect with exponential
         back-off.  The loop only exits when self._stop is set or a file source ends.
         """
-        cap = self._open()
-        if not cap or not cap.isOpened():
+        cap = self._open_initial()
+        if not cap:
             self.state.log(f"ERROR: cannot open source {self.cfg.source}")
             return
 

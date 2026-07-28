@@ -28,6 +28,9 @@ public static class DbSeeder
             );
             CREATE INDEX IF NOT EXISTS "IX_ConnectorSetupCodes_ExpiresAt"
                 ON "ConnectorSetupCodes" ("ExpiresAt");
+            ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "StoreId" uuid NULL;
+            CREATE INDEX IF NOT EXISTS "IX_Users_StoreId" ON "Users" ("StoreId");
+            ALTER TABLE "Stores" ADD COLUMN IF NOT EXISTS "NotificationEmail" text NULL;
             """
         );
 

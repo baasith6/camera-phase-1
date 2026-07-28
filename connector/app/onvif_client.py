@@ -109,6 +109,7 @@ class OnvifCamera:
         self.host: str = ""
         self.port: int = 80
         self.username: str = ""
+        self.password: str = ""
 
     # ------------------------------------------------------------------
     def connect(self, host: str, port: int = 80, username: str = "admin",
@@ -127,6 +128,7 @@ class OnvifCamera:
         self.host = host
         self.port = port
         self.username = username
+        self.password = password
         logger.info("[onvif] connecting to %s:%s as %s", host, port, username)
 
         self._cam = ONVIFCamera(host, port, username, password)
@@ -175,8 +177,7 @@ class OnvifCamera:
             resp = self._media.GetStreamUri(req)
             raw_url: str = resp.Uri
             # Inject credentials into the URL so OpenCV can auth.
-            return _inject_credentials(raw_url, self.username,
-                                       getattr(self._cam, "_password", ""))
+            return _inject_credentials(raw_url, self.username, self.password)
         except Exception as exc:
             raise RuntimeError(f"GetStreamUri failed: {exc}") from exc
 
@@ -188,8 +189,7 @@ class OnvifCamera:
             req = self._media.create_type("GetSnapshotUri")
             req.ProfileToken = token
             resp = self._media.GetSnapshotUri(req)
-            return _inject_credentials(resp.Uri, self.username,
-                                       getattr(self._cam, "_password", ""))
+            return _inject_credentials(resp.Uri, self.username, self.password)
         except Exception as exc:
             raise RuntimeError(f"GetSnapshotUri failed: {exc}") from exc
 

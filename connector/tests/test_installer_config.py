@@ -81,7 +81,9 @@ class NativeProvisioningTests(unittest.TestCase):
         state = SimpleNamespace(connector_id=None, log=lambda *_: None)
         runtime_cfg = SimpleNamespace(version="1.0.0")
 
-        with patch("app.paths.save_wizard_config"):
+        with patch("app.paths.save_wizard_config"), patch(
+            "app.main.validate_rtsp_stream", return_value=(True, "RTSP stream OK")
+        ):
             ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
         self.assertTrue(ok)
