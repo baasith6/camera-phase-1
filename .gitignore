@@ -32,6 +32,7 @@ cloud-ai/models/
 connector/dist/**
 !connector/dist/.gitkeep
 connector/installer/tools/*.exe
+installer-site/*.exe
 
 # IDE
 .vs/
