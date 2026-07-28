@@ -85,6 +85,14 @@ services:
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
       ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.0.0}
       ConnectorInstaller__Path: /app/connector-dist
+      Smtp__Enabled: ${SMTP_ENABLE:-false}
+      Smtp__Host: ${SMTP_HOST:-smtp.gmail.com}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__User: ${SMTP_USER:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__From: ${SMTP_FROM:-}
+      Smtp__DashboardBaseUrl: ${DASHBOARD_BASE_URL:-http://localhost:4200}
+      EnableSwagger: ${ENABLE_SWAGGER:-true}
       # CORS: allow both local dev and the Dockerized dashboard
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200,http://localhost:80}
     ports:

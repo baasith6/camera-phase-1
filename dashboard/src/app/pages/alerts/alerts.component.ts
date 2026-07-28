@@ -75,7 +75,7 @@ import { Alert, Store } from '../../core/models';
             <div class="col-risk"><span class="badge" [class]="a.riskLevel.toLowerCase()">{{ a.riskLevel }}</span></div>
             <div class="col-score"><span class="score-num">{{ a.riskScore }}</span></div>
             <div class="col-status"><span class="pill" [class]="pillClass(a.status)">{{ pillLabel(a.status) }}</span></div>
-            <div class="col-action"><button class="ghost review-btn" [routerLink]="['/alerts', a.id]">Review</button></div>
+            <div class="col-action"><button class="ghost review-btn" [routerLink]="['/app/alerts', a.id]">Review</button></div>
           </div>
         }
       </div>

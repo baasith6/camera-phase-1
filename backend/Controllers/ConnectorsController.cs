@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Onevo.Api.Auth;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
@@ -117,6 +118,8 @@ public class ConnectorsController : ControllerBase
     [HttpPost("setup-codes")]
     public async Task<ActionResult<CreateSetupCodeResponse>> CreateSetupCode(CreateSetupCodeRequest req)
     {
+        if (!TenantAccess.CanAccessStore(User, req.StoreId))
+            return Forbid();
         if (!await _db.Stores.AnyAsync(s => s.Id == req.StoreId))
             return BadRequest(new { error = "Unknown store" });
 
@@ -159,8 +162,12 @@ public class ConnectorsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? storeId)
     {
-        var q = _db.Connectors.AsQueryable();
-        if (storeId is not null) q = q.Where(c => c.StoreId == storeId);
+        var q = TenantAccess.ScopeConnectors(_db.Connectors, User);
+        if (storeId is not null)
+        {
+            if (!TenantAccess.CanAccessStore(User, storeId.Value)) return Forbid();
+            q = q.Where(c => c.StoreId == storeId);
+        }
         return Ok(await q.OrderBy(c => c.Name).ToListAsync());
     }
 

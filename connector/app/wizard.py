@@ -16,12 +16,22 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .backend_client import BackendClient
+from .capture import validate_rtsp_stream
 from .paths import CameraSource, WizardConfig, load_wizard_config, media_dir, save_wizard_config
 
 if TYPE_CHECKING:
     from .config import Config
     from .runtime import RuntimeState
     from .store import LocalStore
+
+
+def parse_rtsp_urls(rtsp_text: str) -> list[str]:
+    """Parse RTSP URLs from newline- or semicolon-separated text."""
+    return [
+        value.strip()
+        for value in rtsp_text.replace("\r", "\n").replace(";", "\n").splitlines()
+        if value.strip()
+    ]
 
 
 WIZARD_HTML = """<!DOCTYPE html>
@@ -267,10 +277,13 @@ def build_wizard_app(
             raise HTTPException(400, "Claim a setup code first")
 
         sources: list[CameraSource] = []
-        lines = [ln.strip() for ln in (rtsp_text or "").splitlines() if ln.strip()]
+        lines = parse_rtsp_urls(rtsp_text or "")
         for i, url in enumerate(lines, start=1):
             if not url.lower().startswith("rtsp://"):
                 raise HTTPException(400, f"Invalid RTSP URL (line {i}): must start with rtsp://")
+            ok, msg = validate_rtsp_stream(url)
+            if not ok:
+                raise HTTPException(400, f"RTSP preflight failed for '{url}': {msg}")
             sources.append(CameraSource(name=f"Camera {i}", rtsp_url=url, loop=False))
 
         if file is not None and file.filename:

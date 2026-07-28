@@ -1,0 +1,14 @@
+# Override local builds with images pushed to Azure Container Registry.
+# Set ONEVO_*_IMAGE before deploy (see infra/mvp/deploy.sh).
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.gpu.yml -f docker-compose.acr.yml pull
+#   docker compose ... up -d --no-build
+
+services:
+  backend:
+    image: ${ONEVO_BACKEND_IMAGE:?Set ONEVO_BACKEND_IMAGE}
+  dashboard:
+    image: ${ONEVO_DASHBOARD_IMAGE:?Set ONEVO_DASHBOARD_IMAGE}
+  cloud-ai:
+    image: ${ONEVO_CLOUD_AI_IMAGE:?Set ONEVO_CLOUD_AI_IMAGE}

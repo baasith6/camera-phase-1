@@ -1,0 +1,30 @@
+# Production-oriented overrides for ONEVO pilot deployment.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Before launch:
+# 1. Copy .env.example to .env and set strong secrets + SMTP + public URLs
+# 2. Set BACKEND_PUBLIC_URL to your HTTPS API URL
+# 3. Build installer: .\scripts\build-installer.ps1 -BackendUrl https://api.yourdomain.example
+# 4. Optionally add GPU: -f docker-compose.gpu.yml
+
+services:
+  backend:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      EnableSwagger: "false"
+      Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE:-ManagerOnly}
+      Smtp__Enabled: ${SMTP_ENABLE:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.yourdomain.example}
+
+  cloud-ai:
+    environment:
+      CLOUD_AI_DEVICE: ${CLOUD_AI_DEVICE:-cuda}
+
+  dashboard:
+    environment:
+      NGINX_API_PROXY: http://backend:8080
+
+  connector:
+    profiles:
+      - dev
+    # Edge connector runs on shop PCs — do not deploy in production cloud stack by default.

@@ -1,38 +1,52 @@
-import { Routes } from '@angular/router';
-import { authGuard } from './core/auth.guard';
-import { ShellComponent } from './shell/shell.component';
-import { LoginComponent } from './pages/login/login.component';
-
-export const routes: Routes = [
-  { path: 'login', component: LoginComponent },
-  {
-    path: '',
-    component: ShellComponent,
-    canActivate: [authGuard],
-    children: [
-      { path: '', redirectTo: 'alerts', pathMatch: 'full' },
-      {
-        path: 'alerts',
-        loadComponent: () => import('./pages/alerts/alerts.component').then((m) => m.AlertsComponent),
-      },
-      {
-        path: 'alerts/:id',
-        loadComponent: () =>
-          import('./pages/alert-detail/alert-detail.component').then((m) => m.AlertDetailComponent),
-      },
-      {
-        path: 'setup',
-        loadComponent: () => import('./pages/setup/setup.component').then((m) => m.SetupComponent),
-      },
-      {
-        path: 'tuning',
-        loadComponent: () => import('./pages/tuning/tuning.component').then((m) => m.TuningComponent),
-      },
-      {
-        path: 'health',
-        loadComponent: () => import('./pages/health/health.component').then((m) => m.HealthComponent),
-      },
-    ],
-  },
-  { path: '**', redirectTo: '' },
-];
+import { Routes } from '@angular/router';
+import { adminGuard } from './core/admin.guard';
+import { authGuard } from './core/auth.guard';
+import { ShellComponent } from './shell/shell.component';
+import { LoginComponent } from './pages/login/login.component';
+import { WelcomeComponent } from './pages/welcome/welcome.component';
+
+export const routes: Routes = [
+  { path: '', component: WelcomeComponent },
+  { path: 'login', component: LoginComponent },
+  {
+    path: 'app',
+    component: ShellComponent,
+    canActivate: [authGuard],
+    children: [
+      { path: '', redirectTo: 'get-started', pathMatch: 'full' },
+      {
+        path: 'get-started',
+        loadComponent: () =>
+          import('./pages/get-started/get-started.component').then((m) => m.GetStartedComponent),
+      },
+      {
+        path: 'admin',
+        canActivate: [adminGuard],
+        loadComponent: () =>
+          import('./pages/admin-stores/admin-stores.component').then((m) => m.AdminStoresComponent),
+      },
+      {
+        path: 'alerts',
+        loadComponent: () => import('./pages/alerts/alerts.component').then((m) => m.AlertsComponent),
+      },
+      {
+        path: 'alerts/:id',
+        loadComponent: () =>
+          import('./pages/alert-detail/alert-detail.component').then((m) => m.AlertDetailComponent),
+      },
+      {
+        path: 'setup',
+        loadComponent: () => import('./pages/setup/setup.component').then((m) => m.SetupComponent),
+      },
+      {
+        path: 'tuning',
+        loadComponent: () => import('./pages/tuning/tuning.component').then((m) => m.TuningComponent),
+      },
+      {
+        path: 'health',
+        loadComponent: () => import('./pages/health/health.component').then((m) => m.HealthComponent),
+      },
+    ],
+  },
+  { path: '**', redirectTo: '' },
+];
