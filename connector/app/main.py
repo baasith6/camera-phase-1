@@ -183,12 +183,28 @@ def _run_wizard_only(cfg, state: RuntimeState, store: LocalStore) -> int:
 
 def _provision_native_installer(cfg, wizard, client: BackendClient, store: LocalStore, state: RuntimeState) -> bool:
     """Claim native-installer setup and create its configured camera sources once."""
-    if not wizard or wizard.setup_complete or not wizard.setup_code:
+    if not wizard or wizard.setup_complete:
         return False
     try:
         from .provisioning import claim_setup, complete_setup, provision_sources
-        cid, store_id = claim_setup(client, store, wizard, cfg.version)
-        created = provision_sources(client, wizard.sources, state)
+        if wizard.setup_code:
+            cid, _ = claim_setup(client, store, wizard, cfg.version)
+        else:
+            cid = store.get_cred("connector_id")
+            api_key = store.get_cred("api_key")
+            if not (cid and api_key):
+                raise RuntimeError("pending setup has no connector credentials")
+            client.set_credentials(cid, api_key)
+        def checkpoint(sources):
+            wizard.sources = sources
+            wizard.setup_complete = False
+            from .paths import save_wizard_config
+            save_wizard_config(wizard)
+
+        created = provision_sources(
+            client, wizard.sources, state, checkpoint=checkpoint
+        )
+        client.finalize_setup([source.source_key for source in created])
         complete_setup(wizard, created)
         state.connector_id = cid
         state.log(f"Native installer provisioned {len(created)} camera source(s)")
@@ -207,21 +223,22 @@ def main() -> int:
     state.source = cfg.source
     state.camera_id = cfg.camera_id
 
-    instance_lock = InstanceLock(cfg.state_dir)
-    if not instance_lock.acquire():
-        state.log("ERROR: another ONEVO connector instance is already running")
-        return 3
-
     store = LocalStore(cfg.state_dir)
-    client = BackendClient(cfg.backend_url)
 
     if cfg.wizard_mode:
         return _run_wizard_only(cfg, state, store)
 
+    instance_lock = InstanceLock(cfg.state_dir)
+    if not instance_lock.acquire():
+        state.log("ERROR: connector state is locked or unavailable")
+        return 3
+
+    client = BackendClient(cfg.backend_url)
+
     # Native installer writes a pending setup config before starting the service.
     # It must take precedence over credentials left by an older installation.
     wizard = load_wizard_config()
-    if cfg.service_mode and wizard and not wizard.setup_complete and wizard.setup_code:
+    if cfg.service_mode and wizard and not wizard.setup_complete:
         if not _provision_native_installer(cfg, wizard, client, store, state):
             state.log("ERROR: installer activation failed; capture will not start with a fallback source")
             return 2

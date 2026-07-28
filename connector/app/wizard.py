@@ -284,12 +284,22 @@ def build_wizard_app(
         if not sources:
             raise HTTPException(400, "Add at least one RTSP URL or upload an MP4")
 
+        w = load_wizard_config() or WizardConfig()
+        w.sources = sources
+        w.setup_complete = False
+
+        def checkpoint(current_sources):
+            w.sources = current_sources
+            save_wizard_config(w)
+
         try:
-            created = provision_sources(client, sources, state)
+            created = provision_sources(
+                client, sources, state, checkpoint=checkpoint
+            )
+            client.finalize_setup([source.source_key for source in created])
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Failed to configure cameras: {exc}") from exc
 
-        w = load_wizard_config() or WizardConfig()
         complete_setup(w, created)
         state.log(f"Wizard: configured {len(created)} source(s)")
 

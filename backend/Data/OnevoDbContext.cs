@@ -46,6 +46,11 @@ public class OnevoDbContext : DbContext
             .HasForeignKey(c => c.ConnectorId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        b.Entity<Camera>()
+            .HasIndex(c => new { c.ConnectorId, c.SourceKey })
+            .IsUnique()
+            .HasFilter("\"SourceKey\" IS NOT NULL");
+
         b.Entity<CameraZone>()
             .HasOne(z => z.Camera)
             .WithMany(c => c.Zones)

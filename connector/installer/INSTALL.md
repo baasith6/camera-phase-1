@@ -58,7 +58,7 @@ connector/dist/ONEVO-Connector-Setup-1.1.0.exe
 4. Collects one or more RTSP URLs, ONVIF cameras, or a local MP4 test video
 5. Writes pending configuration under `%ProgramData%\ONEVO\Connector`
 6. Starts the service; it claims the selected store and provisions its cameras
-6. Service continuously monitors → motion clips → signed MinIO upload → backend
+7. Service continuously monitors → motion clips → signed MinIO upload → backend
 
 ## 4. Publish it
 

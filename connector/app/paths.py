@@ -53,6 +53,8 @@ class CameraSource:
     rtsp_url: str = ""
     source_file: str = ""  # local mp4 path
     camera_id: str = ""    # filled after backend create
+    source_key: str = ""   # stable backend idempotency identity
+    resolved_rtsp_url: str = ""  # ONVIF output; not part of physical identity
     loop: bool = False
     onvif_host: str = ""
     onvif_port: int = 80

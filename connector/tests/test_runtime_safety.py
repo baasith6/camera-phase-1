@@ -1,6 +1,8 @@
 import tempfile
 import threading
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from app.instance_lock import InstanceLock
 from app.store import LocalStore
@@ -16,6 +18,11 @@ class InstanceLockTests(unittest.TestCase):
             first.release()
             self.assertTrue(second.acquire())
             second.release()
+
+    def test_unwritable_lock_path_returns_false(self):
+        lock = InstanceLock("ignored")
+        with patch.object(Path, "mkdir", side_effect=PermissionError("denied")):
+            self.assertFalse(lock.acquire())
 
 
 class LocalStoreConcurrencyTests(unittest.TestCase):

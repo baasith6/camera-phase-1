@@ -1,7 +1,9 @@
 """Shared connector pairing and camera provisioning workflow."""
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import paths
 from .paths import CameraSource, WizardConfig
@@ -13,7 +15,9 @@ def validate_sources(sources: list[CameraSource]) -> None:
 
     for source in sources:
         modes = sum(bool(value) for value in (
-            source.rtsp_url, source.source_file, source.onvif_host
+            source.rtsp_url if not source.onvif_host else "",
+            source.source_file,
+            source.onvif_host,
         ))
         if modes != 1:
             raise ValueError(f"{source.name}: configure exactly one source type")
@@ -23,6 +27,27 @@ def validate_sources(sources: list[CameraSource]) -> None:
             raise ValueError(f"{source.name}: video file does not exist")
         if source.onvif_host and not (1 <= int(source.onvif_port) <= 65535):
             raise ValueError(f"{source.name}: invalid ONVIF port")
+
+
+def source_key_for(source: CameraSource) -> str:
+    """Return a credential-safe, stable physical-source identity."""
+    if source.onvif_host:
+        host = source.onvif_host.strip().strip("[]").lower()
+        identity = f"onvif|{host}|{int(source.onvif_port)}"
+    elif source.source_file:
+        path = Path(source.source_file)
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            digest.update(handle.read(1024 * 1024))
+        digest.update(str(path.stat().st_size).encode("ascii"))
+        identity = f"mp4|{digest.hexdigest()}"
+    else:
+        parsed = urlsplit(source.rtsp_url)
+        host = (parsed.hostname or "").lower()
+        port = parsed.port or 554
+        path = parsed.path or "/"
+        identity = f"rtsp|{host}|{port}|{path}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def claim_setup(client, store, wizard: WizardConfig, version: str) -> tuple[str, str]:
@@ -40,11 +65,16 @@ def claim_setup(client, store, wizard: WizardConfig, version: str) -> tuple[str,
     return cid, store_id
 
 
-def provision_sources(client, sources: list[CameraSource], state) -> list[CameraSource]:
+def provision_sources(client, sources: list[CameraSource], state, checkpoint=None) -> list[CameraSource]:
     validate_sources(sources)
     created: list[CameraSource] = []
 
     for source in sources:
+        source.source_key = source.source_key or source_key_for(source)
+        if source.camera_id:
+            created.append(source)
+            continue
+
         rtsp_url = source.rtsp_url
         device_info = None
         if source.onvif_host:
@@ -57,9 +87,11 @@ def provision_sources(client, sources: list[CameraSource], state) -> list[Camera
             )
             profile = None if source.onvif_profile == "auto" else source.onvif_profile
             rtsp_url = onvif.get_rtsp_url(profile)
+            source.resolved_rtsp_url = rtsp_url
             device_info = onvif.get_device_info()
 
         camera = client.create_camera({
+            "sourceKey": source.source_key,
             "name": source.name,
             "rtspUrl": rtsp_url or f"file://{source.source_file}",
             "onvifHost": source.onvif_host or None,
@@ -67,7 +99,8 @@ def provision_sources(client, sources: list[CameraSource], state) -> list[Camera
             "useDemoZones": bool(source.source_file),
         })
         source.camera_id = camera.get("id") or camera.get("Id") or ""
-        source.rtsp_url = rtsp_url
+        if checkpoint:
+            checkpoint(sources)
 
         if device_info and source.camera_id:
             try:

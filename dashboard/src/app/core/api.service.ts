@@ -74,6 +74,11 @@ export class ApiService {
     return this.http.get<InstallerInfo>(`${API_BASE}/api/connectors/installer`);
   }
 
+  downloadInstaller(path: string): Observable<Blob> {
+    const url = path.startsWith('/') ? `${API_BASE}${path}` : path;
+    return this.http.get(url, { responseType: 'blob' });
+  }
+
   createSetupCode(storeId: string): Observable<SetupCodeResponse> {
     return this.http.post<SetupCodeResponse>(`${API_BASE}/api/connectors/setup-codes`, { storeId });
   }

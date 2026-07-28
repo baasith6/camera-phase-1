@@ -36,7 +36,12 @@ public class ClipsController : ControllerBase
     {
         var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
-        if (!await _connectorAuth.OwnsCameraAsync(connector, req.CameraId, HttpContext.RequestAborted))
+        var camera = await _db.Cameras
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == req.CameraId, HttpContext.RequestAborted);
+        if (camera is null)
+            return BadRequest(new { error = "Unknown camera" });
+        if (camera.StoreId != connector.StoreId || camera.ConnectorId != connector.Id)
             return Forbid();
 
         var clip = new Clip

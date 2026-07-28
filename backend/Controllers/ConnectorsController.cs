@@ -50,7 +50,8 @@ public class ConnectorsController : ControllerBase
             return BadRequest(new { error = "Unknown store" });
 
         var (connector, apiKey) = await _pairing.PairAsync(
-            req.StoreId, req.Name, req.Version, HttpContext.RequestAborted);
+            req.StoreId, req.Name, req.Version,
+            ct: HttpContext.RequestAborted);
 
         return new RegisterConnectorResponse(connector.Id, apiKey);
     }
@@ -71,10 +72,25 @@ public class ConnectorsController : ControllerBase
         if (row is null)
             return BadRequest(new { error = "Invalid, used, or expired setup code" });
 
+        await using var transaction = await _db.Database.BeginTransactionAsync(
+            HttpContext.RequestAborted);
+
+        // Consume the code before pairing. The conditional update is atomic, so a
+        // concurrent claimant can never receive a second connector key.
+        var consumed = await _db.ConnectorSetupCodes
+            .Where(c => c.Id == row.Id &&
+                        c.UsedAt == null &&
+                        c.ExpiresAt >= DateTimeOffset.UtcNow)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(c => c.UsedAt, DateTimeOffset.UtcNow),
+                HttpContext.RequestAborted);
+        if (consumed != 1)
+            return BadRequest(new { error = "Invalid, used, or expired setup code" });
+
         var (connector, apiKey) = await _pairing.PairAsync(
-            row.StoreId, req.Name, req.Version, HttpContext.RequestAborted);
-        row.UsedAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync();
+            row.StoreId, req.Name, req.Version,
+            ct: HttpContext.RequestAborted);
+        await transaction.CommitAsync(HttpContext.RequestAborted);
 
         return new ClaimSetupCodeResponse(connector.Id, apiKey, row.StoreId);
     }
@@ -181,6 +197,7 @@ public class ConnectorsController : ControllerBase
 
         var cam = await _cameraProvisioning.ProvisionConnectorCameraAsync(
             connector,
+            req.SourceKey,
             req.Name,
             req.RtspUrl,
             req.OnvifHost,
@@ -188,6 +205,48 @@ public class ConnectorsController : ControllerBase
             req.UseDemoZones,
             HttpContext.RequestAborted);
         return Ok(cam);
+    }
+
+    /// <summary>
+    /// Atomically makes the successfully provisioned source set authoritative.
+    /// Safe to retry: applying the same source-key set produces the same result.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("finalize-setup")]
+    public async Task<IActionResult> FinalizeSetup(FinalizeConnectorSetupRequest req)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(
+            Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+
+        var sourceKeys = (req.SourceKeys ?? [])
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Select(k => k.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (sourceKeys.Count == 0)
+            return BadRequest(new { error = "At least one sourceKey is required" });
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(
+            HttpContext.RequestAborted);
+
+        var provisionedCount = await _db.Cameras
+            .CountAsync(c => c.ConnectorId == connector.Id &&
+                             c.SourceKey != null &&
+                             sourceKeys.Contains(c.SourceKey),
+                        HttpContext.RequestAborted);
+        if (provisionedCount != sourceKeys.Count)
+            return BadRequest(new { error = "One or more sources were not provisioned" });
+
+        var detached = await _db.Cameras
+            .Where(c => c.ConnectorId == connector.Id &&
+                        (c.SourceKey == null || !sourceKeys.Contains(c.SourceKey)))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(c => c.ConnectorId, (Guid?)null),
+                HttpContext.RequestAborted);
+
+        await transaction.CommitAsync(HttpContext.RequestAborted);
+        return Ok(new { ok = true, activeCameraCount = sourceKeys.Count, detached });
     }
 
     /// <summary>Installer metadata (version / size / sha256). File must exist on disk.</summary>

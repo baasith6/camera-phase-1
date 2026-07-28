@@ -13,9 +13,10 @@ class InstanceLock:
         self._file: BinaryIO | None = None
 
     def acquire(self) -> bool:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self.path.open("a+b")
+        handle: BinaryIO | None = None
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            handle = self.path.open("a+b")
             handle.seek(0)
             if os.name == "nt":
                 import msvcrt
@@ -29,7 +30,8 @@ class InstanceLock:
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (OSError, IOError):
-            handle.close()
+            if handle is not None:
+                handle.close()
             return False
 
         self._file = handle

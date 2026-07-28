@@ -28,6 +28,7 @@ public class Camera
     public Store? Store { get; set; }
     public Guid? ConnectorId { get; set; }
     public Connector? Connector { get; set; }
+    public string? SourceKey { get; set; }
     public string Name { get; set; } = string.Empty;
     public string RtspUrl { get; set; } = string.Empty;
     public CameraStatus Status { get; set; } = CameraStatus.Pending;

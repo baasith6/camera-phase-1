@@ -1,4 +1,7 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using NpgsqlTypes;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
 
@@ -17,6 +20,7 @@ public class CameraProvisioningService
 
     public async Task<Camera> ProvisionConnectorCameraAsync(
         Connector connector,
+        string sourceKey,
         string name,
         string rtspUrl,
         string? onvifHost,
@@ -24,38 +28,68 @@ public class CameraProvisioningService
         bool useDemoZones,
         CancellationToken ct = default)
     {
+        var normalizedSourceKey = sourceKey?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(normalizedSourceKey))
+            throw new ArgumentException("sourceKey is required", nameof(sourceKey));
+        if (normalizedSourceKey.Length > 128)
+            throw new ArgumentException("sourceKey is too long", nameof(sourceKey));
+
         var normalizedName = name.Trim();
         var normalizedUrl = rtspUrl?.Trim() ?? "";
 
-        // Installer retries must be safe: reuse the connector camera for the same
-        // source instead of creating duplicate cameras and split alert histories.
+        // PostgreSQL performs identity reconciliation atomically. The partial
+        // unique index closes the concurrent check/insert race, while ON CONFLICT
+        // makes network retries update and return the same camera.
+        var connection = (NpgsqlConnection)_db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(ct);
+
+        Guid cameraId;
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                INSERT INTO "Cameras"
+                    ("Id", "StoreId", "ConnectorId", "SourceKey", "Name",
+                     "RtspUrl", "Status", "CreatedAt", "OnvifHost", "OnvifPort")
+                VALUES
+                    (@id, @storeId, @connectorId, @sourceKey, @name,
+                     @rtspUrl, @status, @createdAt, @onvifHost, @onvifPort)
+                ON CONFLICT ("ConnectorId", "SourceKey")
+                    WHERE "SourceKey" IS NOT NULL
+                DO UPDATE SET
+                    "Name" = EXCLUDED."Name",
+                    "RtspUrl" = EXCLUDED."RtspUrl",
+                    "OnvifHost" = EXCLUDED."OnvifHost",
+                    "OnvifPort" = EXCLUDED."OnvifPort"
+                RETURNING "Id";
+                """;
+            command.Parameters.AddWithValue("id", Guid.NewGuid());
+            command.Parameters.AddWithValue("storeId", connector.StoreId);
+            command.Parameters.AddWithValue("connectorId", connector.Id);
+            command.Parameters.AddWithValue("sourceKey", normalizedSourceKey);
+            command.Parameters.AddWithValue("name", normalizedName);
+            command.Parameters.AddWithValue("rtspUrl", normalizedUrl);
+            command.Parameters.AddWithValue("status", CameraStatus.Pending.ToString());
+            command.Parameters.AddWithValue("createdAt", DateTimeOffset.UtcNow);
+            command.Parameters.AddWithValue(
+                "onvifHost", NpgsqlDbType.Text, (object?)onvifHost ?? DBNull.Value);
+            command.Parameters.AddWithValue(
+                "onvifPort", NpgsqlDbType.Integer, (object?)onvifPort ?? DBNull.Value);
+            cameraId = (Guid)(await command.ExecuteScalarAsync(ct)
+                ?? throw new InvalidOperationException("Camera upsert returned no id"));
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
+        }
+
         var camera = await _db.Cameras
             .Include(c => c.Zones)
-            .FirstOrDefaultAsync(c =>
-                c.StoreId == connector.StoreId &&
-                c.ConnectorId == connector.Id &&
-                c.Name == normalizedName &&
-                c.RtspUrl == normalizedUrl, ct);
-
-        if (camera is null)
-        {
-            camera = new Camera
-            {
-                StoreId = connector.StoreId,
-                ConnectorId = connector.Id,
-                Name = normalizedName,
-                RtspUrl = normalizedUrl,
-                OnvifHost = onvifHost,
-                OnvifPort = onvifPort,
-                Status = CameraStatus.Pending
-            };
-            _db.Cameras.Add(camera);
-        }
-        else
-        {
-            camera.OnvifHost = onvifHost;
-            camera.OnvifPort = onvifPort;
-        }
+            .SingleAsync(c => c.Id == cameraId, ct);
 
         if (useDemoZones)
             AddMissingDemoZones(camera);

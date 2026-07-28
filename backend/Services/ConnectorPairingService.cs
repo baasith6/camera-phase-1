@@ -23,6 +23,7 @@ public sealed class ConnectorPairingService
     {
         var connector = await _db.Connectors
             .SingleOrDefaultAsync(c => c.StoreId == storeId, ct);
+        var isNewConnector = connector is null;
 
         if (connector is null)
         {
@@ -40,12 +41,17 @@ public sealed class ConnectorPairingService
 
         await _db.SaveChangesAsync(ct);
 
-        // With one connector per store, every unassigned store camera belongs to it.
-        await _db.Cameras
-            .Where(c => c.StoreId == storeId && c.ConnectorId == null)
-            .ExecuteUpdateAsync(
-                setters => setters.SetProperty(c => c.ConnectorId, connector.Id),
-                ct);
+        // Only a genuinely new connector adopts pre-existing dashboard cameras.
+        // Re-pairing must not resurrect stale cameras detached by an earlier
+        // finalize operation.
+        if (isNewConnector)
+        {
+            await _db.Cameras
+                .Where(c => c.StoreId == storeId && c.ConnectorId == null)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(c => c.ConnectorId, connector.Id),
+                    ct);
+        }
 
         return (connector, apiKey);
     }

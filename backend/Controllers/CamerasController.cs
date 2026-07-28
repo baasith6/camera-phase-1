@@ -43,9 +43,15 @@ public class CamerasController : ControllerBase
         if (!await _db.Stores.AnyAsync(s => s.Id == req.StoreId))
             return BadRequest(new { error = "Unknown store" });
 
+        var connectorId = await _db.Connectors
+            .Where(c => c.StoreId == req.StoreId)
+            .Select(c => (Guid?)c.Id)
+            .SingleOrDefaultAsync();
+
         var cam = new Camera
         {
             StoreId = req.StoreId,
+            ConnectorId = connectorId,
             Name = req.Name,
             RtspUrl = req.RtspUrl,
             OnvifHost = req.OnvifHost,
@@ -81,11 +87,10 @@ public class CamerasController : ControllerBase
     {
         var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
-        if (!await _connectorAuth.OwnsCameraAsync(connector, id, HttpContext.RequestAborted))
-            return Forbid();
-
         var cam = await _db.Cameras.FindAsync(id);
         if (cam is null) return NotFound();
+        if (cam.StoreId != connector.StoreId || cam.ConnectorId != connector.Id)
+            return Forbid();
 
         if (req.Manufacturer is not null) cam.CameraManufacturer = req.Manufacturer;
         if (req.Model is not null) cam.CameraModel = req.Model;

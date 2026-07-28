@@ -15,7 +15,11 @@ public static class DbSeeder
         await db.Database.ExecuteSqlRawAsync(
             """
             ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ConnectorId" uuid NULL;
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "SourceKey" text NULL;
             CREATE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId" ON "Cameras" ("ConnectorId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId_SourceKey"
+                ON "Cameras" ("ConnectorId", "SourceKey")
+                WHERE "SourceKey" IS NOT NULL;
             CREATE TABLE IF NOT EXISTS "ConnectorSetupCodes" (
                 "Id" uuid NOT NULL,
                 "StoreId" uuid NOT NULL,
@@ -78,10 +82,43 @@ public static class DbSeeder
             USING ranked
             WHERE connector."Id" = ranked."Id" AND ranked.row_number > 1;
 
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_Connectors_StoreId"
+            -- Ensure a legacy non-unique FK index with this name cannot silently
+            -- defeat the one-connector-per-store invariant.
+            DROP INDEX IF EXISTS "IX_Connectors_StoreId";
+            CREATE UNIQUE INDEX "IX_Connectors_StoreId"
                 ON "Connectors" ("StoreId");
 
-            -- Remove invalid legacy camera assignments before adding the FK.
+            -- Detach dependants from orphan connectors, then remove those
+            -- connectors before enforcing Connectors(StoreId) -> Stores(Id).
+            UPDATE "Cameras" AS camera
+            SET "ConnectorId" = NULL
+            WHERE camera."ConnectorId" IN (
+                SELECT connector."Id"
+                FROM "Connectors" connector
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM "Stores" store
+                    WHERE store."Id" = connector."StoreId"
+                )
+            );
+
+            UPDATE "Clips" AS clip
+            SET "ConnectorId" = NULL
+            WHERE clip."ConnectorId" IN (
+                SELECT connector."Id"
+                FROM "Connectors" connector
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM "Stores" store
+                    WHERE store."Id" = connector."StoreId"
+                )
+            );
+
+            DELETE FROM "Connectors" AS connector
+            WHERE NOT EXISTS (
+                SELECT 1 FROM "Stores" store
+                WHERE store."Id" = connector."StoreId"
+            );
+
+            -- Remove any other invalid legacy camera assignments before adding the FK.
             UPDATE "Cameras" AS camera
             SET "ConnectorId" = NULL
             WHERE camera."ConnectorId" IS NOT NULL

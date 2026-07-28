@@ -56,6 +56,17 @@ class BackendClient:
         r.raise_for_status()
         return r.json()
 
+    def finalize_setup(self, source_keys: list[str]) -> dict:
+        """Make a fully provisioned source set authoritative (safe to retry)."""
+        r = requests.post(
+            f"{self.base}/api/connectors/finalize-setup",
+            headers=self._auth_headers(),
+            json={"sourceKeys": source_keys},
+            timeout=20,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def set_credentials(self, connector_id: str, api_key: str) -> None:
         self.connector_id = connector_id
         self.api_key = api_key

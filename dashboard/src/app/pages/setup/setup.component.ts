@@ -251,10 +251,6 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             💡 <strong>Tip:</strong> Click 2 opposite corners to draw a Box, or keep clicking to add points. Drag yellow dots to adjust points anytime!
           </div>
         </div>
-        <canvas #snapshotCanvas width="480" height="270"
-                (click)="onCanvasClick($event)"
-                [style.background-image]="snapshotUrl"
-                style="background-size: cover; background-position: center;"></canvas>
       </div>
     }
   `,
@@ -365,10 +361,6 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.cameraId ? `url(http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId})` : 'none';
   }
 
-  get snapshotUrl(): string {
-    return this.effectiveSnapshotUrl;
-  }
-
   get storeConnectorOnline(): boolean {
     const now = Date.now();
     return this.storeConnectors.some((c) => {
@@ -415,7 +407,24 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   downloadInstaller(): void {
     if (!this.installerInfo?.downloadPath) return;
-    window.location.assign(this.installerInfo.downloadPath);
+    const path = this.installerInfo.downloadPath;
+    if (/^https?:\/\//i.test(path)) {
+      window.location.assign(path);
+      return;
+    }
+    this.api.downloadInstaller(path).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = this.installerInfo?.fileName || 'ONEVO-Connector-Setup.exe';
+        anchor.click();
+        URL.revokeObjectURL(url);
+      },
+      error: (err) => {
+        this.installerError = err?.error?.error || 'Installer download failed';
+      },
+    });
   }
 
   generateSetupCode(): void {
@@ -519,11 +528,6 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     this.rectStart = null;
     this.rectCurrent = null;
     this.redraw();
-  }
-
-  onCanvasClick(ev: MouseEvent): void {
-    ev.stopPropagation();
-    this.onCanvasMouseDown(ev);
   }
 
   onCanvasMouseDown(ev: MouseEvent): void {
