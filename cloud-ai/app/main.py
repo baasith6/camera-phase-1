@@ -16,9 +16,9 @@ import redis
 
 from .backend_client import BackendClient
 from .config import Config
-from .reid import ReIDExtractor
 from .detector import DetectorBackend, build_detector
 from .events import extract_events
+from .reid import ReIDExtractor
 from .s3 import ClipStore
 from .zones import parse_zones
 

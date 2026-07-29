@@ -17,6 +17,8 @@ class Config:
     source: str            # file path or rtsp url (auto-filled from ONVIF if onvif_host set)
     loop: bool             # loop a file source (useful for testing)
     admin_port: int
+    admin_token: str
+    admin_bind_host: str
     state_dir: str
     camera_id: str
 
@@ -123,6 +125,12 @@ def load_config(argv: list[str] | None = None) -> Config:
         source=source,
         loop=loop,
         admin_port=args.admin_port,
+        admin_token=os.getenv("CONNECTOR_ADMIN_TOKEN", "").strip(),
+        admin_bind_host=(
+            "0.0.0.0"
+            if os.getenv("CONNECTOR_ADMIN_BIND_LAN", "false").lower() == "true"
+            else os.getenv("CONNECTOR_ADMIN_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        ),
         state_dir=str(default_state_dir()),
         camera_id=camera_id,
         fps=float(os.getenv("CONNECTOR_FPS", "10")),

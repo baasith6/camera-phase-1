@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Onevo.Api.Auth;
 using Onevo.Api.Data;
 
 namespace Onevo.Api.Controllers;
@@ -33,10 +34,6 @@ public class ServiceController : ControllerBase
     }
 
     private bool IsService()
-    {
-        var serviceKey = _cfg["Seed:ConnectorBootstrapKey"];
-        return Request.Headers.TryGetValue("X-Service-Key", out var provided)
-               && !string.IsNullOrEmpty(serviceKey)
-               && provided.ToString() == serviceKey;
-    }
+        => Request.Headers.TryGetValue("X-Service-Key", out var provided)
+           && ServiceAuth.ValidateCloudAiKey(_cfg, provided.ToString());
 }

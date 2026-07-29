@@ -282,9 +282,6 @@ def attach_wizard_routes(
             raise HTTPException(400, str(exc)) from exc
         state.connector_id = cid
         state.log(f"Wizard: claimed setup code → connector {cid} store {store_id}")
-        store.set_cred("connector_id", cid)
-        store.set_cred("api_key", key)
-        store.set_cred("store_id", store_id)
         w = load_wizard_config() or WizardConfig()
         w.store_id = store_id
         w.connector_name = name
@@ -346,28 +343,9 @@ def attach_wizard_routes(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Failed to configure cameras: {exc}") from exc
 
-        complete_setup(w, created)
-        created = []
-        for src in sources:
-            body = {
-                "name": src.name,
-                "rtspUrl": src.rtsp_url or f"file://{src.source_file}",
-                "useDemoZones": bool(src.source_file),
-            }
-            try:
-                cam = client.create_camera(body)
-                src.camera_id = cam.get("id") or cam.get("Id") or ""
-                created.append(src)
-            except Exception as exc:  # noqa: BLE001
-                raise HTTPException(502, f"Failed to create camera '{src.name}': {exc}") from exc
-
         w = load_wizard_config() or WizardConfig()
-        w.sources = created
-        w.use_backend_cameras = True
-        w.setup_complete = True
-        w.setup_code = ""
         w.activation_error = ""
-        save_wizard_config(w)
+        complete_setup(w, created)
         state.log(f"Wizard: configured {len(created)} source(s)")
 
         if on_configured:

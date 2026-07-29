@@ -160,7 +160,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
               {{ testingStream ? 'Testing…' : '🔌 Test Stream' }}
             </button>
             @if (selectedCamera.onvifHost) {
-              <a class="btn-link" [href]="'http://' + connectorAdminHost + ':8099/onvif/snapshot'" target="_blank">
+              <a class="btn-link" [href]="liveSnapshotUrl" target="_blank">
                 📷 Live Snapshot
               </a>
             }
@@ -350,6 +350,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   testingStream = false;
   streamTestResult: { ok: boolean; message: string } | null = null;
   connectorAdminHost = 'localhost';
+  connectorAdminPort = 8099;
 
   generatingCode = false;
   setupCodeError = '';
@@ -367,7 +368,15 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   ) {}
 
   get effectiveSnapshotUrl(): string {
-    return this.cameraId ? `url(http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId})` : 'none';
+    return this.cameraId
+      ? `url(http://${this.connectorAdminHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId})`
+      : 'none';
+  }
+
+  get liveSnapshotUrl(): string {
+    return this.cameraId
+      ? `http://${this.connectorAdminHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId}`
+      : '';
   }
 
   get storeConnectorOnline(): boolean {
@@ -476,7 +485,14 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   refreshConnectors(): void {
     if (!this.storeId) { this.storeConnectors = []; return; }
     this.api.listConnectors(this.storeId).subscribe({
-      next: (c) => (this.storeConnectors = c),
+      next: (c) => {
+        this.storeConnectors = c;
+        const online = c.find((x) => x.adminHost && x.lastHeartbeat);
+        if (online?.adminHost) {
+          this.connectorAdminHost = online.adminHost;
+          this.connectorAdminPort = online.adminPort || 8099;
+        }
+      },
       error: () => (this.storeConnectors = []),
     });
   }

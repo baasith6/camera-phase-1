@@ -124,7 +124,10 @@ class NativeProvisioningTests(unittest.TestCase):
             client.create_camera = lambda body: created.append(body) or {"id": "camera-id"}
             client.finalize_setup = lambda keys: finalized.append(keys) or {"ok": True}
             stored = {}
-            store = SimpleNamespace(set_cred=lambda key, value: stored.__setitem__(key, value))
+            store = SimpleNamespace(
+                set_cred=lambda key, value: stored.__setitem__(key, value),
+                get_cred=lambda key: stored.get(key),
+            )
             state = SimpleNamespace(connector_id=None, log=lambda *_: None)
             runtime_cfg = SimpleNamespace(version="1.0.0")
 
@@ -153,7 +156,11 @@ class NativeProvisioningTests(unittest.TestCase):
         finalized = []
         client.create_camera = lambda body: created.append(body) or {"id": "camera-id"}
         client.finalize_setup = lambda keys: finalized.append(keys) or {"ok": True}
-        store = SimpleNamespace(set_cred=lambda *_: None)
+        stored = {}
+        store = SimpleNamespace(
+            set_cred=lambda key, value: stored.__setitem__(key, value),
+            get_cred=lambda key: stored.get(key),
+        )
         state = SimpleNamespace(connector_id=None, log=lambda *_: None)
         runtime_cfg = SimpleNamespace(version="1.0.0")
 

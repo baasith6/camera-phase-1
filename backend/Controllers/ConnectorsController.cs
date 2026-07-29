@@ -44,8 +44,8 @@ public class ConnectorsController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<RegisterConnectorResponse>> Register(RegisterConnectorRequest req)
     {
-        var bootstrap = _cfg["Seed:ConnectorBootstrapKey"];
-        if (string.IsNullOrEmpty(bootstrap) || req.BootstrapKey != bootstrap)
+        var bootstrap = ServiceAuth.ConnectorBootstrapKey(_cfg);
+        if (!ServiceAuth.ValidateBootstrapKey(_cfg, req.BootstrapKey))
             return Unauthorized(new { error = "Invalid bootstrap key" });
         if (!await _db.Stores.AnyAsync(s => s.Id == req.StoreId))
             return BadRequest(new { error = "Unknown store" });
@@ -135,6 +135,10 @@ public class ConnectorsController : ControllerBase
         connector.DegradedReason = req.DegradedReason;
         connector.Version = req.Version;
         connector.LastHeartbeat = DateTimeOffset.UtcNow;
+        if (!string.IsNullOrWhiteSpace(req.AdminHost))
+            connector.AdminHost = req.AdminHost.Trim();
+        if (req.AdminPort is > 0 and <= 65535)
+            connector.AdminPort = req.AdminPort;
         connector.Status = req.DegradedReason is null ? ConnectorStatus.Healthy : ConnectorStatus.Degraded;
         await _db.SaveChangesAsync();
         return Ok(new { ok = true });

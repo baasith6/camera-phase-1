@@ -51,6 +51,18 @@ def build_app(
 ) -> FastAPI:
     app = FastAPI(title="ONEVO Connector Admin")
 
+    admin_token = (cfg.admin_token or "").strip()
+
+    @app.middleware("http")
+    async def admin_auth_middleware(request, call_next):
+        if request.url.path in ("/health",):
+            return await call_next(request)
+        if admin_token:
+            provided = request.headers.get("X-Admin-Token") or request.query_params.get("admin_token")
+            if provided != admin_token:
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
     @app.get("/status")
     def status():
         return state.snapshot()
@@ -859,9 +871,20 @@ def start_admin(
     enable_setup_wizard: bool = False,
     on_wizard_configured: Callable | None = None,
 ) -> threading.Thread:
+    from .backend_client import BackendClient
+
+    client: BackendClient | None = None
+    if store is not None:
+        client = BackendClient(cfg.backend_url)
+        connector_id = store.get_cred("connector_id")
+        api_key = store.get_cred("api_key")
+        if connector_id and api_key:
+            client.set_credentials(connector_id, api_key)
+
     app = build_app(
         state,
         cfg,
+        client=client,
         store=store,
         enable_setup_wizard=enable_setup_wizard,
         on_wizard_configured=on_wizard_configured,
@@ -877,7 +900,7 @@ def start_admin(
             route_prefix=WIZARD_ROUTE_PREFIX,
             on_configured=on_wizard_configured,
         )
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+    config = uvicorn.Config(app, host=cfg.admin_bind_host, port=port, log_level="warning")
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()

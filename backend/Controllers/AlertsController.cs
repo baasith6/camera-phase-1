@@ -141,6 +141,13 @@ public class AlertsController : ControllerBase
         {
             await foreach (var ev in reader.ReadAllAsync(ct))
             {
+                if (!TenantAccess.CanAccessStore(User, ev.StoreId))
+                    continue;
+
+                var store = await _db.Stores.AsNoTracking().FirstOrDefaultAsync(s => s.Id == ev.StoreId, ct);
+                if (store is not null && !IsVisible(store.AlertVisibilityMode, TenantAccess.CurrentRole(User)))
+                    continue;
+
                 var json = JsonSerializer.Serialize(new
                 {
                     alertId  = ev.AlertId,
@@ -192,6 +199,58 @@ public class AlertsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(alert);
+    }
+
+    [Authorize(Roles = "Admin,Manager")]
+    [HttpPost("bulk-delete")]
+    public async Task<ActionResult<BulkDeleteResponse>> BulkDelete(BulkDeleteRequest req)
+    {
+        if (req.DeleteAllInStore)
+        {
+            if (req.StoreId is null)
+                return BadRequest(new { error = "storeId is required for delete all" });
+            if (!TenantAccess.CanAccessStore(User, req.StoreId.Value))
+                return Forbid();
+        }
+
+        var alerts = await ResolveAlertsForDeleteAsync(req);
+        if (alerts is null)
+            return BadRequest(new { error = "Provide ids or set deleteAllInStore with storeId" });
+
+        if (alerts.Count == 0)
+            return Ok(new BulkDeleteResponse(0, 0, []));
+
+        foreach (var alert in alerts)
+        {
+            _db.AlertReviews.RemoveRange(alert.Reviews);
+            _db.Alerts.Remove(alert);
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new BulkDeleteResponse(alerts.Count, 0, []));
+    }
+
+    private async Task<List<Alert>?> ResolveAlertsForDeleteAsync(BulkDeleteRequest req)
+    {
+        IQueryable<Alert> query = TenantAccess.ScopeAlerts(_db.Alerts.Include(a => a.Reviews), User);
+
+        if (req.DeleteAllInStore)
+        {
+            if (req.StoreId is null) return null;
+            if (!TenantAccess.CanAccessStore(User, req.StoreId.Value)) return null;
+            query = query.Where(a => a.StoreId == req.StoreId);
+        }
+        else if (req.Ids is { Count: > 0 })
+        {
+            var ids = req.Ids.Distinct().ToList();
+            query = query.Where(a => ids.Contains(a.Id));
+        }
+        else
+        {
+            return null;
+        }
+
+        return await query.ToListAsync();
     }
 
     private static bool IsVisible(AlertVisibilityMode mode, UserRole role) => mode switch

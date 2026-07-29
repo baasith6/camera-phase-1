@@ -76,7 +76,7 @@ public class TheftOrchestrator
                                 PickupCameraId = pickup.CameraId,
                                 ExitCameraId = ev.CameraId,
                             }),
-                            ClipUrl = "multi-camera-event", 
+                            ClipUrl = ev.ClipId.ToString(),
                             Status = AlertStatus.PendingReview
                         });
                         

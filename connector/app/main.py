@@ -26,6 +26,7 @@ from .paths import apply_pending_source_update, load_wizard_config,save_wizard_c
 from .instance_lock import InstanceLock
 from .runtime import RuntimeState
 from .store import LocalStore
+from .update_check import check_for_update
 from .workers import run_heartbeat, run_uploader
 
 
@@ -385,6 +386,7 @@ def main() -> int:
     hb = threading.Thread(target=run_heartbeat, args=(cfg, client, store, state, stop), daemon=True)
     up.start()
     hb.start()
+    check_for_update(cfg.backend_url, cfg.version, state.log)
 
     return _run_capture(cfg, client, store, state, stop)
 

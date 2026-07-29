@@ -20,6 +20,8 @@ def _minimal_cfg(**overrides) -> Config:
         source="rtsp://127.0.0.1/stream",
         loop=False,
         admin_port=8099,
+        admin_token="",
+        admin_bind_host="127.0.0.1",
         state_dir="data",
         camera_id="cam-1",
         fps=10.0,

@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { RouterLink, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { API_BASE } from '../../core/api.config';
@@ -36,6 +36,24 @@ import { Alert, Store } from '../../core/models';
       </div>
     </div>
 
+    @if (auth.isManagerOrAdmin() && alerts.length > 0) {
+      <div class="bulk-bar">
+        <label class="select-all">
+          <input type="checkbox" [checked]="allSelected" (change)="toggleSelectAll($event)" />
+          Select all ({{ alerts.length }})
+        </label>
+        <span class="muted">{{ selectedIds.size }} selected</span>
+        <button class="ghost danger" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">
+          Delete selected
+        </button>
+        @if (storeId) {
+          <button class="ghost danger" (click)="deleteAllInStore()" [disabled]="bulkDeleting">
+            Delete all in store
+          </button>
+        }
+      </div>
+    }
+
     @if (error) {
       <div class="err-banner">⚠ {{ error }} <button class="ghost small" (click)="load()">Retry</button></div>
     }
@@ -56,8 +74,9 @@ import { Alert, Store } from '../../core/models';
           🔔 {{ newCount }} new alert{{ newCount > 1 ? 's' : '' }} received — click to dismiss
         </div>
       }
-      <div class="alert-list">
+      <div class="alert-list" [class.with-bulk]="auth.isManagerOrAdmin()">
         <div class="list-header">
+          @if (auth.isManagerOrAdmin()) { <div class="col-chk-h"></div> }
           <div></div>
           <div class="col-type-h">Alert</div>
           <div class="col-h">Risk</div>
@@ -66,7 +85,12 @@ import { Alert, Store } from '../../core/models';
           <div class="col-h"></div>
         </div>
         @for (a of pagedAlerts(); track a.id) {
-          <div class="alert-card" [class.new-row]="newIds.has(a.id)">
+          <div class="alert-card" [class.new-row]="newIds.has(a.id)" [class.selected-row]="selectedIds.has(a.id)">
+            @if (auth.isManagerOrAdmin()) {
+              <div class="col-chk">
+                <input type="checkbox" [checked]="selectedIds.has(a.id)" (change)="toggleSelect(a.id, $event)" />
+              </div>
+            }
             <div class="risk-strip" [class]="a.riskLevel.toLowerCase()"></div>
             <div class="col-type">
               <span class="alert-type">{{ a.alertType }}</span>
@@ -99,8 +123,18 @@ import { Alert, Store } from '../../core/models';
     }
   `,
   styles: [`
-    .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
-    .filters { display:flex; gap:.5rem; }
+    .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; flex-wrap:wrap; gap:.5rem; }
+    .filters { display:flex; gap:.5rem; flex-wrap:wrap; }
+    .bulk-bar {
+      display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;
+      margin-bottom:.75rem; padding:.55rem .75rem;
+      background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm);
+    }
+    .select-all { display:flex; align-items:center; gap:.4rem; font-size:.85rem; cursor:pointer; }
+    .col-chk, .col-chk-h { width:28px; display:flex; align-items:center; justify-content:center; }
+    .selected-row { box-shadow:inset 0 0 0 1px rgba(139,92,246,.35); }
+    button.danger { color:var(--danger); border-color:rgba(248,113,113,.35); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
     .badge { padding:.18rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
     .badge.high { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
     .badge.medium { background:var(--warning-soft); color:var(--warning); border:1px solid rgba(251,191,36,.3); }
@@ -146,6 +180,7 @@ import { Alert, Store } from '../../core/models';
       font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.07em;
       color:var(--text-muted);
     }
+    .with-bulk .list-header { grid-template-columns:28px 4px 1fr 110px 70px 150px 100px; }
     .col-type-h { padding-left:.2rem; }
     .col-h { text-align:center; }
     .alert-card {
@@ -156,6 +191,7 @@ import { Alert, Store } from '../../core/models';
       padding:.8rem 1rem .8rem 0; overflow:hidden;
       transition:border-color .15s ease, box-shadow .15s ease;
     }
+    .with-bulk .alert-card { grid-template-columns:28px 4px 1fr 110px 70px 150px 100px; }
     .alert-card:hover { border-color:var(--accent); box-shadow:0 0 16px rgba(139,92,246,.12); }
     .risk-strip { align-self:stretch; width:4px; border-radius:0 4px 4px 0; }
     .risk-strip.high { background:var(--danger); box-shadow:0 0 8px rgba(248,113,113,.5); }
@@ -207,18 +243,34 @@ export class AlertsComponent implements OnInit, OnDestroy {
   toast = '';
   page = 1;
   readonly pageSize = 7;
+  bulkDeleting = false;
+  selectedIds = new Set<string>();
   private toastTimer?: any;
   private es?: EventSource;
+  private sseRetryTimer?: ReturnType<typeof setTimeout>;
+  private sseRetryMs = 2000;
 
-  constructor(private api: ApiService, private auth: AuthService) {}
+  constructor(private api: ApiService, public auth: AuthService, private route: ActivatedRoute) {}
+
+  get allSelected(): boolean {
+    return this.alerts.length > 0 && this.alerts.every((a) => this.selectedIds.has(a.id));
+  }
 
   ngOnInit(): void {
     this.api.listStores().subscribe({ next: s => this.stores = s });
-    this.load();
+    this.route.queryParamMap.subscribe((params) => {
+      const fromQuery = params.get('storeId');
+      if (fromQuery) this.storeId = fromQuery;
+      this.load();
+    });
     this.connectSse();
   }
 
-  ngOnDestroy(): void { this.es?.close(); clearTimeout(this.toastTimer); }
+  ngOnDestroy(): void {
+    this.es?.close();
+    clearTimeout(this.sseRetryTimer);
+    clearTimeout(this.toastTimer);
+  }
 
   pillClass(status: string): string {
     switch (status) {
@@ -251,6 +303,7 @@ export class AlertsComponent implements OnInit, OnDestroy {
   load(): void {
     this.loading = true;
     this.error = '';
+    this.selectedIds.clear();
     this.api.listAlerts(this.storeId || undefined, this.status || undefined).subscribe({
       next: (a) => { this.alerts = a; this.loading = false; this.page = 1; },
       error: (e) => { this.loading = false; this.error = e?.error?.error || 'Failed to load alerts'; },
@@ -278,18 +331,63 @@ export class AlertsComponent implements OnInit, OnDestroy {
 
   dismissNewBanner(): void { this.newCount = 0; this.newIds.clear(); }
 
+  toggleSelect(id: string, event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) this.selectedIds.add(id);
+    else this.selectedIds.delete(id);
+  }
+
+  toggleSelectAll(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.selectedIds.clear();
+    if (checked) this.alerts.forEach((a) => this.selectedIds.add(a.id));
+  }
+
+  deleteSelected(): void {
+    const ids = [...this.selectedIds];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected alert(s)? Clips will remain in storage.`)) return;
+    this.runBulkDelete({ ids });
+  }
+
+  deleteAllInStore(): void {
+    if (!this.storeId) return;
+    const name = this.stores.find((s) => s.id === this.storeId)?.name || 'this store';
+    if (!confirm(`Delete ALL alerts in ${name}? Clips will remain in storage.`)) return;
+    this.runBulkDelete({ storeId: this.storeId, deleteAllInStore: true });
+  }
+
+  private runBulkDelete(body: { storeId?: string; ids?: string[]; deleteAllInStore?: boolean }): void {
+    this.bulkDeleting = true;
+    this.error = '';
+    this.api.bulkDeleteAlerts(body).subscribe({
+      next: (res) => {
+        this.bulkDeleting = false;
+        this.selectedIds.clear();
+        this.showToast(`Deleted ${res.deleted} alert(s)`);
+        this.load();
+      },
+      error: (e) => {
+        this.bulkDeleting = false;
+        this.error = e?.error?.error || 'Bulk delete failed';
+      },
+    });
+  }
+
   private connectSse(): void {
-    // SSE uses the JWT from localStorage (set by auth service).
+    this.es?.close();
     const token = this.auth.token ?? '';
     const url = `${API_BASE}/api/alerts/stream?access_token=${encodeURIComponent(token)}`;
     this.es = new EventSource(url);
 
-    this.es.addEventListener('connected', () => { this.sseConnected = true; });
+    this.es.addEventListener('connected', () => {
+      this.sseConnected = true;
+      this.sseRetryMs = 2000;
+    });
 
     this.es.addEventListener('alert', (ev: MessageEvent) => {
       try {
         const data = JSON.parse(ev.data);
-        // Only prepend if it matches current store filter (or no filter).
         if (this.storeId && data.storeId !== this.storeId) return;
         const newAlert: Alert = {
           id: data.alertId,
@@ -309,7 +407,12 @@ export class AlertsComponent implements OnInit, OnDestroy {
       } catch { /* ignore malformed events */ }
     });
 
-    this.es.onerror = () => { this.sseConnected = false; };
+    this.es.onerror = () => {
+      this.sseConnected = false;
+      this.es?.close();
+      this.sseRetryTimer = setTimeout(() => this.connectSse(), this.sseRetryMs);
+      this.sseRetryMs = Math.min(this.sseRetryMs * 2, 30000);
+    };
   }
 }
 

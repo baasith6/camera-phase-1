@@ -74,6 +74,9 @@ public class Connector
     public string ApiKeyHash { get; set; } = string.Empty;
     public ConnectorStatus Status { get; set; } = ConnectorStatus.Unknown;
     public DateTimeOffset? LastHeartbeat { get; set; }
+    /// <summary>Reachable admin UI host reported by connector heartbeat (shop PC LAN IP).</summary>
+    public string? AdminHost { get; set; }
+    public int? AdminPort { get; set; }
     public double DiskFreePct { get; set; } = 100;
     public int UploadQueueDepth { get; set; } = 0;
     public string? DegradedReason { get; set; }
