@@ -29,6 +29,7 @@ class Config:
     cooldown_seconds: float
     motion_area_frac: float   # fraction of frame that must change to count as motion
     use_person_filter: bool
+    processing_max_width: int
 
     # Reliability
     disk_warn_pct: float
@@ -121,7 +122,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         bootstrap_key=args.bootstrap_key,
         store_id=store_id,
         connector_name=connector_name,
-        version="1.1.5",
+        version="1.1.12",
         source=source,
         loop=loop,
         admin_port=args.admin_port,
@@ -141,6 +142,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         cooldown_seconds=float(os.getenv("CONNECTOR_COOLDOWN_SECONDS", "60")),
         motion_area_frac=float(os.getenv("CONNECTOR_MOTION_AREA_FRAC", "0.02")),
         use_person_filter=os.getenv("CONNECTOR_PERSON_FILTER", "false").lower() == "true",
+        processing_max_width=max(320, int(os.getenv("CONNECTOR_PROCESSING_MAX_WIDTH", "640"))),
         disk_warn_pct=float(os.getenv("CONNECTOR_DISK_WARN_PCT", "20")),
         disk_critical_pct=float(os.getenv("CONNECTOR_DISK_CRITICAL_PCT", "10")),
         max_upload_retries=int(os.getenv("CONNECTOR_MAX_RETRIES", "5")),

@@ -21,7 +21,9 @@ def install_dir() -> Path:
 
 
 def program_data_root() -> Path:
-    base = os.environ.get("PROGRAMDATA") or os.environ.get("CONNECTOR_PROGRAM_DATA")
+    # Explicit connector override comes first so tests and portable deployments
+    # never touch the machine-wide Windows ProgramData directory.
+    base = os.environ.get("CONNECTOR_PROGRAM_DATA") or os.environ.get("PROGRAMDATA")
     if base:
         return Path(base) / "ONEVO" / "Connector"
     # Non-Windows / Docker fallback
@@ -49,6 +51,11 @@ def config_path() -> Path:
 
 def source_update_path() -> Path:
     return program_data_root() / "source-update.json"
+
+
+def pause_marker_path() -> Path:
+    """Machine-wide marker: monitoring must stay stopped across reboot/update."""
+    return default_state_dir() / "monitoring.paused"
 
 
 @dataclass

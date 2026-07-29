@@ -246,13 +246,13 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
             created = []
 
         complete_setup(wizard, created)
-        state.connector_id = store.get_cred("connector_id")
+        state.connector_id = cid
         state.log(f"Native installer provisioned {len(created)} camera source(s)")
         return True
     except Exception as exc:  # noqa: BLE001
         state.log(f"ERROR: native installer activation failed: {exc}")
         _persist_provision_failure(wizard, claim_succeeded, exc, state)
-        if claim_succeeded:
+        if claim_succeeded and hasattr(store, "get_cred"):
             cid = store.get_cred("connector_id")
             key = store.get_cred("api_key")
             if cid and key:
@@ -280,6 +280,9 @@ def main() -> int:
     state.camera_id = cfg.camera_id
 
     store = LocalStore(cfg.state_dir)
+    # Pause is an operator decision, not a temporary process flag. Preserve it
+    # across Windows service restarts and PC reboots.
+    state.set_paused(store.get_bool_setting("monitoring_paused", False))
 
     if cfg.wizard_mode:
         return _run_wizard_only(cfg, state, store)
@@ -310,6 +313,7 @@ def main() -> int:
         state,
         cfg,
         cfg.admin_port,
+        client=client,
         store=store,
         enable_setup_wizard=pending_setup,
         on_wizard_configured=_on_wizard_configured if pending_setup else None,
@@ -317,15 +321,57 @@ def main() -> int:
     state.log(f"Admin UI on http://localhost:{cfg.admin_port}")
 
     if cfg.service_mode and wizard and not wizard.setup_complete:
-        while not _provision_native_installer(cfg, wizard, client, store, state):
+        if not wizard.setup_code and not (
+            store.get_cred("connector_id") and store.get_cred("api_key")
+        ):
             state.degraded_reason = (
-                "Setup pending: check the backend connection or setup code."
+                "Setup code required. Open Retry setup and enter a new code."
             )
-            state.log("Installer activation pending; retrying in 15 seconds")
-            time.sleep(15)
+            state.log("Setup is waiting for a setup code")
+            while not wizard_ready.wait(timeout=1):
+                current = load_wizard_config()
+                if current and (
+                    current.setup_code or current.setup_complete
+                ):
+                    wizard = current
+                    break
+        while wizard and not wizard.setup_complete:
+            if _provision_native_installer(cfg, wizard, client, store, state):
+                break
+
             wizard = load_wizard_config()
             if wizard is None:
                 break
+
+            has_credentials = bool(
+                store.get_cred("connector_id") and store.get_cred("api_key")
+            )
+            if not wizard.setup_code and not has_credentials:
+                state.degraded_reason = (
+                    wizard.activation_error
+                    or "Setup code required. Enter a valid one-time code once."
+                )
+                state.log(
+                    "Setup is waiting for a valid setup code; automatic retries paused"
+                )
+                wizard_ready.clear()
+                while not wizard_ready.wait(timeout=1):
+                    current = load_wizard_config()
+                    if current is None:
+                        wizard = None
+                        break
+                    if current.setup_complete or current.setup_code:
+                        wizard = current
+                        break
+                continue
+
+            state.degraded_reason = (
+                "Setup pending: backend connection failed; retrying automatically."
+            )
+            state.log("Installer activation pending; retrying in 15 seconds")
+            if wizard_ready.wait(timeout=15):
+                wizard_ready.clear()
+            wizard = load_wizard_config()
         cfg = load_config()
         state.source = cfg.source
         state.camera_id = cfg.camera_id

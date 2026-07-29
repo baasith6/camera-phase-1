@@ -65,6 +65,13 @@ export class ApiService {
   testStream(id: string): Observable<any> {
     return this.http.post<any>(`${API_BASE}/api/cameras/${id}/test-stream`, {});
   }
+  deleteCamera(id: string): Observable<{ ok: boolean; cameraId: string }> {
+    return this.http.delete<{ ok: boolean; cameraId: string }>(`${API_BASE}/api/cameras/${id}`);
+  }
+  bulkDisableCameras(cameraIds: string[]): Observable<{ ok: boolean; disabled: number }> {
+    return this.http.post<{ ok: boolean; disabled: number }>(
+      `${API_BASE}/api/cameras/bulk-disable`, { cameraIds });
+  }
 
   // Zones
   listZones(cameraId: string): Observable<Zone[]> {

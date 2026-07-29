@@ -13,17 +13,29 @@ Endpoints:
   ...
 """
 import json
+import os
 import shutil
+import subprocess
 import threading
+import time
 import uuid
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from typing import TYPE_CHECKING, Callable
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .paths import CameraSource, WizardConfig, load_wizard_config, media_dir, save_wizard_config
+from .paths import (
+    CameraSource,
+    WizardConfig,
+    load_wizard_config,
+    media_dir,
+    pause_marker_path,
+    save_wizard_config,
+)
 from .provisioning import provision_sources, source_key_for, validate_sources
 from .clip_ops import clear_local_clip_files, list_local_clip_files, prepare_clip_file, resolve_file_source
 from .clip_settings import ClipSettings, load_clip_settings, save_clip_settings
@@ -39,6 +51,34 @@ class CaptureSettingsBody(BaseModel):
     pre_seconds: float = Field(ge=1, le=120)
     post_seconds: float = Field(ge=1, le=120)
     cooldown_seconds: float = Field(ge=5, le=600)
+
+
+class SourceUpdateBody(BaseModel):
+    name: str | None = None
+    rtsp_url: str | None = None
+    onvif_host: str | None = None
+    onvif_port: int | None = Field(default=None, ge=1, le=65535)
+    onvif_user: str | None = None
+    onvif_pass: str | None = None
+
+
+class BulkDeleteBody(BaseModel):
+    source_keys: list[str] = Field(default_factory=list)
+
+
+def _masked_source_value(source: CameraSource) -> str:
+    if source.source_file:
+        return Path(source.source_file).name
+    if source.onvif_host:
+        return source.onvif_host
+    parsed = urlsplit(source.rtsp_url)
+    if not parsed.password:
+        return source.rtsp_url
+    username = parsed.username or ""
+    hostname = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    netloc = f"{username}:••••@{hostname}{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def build_app(
@@ -74,7 +114,16 @@ def build_app(
     @app.get("/sources")
     def sources():
         wizard = load_wizard_config() or WizardConfig()
+        management_ready = bool(
+            client is not None
+            and store is not None
+            and store.get_cred("connector_id")
+            and store.get_cred("api_key")
+        )
+        for source in wizard.sources:
+            source.source_key = source.source_key or source_key_for(source)
         return {
+            "managementReady": management_ready,
             "sources": [
                 {
                     "name": source.name,
@@ -82,14 +131,101 @@ def build_app(
                         "onvif" if source.onvif_host else
                         "video" if source.source_file else "rtsp"
                     ),
-                    "value": (
-                        source.onvif_host or source.source_file or source.rtsp_url
-                    ),
+                    "value": _masked_source_value(source),
                     "cameraId": source.camera_id,
+                    "sourceKey": source.source_key,
                 }
                 for source in wizard.sources
             ]
         }
+
+    def _sync_sources(wizard: WizardConfig) -> bool:
+        connector_id = store.get_cred("connector_id") if store else None
+        api_key = store.get_cred("api_key") if store else None
+        if client is None or not (connector_id and api_key):
+            wizard.setup_complete = False
+            save_wizard_config(wizard)
+            return False
+        client.set_credentials(connector_id, api_key)
+        client.finalize_setup([
+            source.source_key or source_key_for(source) for source in wizard.sources
+        ])
+        wizard.setup_complete = True
+        save_wizard_config(wizard)
+        return True
+
+    @app.put("/sources/{source_key}")
+    def update_source(source_key: str, body: SourceUpdateBody):
+        wizard = load_wizard_config() or WizardConfig()
+        source_index = next(
+            (
+                index for index, item in enumerate(wizard.sources)
+                if (item.source_key or source_key_for(item)) == source_key
+            ),
+            -1,
+        )
+        source = wizard.sources[source_index] if source_index >= 0 else None
+        if source is None:
+            raise HTTPException(404, "Source not found")
+        if body.name is not None:
+            source.name = body.name.strip() or source.name
+        if body.rtsp_url is not None:
+            source.rtsp_url = body.rtsp_url.strip()
+            source.source_file = ""
+            source.onvif_host = ""
+            source.resolved_rtsp_url = ""
+        if body.onvif_host is not None:
+            source.onvif_host = body.onvif_host.strip()
+            source.rtsp_url = ""
+            source.source_file = ""
+        if body.onvif_port is not None:
+            source.onvif_port = body.onvif_port
+        if body.onvif_user is not None:
+            source.onvif_user = body.onvif_user.strip()
+        if body.onvif_pass:
+            source.onvif_pass = body.onvif_pass
+        source.source_key = source_key_for(source)
+        source.camera_id = ""
+        validate_sources([source])
+        wizard.setup_complete = False
+        save_wizard_config(wizard)
+        pending = True
+        if client is not None and store is not None:
+            try:
+                created = provision_sources(client, [source], state)
+                source = created[0]
+                wizard.sources[source_index] = source
+                pending = not _sync_sources(wizard)
+            except Exception as exc:  # noqa: BLE001
+                state.log(f"Local admin: source update pending: {exc}")
+        return {"ok": True, "pending": pending, "sourceKey": source.source_key}
+
+    @app.post("/sources/bulk-delete")
+    def bulk_delete_sources(body: BulkDeleteBody):
+        requested = {key.strip() for key in body.source_keys if key.strip()}
+        if not requested:
+            raise HTTPException(400, "Select at least one source")
+        wizard = load_wizard_config() or WizardConfig()
+        before = len(wizard.sources)
+        wizard.sources = [
+            source for source in wizard.sources
+            if (source.source_key or source_key_for(source)) not in requested
+        ]
+        removed = before - len(wizard.sources)
+        if removed == 0:
+            raise HTTPException(404, "No matching sources found")
+        pending = True
+        try:
+            pending = not _sync_sources(wizard)
+        except Exception as exc:  # noqa: BLE001
+            wizard.setup_complete = False
+            save_wizard_config(wizard)
+            state.log(f"Local admin: bulk removal sync pending: {exc}")
+        return {"ok": True, "removed": removed, "pending": pending}
+
+    @app.delete("/sources/by-key/{source_key}")
+    def delete_source_by_key(source_key: str):
+        return bulk_delete_sources(BulkDeleteBody(source_keys=[source_key]))
 
     @app.post("/sources")
     async def add_sources(
@@ -100,6 +236,13 @@ def build_app(
     ):
         if client is None or store is None:
             raise HTTPException(503, "Source management is unavailable")
+        connector_id = store.get_cred("connector_id")
+        api_key = store.get_cred("api_key")
+        if not (connector_id and api_key):
+            raise HTTPException(
+                409,
+                "Complete connector setup with a setup code before adding camera sources",
+            )
 
         new_sources: list[CameraSource] = []
         kind = source_type.strip().lower()
@@ -172,18 +315,6 @@ def build_app(
         wizard.setup_complete = False
         save_wizard_config(wizard)
 
-        connector_id = store.get_cred("connector_id")
-        api_key = store.get_cred("api_key")
-        if not (connector_id and api_key):
-            state.log(
-                f"Local admin: saved {len(new_sources)} {kind} source(s); pairing pending"
-            )
-            return {
-                "ok": True,
-                "pending": True,
-                "added": len(new_sources),
-                "total": len(wizard.sources),
-            }
         client.set_credentials(connector_id, api_key)
 
         def checkpoint(created):
@@ -247,11 +378,43 @@ def build_app(
         }
     @app.post("/capture/pause")
     def capture_pause():
+        if store is not None:
+            store.set_bool_setting("monitoring_paused", True)
         state.set_paused(True)
-        return {"ok": True, "paused": True}
+        marker = pause_marker_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+
+        def stop_service_after_response() -> None:
+            time.sleep(3.0)
+            if os.name != "nt":
+                return
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.run(
+                ["sc.exe", "config", "ONEVOConnector", "start=", "demand"],
+                creationflags=flags,
+                capture_output=True,
+                check=False,
+            )
+            subprocess.run(
+                ["sc.exe", "stop", "ONEVOConnector"],
+                creationflags=flags,
+                capture_output=True,
+                check=False,
+            )
+
+        threading.Thread(target=stop_service_after_response, daemon=True).start()
+        return {
+            "ok": True,
+            "paused": True,
+            "serviceStopping": True,
+            "message": "Connector is stopping. Use the tray to start monitoring again.",
+        }
 
     @app.post("/capture/resume")
     def capture_resume():
+        if store is not None:
+            store.set_bool_setting("monitoring_paused", False)
         state.set_paused(False)
         return {"ok": True, "paused": False}
 
@@ -439,6 +602,40 @@ def build_app(
             raise HTTPException(status_code=404, detail="No snapshot available yet")
         return Response(content=frame, media_type="image/jpeg")
 
+    @app.get("/live/cameras")
+    def live_cameras():
+        return {"cameras": state.camera_statuses()}
+
+    @app.get("/live/cameras/{camera_id}/status")
+    def live_camera_status(camera_id: str):
+        camera = next(
+            (item for item in state.camera_statuses() if item["cameraId"] == camera_id),
+            None,
+        )
+        if camera is None:
+            raise HTTPException(404, "Camera runtime not found")
+        return camera
+
+    @app.get("/live/cameras/{camera_id}/stream.mjpg")
+    def live_camera_stream(camera_id: str):
+        def frames():
+            last_frame = None
+            while True:
+                frame = state.get_frame(camera_id)
+                if frame and frame is not last_frame:
+                    last_frame = frame
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpeg\r\n"
+                        + f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii")
+                        + frame
+                        + b"\r\n"
+                    )
+                time.sleep(0.125)
+
+        return StreamingResponse(
+            frames(), media_type="multipart/x-mixed-replace; boundary=frame"
+        )
+
     # ------------------------------------------------------------------
     # Dashboard HTML
     # ------------------------------------------------------------------
@@ -466,11 +663,13 @@ def build_app(
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
-    body{{font-family:system-ui,sans-serif;background:#0f1216;color:#e6e6e6;padding:1.5rem}}
+    body{{font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#0b0e13;color:#eef2f8;
+      padding:1.5rem;max-width:1500px;margin:auto}}
     h1{{font-size:1.1rem;font-weight:600;color:#8ab4f8;margin-bottom:1rem}}
     h2{{font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
         color:#888;margin-bottom:.5rem}}
-    .section{{background:#171b21;border-radius:8px;padding:1rem;margin-bottom:1rem}}
+    .section{{background:#151a22;border:1px solid #222b38;border-radius:12px;
+      padding:1.15rem;margin-bottom:1rem;box-shadow:0 8px 28px rgba(0,0,0,.12)}}
     .grid{{display:grid;grid-template-columns:180px 1fr;gap:.2rem .75rem;font-size:.85rem}}
     .k{{color:#8ab4f8;font-size:.8rem}}
     .v{{color:#e6e6e6;word-break:break-all}}
@@ -479,8 +678,9 @@ def build_app(
     .badge{{display:inline-block;padding:.1rem .5rem;border-radius:10px;font-size:.7rem;font-weight:600}}
     .ok{{background:#1a3a2a;color:#5cdb7f}}.warn{{background:#3a2a1a;color:#f0a030}}
     .err{{background:#3a1a1a;color:#f07070}}
-    .btn{{display:inline-block;padding:.35rem .75rem;border-radius:6px;font-size:.78rem;
-          background:#1e2530;color:#8ab4f8;text-decoration:none;border:1px solid #2a3a50}}
+    .btn{{display:inline-flex;align-items:center;justify-content:center;padding:.48rem .8rem;
+          border-radius:8px;font-size:.8rem;background:#1b2431;color:#9fc2ff;
+          text-decoration:none;border:1px solid #30415a;min-height:36px}}
     .btn:hover{{background:#2a3a50}}
     button{{cursor:pointer}}
     .source-types{{display:flex;gap:.5rem;flex-wrap:wrap;margin:.75rem 0}}
@@ -491,6 +691,19 @@ def build_app(
     .source-row input{{display:block;width:100%;margin-top:.2rem;background:#0f1216;
       color:#e6e6e6;border:1px solid #2a3a50;border-radius:5px;padding:.45rem}}
     .source-msg{{font-size:.78rem;margin-top:.6rem;color:#8ab4f8}}
+    .source-notice{{padding:.8rem 1rem;border:1px solid #60452c;background:#2b2117;
+      border-radius:9px;color:#ffc27a;font-size:.82rem;line-height:1.45;margin:.75rem 0}}
+    .source-toolbar{{display:flex;justify-content:space-between;align-items:center;gap:.75rem;
+      flex-wrap:wrap;margin:.75rem 0}}
+    .check-all{{display:flex;align-items:center;gap:.5rem;padding:.48rem .7rem;
+      border:1px solid #30415a;border-radius:8px;background:#10151c;color:#c9d3e2;font-size:.8rem}}
+    .check-all input,.source-card input{{accent-color:#79a7ff;width:16px;height:16px}}
+    .source-card{{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;
+      gap:.75rem;padding:.75rem;margin:.55rem 0;border:1px solid #283444;border-radius:10px;
+      background:#10151c}}
+    .source-card .source-title{{font-weight:650;font-size:.85rem;color:#eef2f8}}
+    .source-card .source-detail{{font-size:.74rem;color:#8d99aa;margin-top:.18rem;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
     .btn.danger{{border-color:#6a3030;color:#f07070}}
     .btn.primary{{border-color:#3a5080;color:#8ab4f8}}
     .hdr{{display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem}}
@@ -500,6 +713,17 @@ def build_app(
     input[type=number]{{width:4.5rem;padding:.25rem .4rem;border-radius:4px;border:1px solid #2a3a50;
       background:#0f1216;color:#e6e6e6;font-size:.82rem}}
     .hint{{font-size:.75rem;color:#888;margin-top:.35rem}}
+    .camera-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.75rem}}
+    .camera-tile{{background:#0f1216;border:1px solid #2a3a50;border-radius:8px;overflow:hidden;
+      cursor:pointer;transition:border-color .15s,transform .15s}}
+    .camera-tile:hover{{border-color:#8ab4f8;transform:translateY(-1px)}}
+    .camera-tile img{{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#090b0e}}
+    .camera-tile .meta{{display:flex;justify-content:space-between;gap:.5rem;padding:.55rem .65rem;
+      font-size:.78rem}}
+    .camera-focus{{position:fixed;inset:0;background:rgba(4,6,9,.96);z-index:50;padding:2rem;
+      display:flex;flex-direction:column;gap:.75rem}}
+    .camera-focus img{{width:100%;height:calc(100vh - 7rem);object-fit:contain;background:#000}}
+    .camera-focus .focus-head{{display:flex;justify-content:space-between;align-items:center}}
     #action-msg{{font-size:.78rem;color:#5cdb7f;margin-top:.35rem}}
     #action-err{{font-size:.78rem;color:#f07070;margin-top:.35rem}}
   </style>
@@ -523,7 +747,7 @@ def build_app(
 
   <div class="section">
     <h2>Actions</h2>
-    <p class="hint">Pause stops new motion clips. To fully stop the Windows service use Services.msc or <code>net stop ONEVO-Connector</code>.</p>
+    <p class="hint">Pause fully stops camera processing and the ONEVO Windows service. Use the tray icon to start monitoring again.</p>
     <div class="row">
       <button class="btn" id="btn-pause" onclick="pauseCapture()">Pause monitoring</button>
       <button class="btn" id="btn-resume" onclick="resumeCapture()">Resume monitoring</button>
@@ -560,9 +784,38 @@ def build_app(
   {onvif_section}
 
   <div class="section">
-    <h2>Camera / Video Sources</h2>
+    <div class="hdr">
+      <h2>Live Cameras</h2>
+      <span class="hint">Click a camera to open the single view</span>
+    </div>
+    <div id="camera-grid" class="camera-grid"></div>
+  </div>
+
+  <div class="camera-focus hidden" id="camera-focus">
+    <div class="focus-head">
+      <h2 id="focus-title">Camera</h2>
+      <button class="btn" type="button" onclick="closeCameraFocus()">Back to all cameras</button>
+    </div>
+    <img id="focus-stream" alt="Selected live camera">
+  </div>
+
+  <div class="section">
+    <div class="hdr">
+      <div>
+        <h2>Camera / Video Sources</h2>
+        <p class="hint">Add RTSP, ONVIF, or MP4 sources. Active sources appear in Live Cameras above.</p>
+      </div>
+    </div>
+    <div id="source-setup-notice" class="source-notice hidden">
+      Connector setup is not complete. Enter a valid setup code before adding camera sources.
+      <a class="btn" href="/setup">Complete setup</a>
+    </div>
+    <div class="source-toolbar hidden" id="source-toolbar">
+      <label class="check-all"><input id="select-all-sources" type="checkbox"> Select all sources</label>
+      <button class="btn danger" type="button" id="remove-selected">Remove selected</button>
+    </div>
     <div id="saved-sources" class="v">Loading configured sources...</div>
-    <div class="source-types">
+    <div class="source-types" id="source-types">
       <button class="btn" type="button" onclick="chooseSource('rtsp')">+ Add RTSP Camera</button>
       <button class="btn" type="button" onclick="chooseSource('onvif')">+ Add ONVIF Camera</button>
       <button class="btn" type="button" onclick="chooseSource('video')">+ Add Local MP4 Video</button>
@@ -643,28 +896,87 @@ def build_app(
     async function loadSources() {{
       const data = await (await fetch('/sources')).json();
       const el = document.getElementById('saved-sources');
+      const toolbar = document.getElementById('source-toolbar');
+      const sourceTypes = document.getElementById('source-types');
+      const notice = document.getElementById('source-setup-notice');
+      sourceTypes.classList.toggle('hidden', !data.managementReady);
+      notice.classList.toggle('hidden', data.managementReady);
+      document.getElementById('source-form').classList.toggle(
+        'hidden', !data.managementReady);
+      renderCameraGrid(data.sources);
       if (!data.sources.length) {{
-        el.textContent = 'No sources configured. Add them here when ready.';
+        toolbar.classList.add('hidden');
+        el.innerHTML = data.managementReady
+          ? '<div class="hint">No sources yet. Choose RTSP, ONVIF, or MP4 below.</div>'
+          : '<div class="hint">Sources can be added after connector setup is complete.</div>';
         return;
       }}
+      toolbar.classList.remove('hidden');
       el.innerHTML = '';
       data.sources.forEach((source, index) => {{
         const row = document.createElement('div');
-        row.className = 'source-row';
-        const text = document.createElement('span');
-        text.textContent = `${{source.name}} (${{source.type}}): ${{source.value}}`;
+        row.className = 'source-card';
+        const select = document.createElement('input');
+        select.type = 'checkbox';
+        select.className = 'saved-source-select';
+        select.value = source.sourceKey;
+        const text = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'source-title';
+        title.textContent = source.name;
+        const detail = document.createElement('div');
+        detail.className = 'source-detail';
+        detail.textContent = `${{source.type.toUpperCase()}} · ${{source.value}}`;
+        text.append(title, detail);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'btn';
         remove.textContent = 'Remove';
-        remove.onclick = () => removeSavedSource(index);
-        row.append(text, remove);
+        remove.onclick = () => removeSavedSource(source.sourceKey);
+        row.append(select, text, remove);
         el.appendChild(row);
       }});
+      document.getElementById('select-all-sources').checked = false;
     }}
-    async function removeSavedSource(index) {{
+    function renderCameraGrid(sources) {{
+      const grid = document.getElementById('camera-grid');
+      grid.innerHTML = '';
+      const active = sources.filter(source => source.cameraId);
+      if (!active.length) {{
+        grid.textContent = 'No active camera feeds yet.';
+        return;
+      }}
+      active.forEach(source => {{
+        const tile = document.createElement('div');
+        tile.className = 'camera-tile';
+        tile.onclick = () => openCameraFocus(source);
+        const img = document.createElement('img');
+        img.src = `/live/cameras/${{encodeURIComponent(source.cameraId)}}/stream.mjpg`;
+        img.alt = source.name;
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const name = document.createElement('strong');
+        name.textContent = source.name;
+        const kind = document.createElement('span');
+        kind.textContent = source.type.toUpperCase();
+        meta.append(name, kind);
+        tile.append(img, meta);
+        grid.appendChild(tile);
+      }});
+    }}
+    function openCameraFocus(source) {{
+      document.getElementById('focus-title').textContent = source.name;
+      document.getElementById('focus-stream').src =
+        `/live/cameras/${{encodeURIComponent(source.cameraId)}}/stream.mjpg`;
+      document.getElementById('camera-focus').classList.remove('hidden');
+    }}
+    function closeCameraFocus() {{
+      document.getElementById('camera-focus').classList.add('hidden');
+      document.getElementById('focus-stream').removeAttribute('src');
+    }}
+    async function removeSavedSource(sourceKey) {{
       if (!confirm('Remove this camera/video source?')) return;
-      const response = await fetch(`/sources/${{index}}`, {{method:'DELETE'}});
+      const response = await fetch(`/sources/by-key/${{encodeURIComponent(sourceKey)}}`, {{method:'DELETE'}});
       const data = await response.json();
       const msg = document.getElementById('source-msg');
       if (!response.ok) {{
@@ -676,6 +988,30 @@ def build_app(
         : 'Source removed.';
       await loadSources();
     }}
+    document.getElementById('select-all-sources').onchange = event => {{
+      document.querySelectorAll('.saved-source-select').forEach(box => {{
+        box.checked = event.target.checked;
+      }});
+    }};
+    document.getElementById('remove-selected').onclick = async () => {{
+      const keys = [...document.querySelectorAll('.saved-source-select:checked')]
+        .map(box => box.value).filter(Boolean);
+      if (!keys.length) {{
+        document.getElementById('source-msg').textContent = 'Select at least one source.';
+        return;
+      }}
+      if (!confirm(`Remove ${{keys.length}} selected source(s)?`)) return;
+      const response = await fetch('/sources/bulk-delete', {{
+        method: 'POST',
+        headers: {{'Content-Type':'application/json'}},
+        body: JSON.stringify({{source_keys: keys}})
+      }});
+      const data = await response.json();
+      document.getElementById('source-msg').textContent = response.ok
+        ? `Removed ${{data.removed}} source(s).`
+        : (data.detail || 'Could not remove selected sources');
+      if (response.ok) await loadSources();
+    }};
     document.getElementById('source-form').onsubmit = async event => {{
       event.preventDefault();
       const fd = new FormData();
@@ -706,6 +1042,10 @@ def build_app(
           ? `Saved ${{data.added}} source(s). Backend activation is pending.`
           : `Added ${{data.added}} source(s). Monitoring will start shortly.`;
         await loadSources();
+        event.target.reset();
+        document.getElementById('source-rows').innerHTML = '';
+        document.getElementById('source-form').classList.remove('on');
+        selectedSourceType = '';
       }} catch (error) {{
         msg.textContent = error.message;
       }}
@@ -761,7 +1101,11 @@ def build_app(
     }}
 
     async function pauseCapture() {{
-      try {{ await postJson('/capture/pause'); showActionMsg('Monitoring paused'); tick(); }}
+      try {{
+        const result = await postJson('/capture/pause');
+        showActionMsg(result.message || 'Connector is stopping...');
+        document.getElementById('btn-pause').disabled = true;
+      }}
       catch(e) {{ showActionMsg(e.message, true); }}
     }}
     async function resumeCapture() {{
@@ -859,7 +1203,10 @@ def build_app(
       }} catch(e) {{ document.getElementById('tick').textContent = 'fetch error'; }}
     }}
     loadClipSettings();
-    setInterval(tick, 1500); tick();loadSources();
+    setInterval(tick, 1500);
+    setInterval(loadSources, 5000);
+    tick();
+    loadSources();
   </script>
 </body>
 </html>"""
@@ -871,6 +1218,7 @@ def start_admin(
     state: RuntimeState,
     cfg: "Config",
     port: int,
+    client: "BackendClient | None" = None,
     store: "LocalStore | None" = None,
     enable_setup_wizard: bool = False,
     on_wizard_configured: Callable | None = None,
@@ -904,6 +1252,10 @@ def start_admin(
             route_prefix=WIZARD_ROUTE_PREFIX,
             on_configured=on_wizard_configured,
         )
+    # Management and live-preview endpoints stay local by default. LAN exposure
+    # must be an explicit deployment choice.
+    admin_host = os.getenv("CONNECTOR_ADMIN_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    config = uvicorn.Config(app, host=admin_host, port=port, log_level="warning")
     config = uvicorn.Config(app, host=cfg.admin_bind_host, port=port, log_level="warning")
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, daemon=True)
