@@ -55,6 +55,23 @@ export const routes: Routes = [
         path: 'health',
         loadComponent: () => import('./pages/health/health.component').then((m) => m.HealthComponent),
       },
+      {
+        path: 'analytics',
+        loadComponent: () =>
+          import('./pages/analytics/analytics.component').then((m) => m.AnalyticsComponent),
+      },
+      {
+        path: 'reports',
+        loadComponent: () => import('./pages/reports/reports.component').then((m) => m.ReportsComponent),
+      },
+      {
+        path: 'logs',
+        loadComponent: () => import('./pages/logs/logs.component').then((m) => m.LogsComponent),
+      },
+      {
+        path: 'settings',
+        loadComponent: () => import('./pages/settings/settings.component').then((m) => m.SettingsComponent),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

@@ -90,6 +90,8 @@ export interface Connector {
   uploadQueueDepth: number;
   degradedReason?: string;
   rtspReconnects?: number;
+  adminHost?: string | null;
+  adminPort?: number | null;
 }
 
 export interface InstallerInfo {
@@ -156,6 +158,36 @@ export interface ClipDetail {
 export interface PipelineHealth {
   redisQueueDepth: number;
   failedJobs: number;
+}
+
+export interface AnalyticsSummary {
+  totalAlerts: number;
+  pendingAlerts: number;
+  highRiskAlerts: number;
+  mediumRiskAlerts: number;
+  falsePositives: number;
+  totalClips: number;
+  analyzedClips: number;
+  alertsByType: Record<string, number>;
+}
+
+export interface ConnectorLogEntry {
+  id: string;
+  storeId: string;
+  name: string;
+  status: string;
+  version: string;
+  lastHeartbeat?: string | null;
+  degradedReason?: string | null;
+  uploadQueueDepth: number;
+  diskFreePct: number;
+}
+
+export interface SystemLogs {
+  connectors: ConnectorLogEntry[];
+  redisQueueDepth: number;
+  failedJobs: number;
+  generatedAt: string;
 }
 
 export interface RiskConfig {

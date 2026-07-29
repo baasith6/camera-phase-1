@@ -43,7 +43,10 @@ class Config:
             s3_secret_key=os.getenv("S3_SECRET_KEY", "onevo_minio_pw"),
             s3_region=os.getenv("S3_REGION", "us-east-1"),
             backend_url=os.getenv("CLOUD_AI_BACKEND_URL", "http://localhost:8080").rstrip("/"),
-            service_key=os.getenv("CONNECTOR_BOOTSTRAP_KEY", "dev-connector-bootstrap-key"),
+            service_key=os.getenv(
+                "CLOUD_AI_SERVICE_KEY",
+                os.getenv("CONNECTOR_BOOTSTRAP_KEY", "dev-connector-bootstrap-key"),
+            ),
             model_backend=os.getenv("CLOUD_AI_MODEL_BACKEND", "yoloe"),
             model=os.getenv("CLOUD_AI_MODEL", "yoloe-11s-seg.pt"),
             device=os.getenv("CLOUD_AI_DEVICE", "cpu"),

@@ -671,9 +671,11 @@ begin
     if ValidCount = 0 then begin
       SourceSetupSkipped := True;
       Result := True;
+      Exit;
     end;
   end;
-  if (CurPageID = RtspPage.ID) and not ValidateRtspUrls(RtspPage.Values[0]) then begin
+  if (CurPageID = RtspPage.ID) and (not SourceSetupSkipped) and
+     (not ValidateRtspUrls(RtspPage.Values[0])) then begin
     MsgBox('Enter one or more valid rtsp:// URLs separated by semicolons.', mbError, MB_OK);
     Result := False;
   end;

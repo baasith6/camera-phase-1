@@ -82,6 +82,7 @@ services:
       Seed__AdminEmail: ${SEED_ADMIN_EMAIL}
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD}
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
+      CloudAi__ServiceKey: ${CLOUD_AI_SERVICE_KEY:-${CONNECTOR_BOOTSTRAP_KEY}}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
       ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.5}
       ConnectorInstaller__Path: /app/connector-dist
@@ -123,7 +124,7 @@ services:
       CLOUD_AI_MODEL: ${CLOUD_AI_MODEL}
       CLOUD_AI_DEVICE: ${CLOUD_AI_DEVICE}
       CLOUD_AI_YOLOE_PROMPTS: ${CLOUD_AI_YOLOE_PROMPTS}
-      CONNECTOR_BOOTSTRAP_KEY: ${CONNECTOR_BOOTSTRAP_KEY}
+      CLOUD_AI_SERVICE_KEY: ${CLOUD_AI_SERVICE_KEY:-${CONNECTOR_BOOTSTRAP_KEY}}
 
   # Angular dashboard â€” served by nginx, proxies /api â†’ backend
   dashboard:

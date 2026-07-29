@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Onevo.Api.Contracts;
+using Onevo.Api.Auth;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
 using Onevo.Api.Services;
@@ -36,7 +37,7 @@ public class AiEventsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Ingest(AiEventsBatchRequest req)
     {
-        var serviceKey = _cfg["Seed:ConnectorBootstrapKey"];
+        var serviceKey = ServiceAuth.CloudAiServiceKey(_cfg);
         if (!Request.Headers.TryGetValue("X-Service-Key", out var provided) ||
             string.IsNullOrEmpty(serviceKey) || provided.ToString() != serviceKey)
             return Unauthorized();

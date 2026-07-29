@@ -31,4 +31,23 @@ public class AuthController : ControllerBase
         var token = _jwt.CreateToken(user);
         return new LoginResponse(token, user.Email, user.Role.ToString(), user.StoreId);
     }
+
+    [Authorize]
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 8)
+            return BadRequest(new { error = "New password must be at least 8 characters" });
+
+        var userId = TenantAccess.CurrentUserId(User);
+        var user = await _db.Users.FindAsync(userId);
+        if (user is null) return Unauthorized();
+
+        if (!BCrypt.Net.BCrypt.Verify(req.CurrentPassword, user.PasswordHash))
+            return BadRequest(new { error = "Current password is incorrect" });
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.NewPassword);
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true });
+    }
 }
