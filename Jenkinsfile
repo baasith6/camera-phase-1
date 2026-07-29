@@ -37,7 +37,7 @@ pipeline {
         stage('Connector tests') {
           steps {
             dir('connector') {
-              bat 'pip install -r requirements.txt pytest'
+              bat 'python -m pip install -r requirements.txt pytest'
               bat 'set PYTHONPATH=.&& python -m pytest tests/ -q'
             }
           }
