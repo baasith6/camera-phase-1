@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Callable, Protocol
 
 # Canonical retail cues used across the whole pipeline.
-CANONICAL_CUES = {"person", "bag", "open_bag", "product_in_hand"}
+CANONICAL_CUES = {"person", "bag", "open_bag", "product_in_hand", "concealment"}
 
 # Closed-set COCO class id -> canonical cue (YOLO / RF-DETR).
 COCO_TO_CUE = {
@@ -33,8 +33,16 @@ DEFAULT_YOLOE_PROMPTS: dict[str, str] = {
     "handbag": "bag",
     "open bag": "open_bag",
     "open backpack": "open_bag",
+    # Direct concealment cues: the phrase itself encodes item-being-hidden, so these
+    # map to a dedicated cue. A plain open bag is NOT concealment — only the act of
+    # putting/hiding an item inside clothing or a bag is.
+    "person hiding item inside jacket": "concealment",
+    "person putting object under clothing": "concealment",
+    "hand inside jacket": "concealment",
     "product in hand": "product_in_hand",
     "item in hand": "product_in_hand",
+    "person holding a bottle": "product_in_hand",
+    "person holding clothes": "product_in_hand",
 }
 
 
