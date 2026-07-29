@@ -12,6 +12,7 @@ pipeline {
 
   environment {
     VM_APP_DIR = '/opt/onevo/app'
+    ONEVO_PYTHON = 'C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe'
   }
 
   stages {
@@ -37,8 +38,8 @@ pipeline {
         stage('Connector tests') {
           steps {
             dir('connector') {
-              bat '"C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe" -m pip install -r requirements.txt pytest'
-              bat 'set PYTHONPATH=.&& "C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe" -m pytest tests/ -q'
+              bat '"%ONEVO_PYTHON%" -m pip install -r requirements.txt pytest'
+              bat 'set PYTHONPATH=.&& "%ONEVO_PYTHON%" -m pytest tests/ -q'
             }
           }
         }
@@ -61,6 +62,7 @@ pipeline {
                 -VmHost ${params.VM_HOST} ^
                 -VmUser ${params.VM_USER} ^
                 -BackendUrl ${params.BACKEND_URL} ^
+                -PythonPath "%ONEVO_PYTHON%" ^
                 -SshKeyPath "${env.SSH_KEY}"${extra}
             """
           }

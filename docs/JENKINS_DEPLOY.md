@@ -12,7 +12,7 @@ Deploy ONEVO to the Azure MVP VM from your local Windows PC using the root [`Jen
 
 1. [Jenkins LTS](https://www.jenkins.io/download/) installed on Windows.
 2. **Git** and **OpenSSH client** (Windows 10+ optional feature or Git for Windows).
-3. **.NET 8 SDK**, **Node.js 20**, **Python 3.11+** on the Jenkins agent (same PC).
+3. **.NET 8 SDK**, **Node.js 20**, **Python 3.11+** on the Jenkins agent (same PC). Set `ONEVO_PYTHON` in the Jenkinsfile to your Python exe — Jenkins service account often has no `python` on PATH.
 4. **Inno Setup 6** + PyInstaller deps for connector installer (see [`connector/installer/INSTALL.md`](../connector/installer/INSTALL.md)).
 5. SSH private key that can log in as `azureuser@20.193.69.220`. On Windows OpenSSH, use your **RSA** key (`id_rsa`) in Jenkins — explicit `-i` with `id_ed25519` often fails even when plain `ssh` works.
 
