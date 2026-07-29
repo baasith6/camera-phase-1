@@ -2,7 +2,7 @@ name: Deploy MVP (Azure)
 
 on:
   push:
-    branches: [main]
+    branches: [main, azure-mvp-deploy]
   workflow_dispatch:
 
 concurrency:
@@ -11,6 +11,7 @@ concurrency:
 
 env:
   IMAGE_TAG: ${{ github.sha }}
+  ONEVO_APP_DIR: /opt/onevo/app
 
 jobs:
   build-push:
@@ -100,7 +101,8 @@ jobs:
             --exclude node_modules \
             --exclude dashboard/dist \
             --exclude connector/dist/build \
-            -e ssh ./ "${VM_USER}@${VM_HOST}:/opt/onevo/"
+            --exclude "installer-site/*.exe" \
+            -e ssh ./ "${VM_USER}@${VM_HOST}:${ONEVO_APP_DIR}/"
 
       - name: Write production .env and deploy
         env:
@@ -110,7 +112,7 @@ jobs:
           DASHBOARD_IMAGE: ${{ needs.build-push.outputs.dashboard_image }}
           CLOUD_AI_IMAGE: ${{ needs.build-push.outputs.cloud_ai_image }}
         run: |
-          ssh "${VM_USER}@${VM_HOST}" "mkdir -p /opt/onevo/connector/dist"
+          ssh "${VM_USER}@${VM_HOST}" "mkdir -p ${ONEVO_APP_DIR}/installer-site ${ONEVO_APP_DIR}/connector/dist"
           printf '%s\n' "${{ secrets.PRODUCTION_ENV }}" > /tmp/onevo.env
           {
             echo ""
@@ -121,8 +123,8 @@ jobs:
             echo "ACR_USERNAME=${{ secrets.ACR_USERNAME }}"
             echo "ACR_PASSWORD=${{ secrets.ACR_PASSWORD }}"
           } >> /tmp/onevo.env
-          scp /tmp/onevo.env "${VM_USER}@${VM_HOST}:/opt/onevo/.env"
-          ssh "${VM_USER}@${VM_HOST}" "chmod +x /opt/onevo/infra/mvp/deploy.sh && /opt/onevo/infra/mvp/deploy.sh"
+          scp /tmp/onevo.env "${VM_USER}@${VM_HOST}:${ONEVO_APP_DIR}/.env"
+          ssh "${VM_USER}@${VM_HOST}" "chmod +x ${ONEVO_APP_DIR}/infra/mvp/deploy.sh && ONEVO_DIR=${ONEVO_APP_DIR} USE_GPU=false DEPLOY_MODE=acr ${ONEVO_APP_DIR}/infra/mvp/deploy.sh"
 
       - name: Smoke test (public API)
         env:
@@ -168,7 +170,7 @@ jobs:
           pip install -r connector/requirements-build.txt
           $url = "${{ secrets.BACKEND_PUBLIC_URL }}"
           if (-not $url) { throw "Set BACKEND_PUBLIC_URL secret (https://api.yourdomain.example)" }
-          ./scripts/build-installer.ps1 -BackendUrl $url
+          ./scripts/build-installer.ps1 -BackendUrl $url -AllowHttp
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -188,5 +190,7 @@ jobs:
           if (-not $exe) { throw "Installer EXE not found" }
           $keyPath = "$env:RUNNER_TEMP/deploy_key"
           Set-Content -Path $keyPath -Value $env:VM_SSH_KEY -NoNewline
-          scp -i $keyPath -o StrictHostKeyChecking=no $exe.FullName "${env:VM_USER}@${env:VM_HOST}:/opt/onevo/connector/dist/"
-          ssh -i $keyPath -o StrictHostKeyChecking=no "${env:VM_USER}@${env:VM_HOST}" "ls -la /opt/onevo/connector/dist/"
+          $appDir = "/opt/onevo/app"
+          scp -i $keyPath -o StrictHostKeyChecking=no $exe.FullName "${env:VM_USER}@${env:VM_HOST}:${appDir}/installer-site/"
+          scp -i $keyPath -o StrictHostKeyChecking=no $exe.FullName "${env:VM_USER}@${env:VM_HOST}:${appDir}/connector/dist/"
+          ssh -i $keyPath -o StrictHostKeyChecking=no "${env:VM_USER}@${env:VM_HOST}" "ls -la ${appDir}/installer-site/"

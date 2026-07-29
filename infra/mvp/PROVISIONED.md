@@ -56,10 +56,10 @@ Also create `AZURE_CREDENTIALS` service principal JSON (see [AZURE_MVP_DEPLOY.md
 
 ```bash
 ssh azureuser@20.193.69.220
-git clone <your-github-repo-url> /opt/onevo
-cd /opt/onevo
+git clone <your-github-repo-url> /opt/onevo/app
+cd /opt/onevo/app
 sudo ACR_LOGIN_SERVER=onevoacrmvp.azurecr.io bash infra/mvp/vm-setup.sh
-cp infra/mvp/.env.production.example /opt/onevo/.env
+cp infra/mvp/.env.production.example /opt/onevo/app/.env
 # Edit .env — set CLOUD_AI_DEVICE=cpu, passwords, JWT, SMTP
 ```
 
@@ -73,4 +73,4 @@ Azure portal: [Quota increase](https://aka.ms/ProdportalCRP/#blade/Microsoft_Azu
 
 ## Installer download
 
-Unchanged: shops download the Windows EXE from the **dashboard** after login. The deploy pipeline copies the built EXE to `/opt/onevo/connector/dist/` on this VM.
+Unchanged: shops download the Windows EXE from the **dashboard** after login. The deploy pipeline copies the built EXE to `/opt/onevo/app/installer-site/` on this VM (mounted as `/app/connector-dist` in the backend container).
