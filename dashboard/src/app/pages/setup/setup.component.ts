@@ -189,8 +189,6 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
               {{ testingStream ? 'Testing…' : '🔌 Test Stream' }}
             </button>
             @if (selectedCamera.id) {
-              <a class="btn-link" [href]="'http://' + connectorAdminHost + ':8099/snapshot?camera_id=' + selectedCamera.id" target="_blank">
-            @if (selectedCamera.onvifHost) {
               <a class="btn-link" [href]="liveSnapshotUrl" target="_blank">
                 📷 Live Snapshot
               </a>
