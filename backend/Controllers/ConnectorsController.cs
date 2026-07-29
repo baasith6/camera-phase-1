@@ -73,6 +73,23 @@ public class ConnectorsController : ControllerBase
         if (row is null)
             return BadRequest(new { error = "Invalid, used, or expired setup code" });
 
+        // A store owns one connector identity. Do not let a second PC claim a
+        // code and rotate the active shop connector's API key. Re-pairing is
+        // allowed only after uninstall/offline timeout.
+        var activeCutoff = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var activeConnector = await _db.Connectors
+            .AsNoTracking()
+            .AnyAsync(c =>
+                c.StoreId == row.StoreId &&
+                c.LastHeartbeat >= activeCutoff &&
+                (c.Status == ConnectorStatus.Healthy ||
+                 c.Status == ConnectorStatus.Degraded),
+                HttpContext.RequestAborted);
+        if (activeConnector)
+            return Conflict(new {
+                error = "This store already has an active connector. Uninstall or stop it before pairing another PC."
+            });
+
         await using var transaction = await _db.Database.BeginTransactionAsync(
             HttpContext.RequestAborted);
 
@@ -140,6 +157,25 @@ public class ConnectorsController : ControllerBase
         return Ok(new { ok = true });
     }
 
+    // Called by the Windows uninstaller before it removes local credentials.
+    // The connector row is retained so a reinstall can safely re-pair the same
+    // store and cameras, but the dashboard stops treating it as installed.
+    [AllowAnonymous]
+    [HttpPost("uninstall")]
+    public async Task<IActionResult> Uninstall()
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(
+            Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+
+        connector.Status = ConnectorStatus.Offline;
+        connector.LastHeartbeat = null;
+        connector.DegradedReason = "uninstalled";
+        connector.UploadQueueDepth = 0;
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        return Ok(new { ok = true });
+    }
+
     // Health list for the dashboard.
     [Authorize]
     [HttpGet]
@@ -176,7 +212,8 @@ public class ConnectorsController : ControllerBase
 
         var cameras = await _db.Cameras
             .Where(c => c.StoreId == connector.StoreId &&
-                        c.ConnectorId == connector.Id)
+                        c.ConnectorId == connector.Id &&
+                        c.Status != CameraStatus.Disabled)
             .OrderBy(c => c.Name)
             .Select(c => new
             {

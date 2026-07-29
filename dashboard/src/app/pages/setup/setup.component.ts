@@ -22,17 +22,26 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         </div>
         <div class="conn-status" [class.on]="storeConnectorOnline" [class.off]="!storeConnectorOnline">
           <span class="dot"></span>
-          {{ storeConnectorOnline ? 'Installed · Online' : (storeConnectors.length ? 'Installed · Offline' : 'Not installed') }}
+          {{ storeConnectorOnline ? 'Installed · Online' : (storeConnectors.length ? 'Offline or uninstalled' : 'Not installed') }}
         </div>
       </div>
 
       <div class="conn-actions">
-        <button (click)="downloadInstaller()" [disabled]="!installerInfo">
-          Download Windows connector
-        </button>
-        <button class="ghost" (click)="generateSetupCode()" [disabled]="!storeId || generatingCode">
-          {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
-        </button>
+        @if (!storeConnectorOnline) {
+          <button (click)="downloadInstaller()" [disabled]="!installerInfo">
+            {{ storeConnectors.length ? 'Download / reinstall connector' : 'Download Windows connector' }}
+          </button>
+          <button class="ghost" (click)="generateSetupCode()" [disabled]="!storeId || generatingCode">
+            {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
+          </button>
+        } @else {
+          <button disabled>Installed</button>
+          @if (connectorUpdateAvailable) {
+            <span class="update-note">Update v{{ installerInfo?.version }} available in the shop PC tray</span>
+          } @else {
+            <span class="muted small">Updates will appear automatically in the shop PC tray.</span>
+          }
+        }
         <button class="ghost" (click)="refreshConnectors()" [disabled]="!storeId">Refresh status</button>
       </div>
 
@@ -91,10 +100,26 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
 
       <!-- Cameras -->
       <div class="card">
-        <h3>Cameras</h3>
+        <div class="cam-list-header">
+          <h3>Cameras</h3>
+          @if (cameras.length) {
+            <div>
+              <button class="ghost small" (click)="toggleAllCameras()">
+                {{ selectedCameraIds.size === cameras.length ? 'Clear all' : 'Select all' }}
+              </button>
+              @if (selectedCameraIds.size) {
+                <button class="ghost small danger-text" (click)="removeSelectedCameras()">
+                  Remove {{ selectedCameraIds.size }}
+                </button>
+              }
+            </div>
+          }
+        </div>
         @if (!storeId) { <p class="muted">Select a store.</p> }
         @for (c of cameras; track c.id) {
           <div class="row-item" [class.sel]="c.id === cameraId" (click)="selectCamera(c.id)">
+            <input type="checkbox" [checked]="selectedCameraIds.has(c.id)"
+                   (click)="$event.stopPropagation()" (change)="toggleCameraSelection(c.id)" />
             <div>
               <span>{{ c.name }}</span>
               <span class="muted small"> [{{ c.status }}]</span>
@@ -156,21 +181,37 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         <div class="cam-detail-header">
           <h3>{{ selectedCamera.name }}</h3>
           <div style="display:flex;gap:.5rem">
+            <button class="ghost small" (click)="startCameraEdit()">
+              {{ editingCamera ? 'Editing' : 'Edit' }}
+            </button>
+            <button class="ghost small danger-text" (click)="removeCamera(selectedCamera.id)">Remove</button>
             <button class="ghost small" (click)="testStream()" [disabled]="testingStream">
               {{ testingStream ? 'Testing…' : '🔌 Test Stream' }}
             </button>
-            @if (selectedCamera.onvifHost) {
-              <a class="btn-link" [href]="'http://' + connectorAdminHost + ':8099/onvif/snapshot'" target="_blank">
+            @if (selectedCamera.id) {
+              <a class="btn-link" [href]="'http://' + connectorAdminHost + ':8099/snapshot?camera_id=' + selectedCamera.id" target="_blank">
                 📷 Live Snapshot
               </a>
             }
           </div>
         </div>
 
+        @if (editingCamera) {
+          <div class="edit-grid">
+            <label>Name<input [(ngModel)]="editCamName" /></label>
+            <label>RTSP URL<input [(ngModel)]="editCamUrl" autocomplete="off" /></label>
+            <label>ONVIF host<input [(ngModel)]="editOnvifHost" /></label>
+            <label>ONVIF port<input type="number" [(ngModel)]="editOnvifPort" /></label>
+            <div class="row">
+              <button (click)="saveCameraEdit()" [disabled]="savingCamera">Save changes</button>
+              <button class="ghost" (click)="editingCamera=false">Cancel</button>
+            </div>
+          </div>
+        } @else {
         <div class="detail-grid">
           <div class="detail-row">
             <span class="dk">RTSP URL</span>
-            <span class="dv">{{ selectedCamera.rtspUrl || '—' }}</span>
+            <span class="dv">{{ maskedRtsp(selectedCamera.rtspUrl) }}</span>
           </div>
           <div class="detail-row">
             <span class="dk">Status</span>
@@ -206,6 +247,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             </div>
           }
         </div>
+        }
 
         @if (streamTestResult) {
           <div class="test-result" [class.ok]="streamTestResult.ok" [class.err]="!streamTestResult.ok">
@@ -285,6 +327,11 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
     .canvas-hint { margin-top:.4rem; font-size:.8rem; }
     .small { font-size:.8rem; }
     .cam-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
+    .cam-list-header { display:flex;justify-content:space-between;gap:.5rem;align-items:center; }
+    .cam-list-header h3 { margin:0; }
+    .danger-text { color:var(--danger)!important; }
+    .edit-grid { display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:.7rem; }
+    .edit-grid label { display:flex;flex-direction:column;gap:.25rem;color:var(--accent-2);font-size:.8rem; }
     .cam-detail-header h3 { margin:0; }
     .detail-grid { display:flex; flex-direction:column; gap:.3rem; }
     .detail-row { display:flex; gap:1rem; font-size:.85rem; }
@@ -319,6 +366,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
     .code-value { font-family:ui-monospace,Consolas,monospace; font-size:1.35rem; letter-spacing:.12em; font-weight:700; }
     .conn-list { margin-top:.75rem; display:flex; flex-direction:column; gap:.35rem; }
     .conn-row { display:flex; justify-content:space-between; align-items:center; font-size:.85rem; }
+    .update-note { color:var(--warning,#f59e0b);font-size:.82rem;font-weight:600;align-self:center; }
   `],
 })
 export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
@@ -330,6 +378,13 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   storeId = '';
   cameraId = '';
   selectedCamera: Camera | null = null;
+  selectedCameraIds = new Set<string>();
+  editingCamera = false;
+  savingCamera = false;
+  editCamName = '';
+  editCamUrl = '';
+  editOnvifHost = '';
+  editOnvifPort = 80;
 
   newStoreName = '';
   newCamName = '';
@@ -484,7 +539,8 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   selectStore(id: string): void {
     this.storeId = id; this.cameraId = ''; this.zones = []; this.selectedCamera = null;
     this.setupCode = ''; this.setupCodeExpires = '';
-    this.api.listCameras(id).subscribe((c) => (this.cameras = c));
+    this.selectedCameraIds.clear();
+    this.api.listCameras(id).subscribe((c) => (this.cameras = c.filter(x => x.status !== 'Disabled')));
     this.refreshConnectors();
   }
 
@@ -497,7 +553,6 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     this.rectCurrent = null;
     this.api.getCamera(id).subscribe(cam => {
       this.selectedCamera = cam;
-      if (cam.onvifHost) this.connectorAdminHost = cam.onvifHost;
     });
     this.api.listZones(id).subscribe((z) => { this.zones = z; setTimeout(() => this.redraw()); });
   }
@@ -521,6 +576,77 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
         this.newOnvifPort = 80; this.showOnvifForm = false;
         this.selectStore(this.storeId);
       });
+  }
+
+  get connectorUpdateAvailable(): boolean {
+    if (!this.installerInfo || !this.storeConnectors.length) return false;
+    return this.storeConnectors.some(
+      connector => this.compareVersions(connector.version, this.installerInfo!.version) < 0);
+  }
+
+  private compareVersions(left: string, right: string): number {
+    const parse = (value: string) => value.split('.').map(part => Number.parseInt(part, 10) || 0);
+    const a = parse(left);
+    const b = parse(right);
+    for (let index = 0; index < Math.max(a.length, b.length); index++) {
+      if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
+    }
+    return 0;
+  }
+
+  maskedRtsp(value?: string): string {
+    if (!value) return '—';
+    return value.replace(/(rtsp:\/\/[^:/@\s]+:)[^@\s]+@/i, '$1••••@');
+  }
+
+  startCameraEdit(): void {
+    if (!this.selectedCamera) return;
+    this.editingCamera = true;
+    this.editCamName = this.selectedCamera.name;
+    this.editCamUrl = this.selectedCamera.rtspUrl || '';
+    this.editOnvifHost = this.selectedCamera.onvifHost || '';
+    this.editOnvifPort = this.selectedCamera.onvifPort || 80;
+  }
+
+  saveCameraEdit(): void {
+    if (!this.selectedCamera || !this.editCamName.trim()) return;
+    this.savingCamera = true;
+    this.api.updateCamera(this.selectedCamera.id, {
+      name: this.editCamName.trim(),
+      rtspUrl: this.editCamUrl.trim(),
+      onvifHost: this.editOnvifHost.trim(),
+      onvifPort: this.editOnvifPort || 80,
+    }).subscribe({
+      next: (camera) => {
+        this.savingCamera = false;
+        this.editingCamera = false;
+        this.selectedCamera = camera;
+        this.selectStore(this.storeId);
+      },
+      error: () => (this.savingCamera = false),
+    });
+  }
+
+  toggleCameraSelection(id: string): void {
+    this.selectedCameraIds.has(id)
+      ? this.selectedCameraIds.delete(id)
+      : this.selectedCameraIds.add(id);
+  }
+
+  toggleAllCameras(): void {
+    if (this.selectedCameraIds.size === this.cameras.length) this.selectedCameraIds.clear();
+    else this.selectedCameraIds = new Set(this.cameras.map(camera => camera.id));
+  }
+
+  removeCamera(id: string): void {
+    if (!confirm('Remove this camera from monitoring?')) return;
+    this.api.deleteCamera(id).subscribe(() => this.selectStore(this.storeId));
+  }
+
+  removeSelectedCameras(): void {
+    const ids = [...this.selectedCameraIds];
+    if (!ids.length || !confirm(`Remove ${ids.length} selected camera(s) from monitoring?`)) return;
+    this.api.bulkDisableCameras(ids).subscribe(() => this.selectStore(this.storeId));
   }
 
   deleteZone(id: string): void {

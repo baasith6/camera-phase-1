@@ -20,6 +20,7 @@ class StoreOrchestrator:
         self.store = store
         self.pipelines: Dict[str, CapturePipeline] = {}
         self.threads: Dict[str, threading.Thread] = {}
+        self.source_fingerprints: Dict[str, tuple] = {}
         self.stop_event = threading.Event()
 
     def run(self):
@@ -47,14 +48,17 @@ class StoreOrchestrator:
             
             # Restart pipelines whose capture thread died (e.g. initial RTSP failure).
             for cid in list(self.pipelines.keys()):
+                cam = next((item for item in cams if item["id"] == cid), None)
+                fingerprint = self._fingerprint(cam) if cam else None
+                if cam is not None and self.source_fingerprints.get(cid) != fingerprint:
+                    self.state.log(f"Orchestrator: source changed for camera {cid}")
+                    self._remove_pipeline(cid)
+                    continue
                 thread = self.threads.get(cid)
                 if thread is not None and thread.is_alive():
                     continue
                 self.state.log(f"Orchestrator: restarting dead pipeline for camera {cid}")
-                self.pipelines[cid].stop()
-                del self.pipelines[cid]
-                if cid in self.threads:
-                    del self.threads[cid]
+                self._remove_pipeline(cid)
 
             # Start new cameras
             for cam in cams:
@@ -72,7 +76,9 @@ class StoreOrchestrator:
                     # Create a copy of config for this specific pipeline
                     cam_cfg = copy.copy(self.base_cfg)
                     cam_cfg.camera_id = cid
-                    cam_cfg.source = rtsp
+                    # Backend represents shop-local MP4 files as file:// paths.
+                    # OpenCV on Windows needs the native path, not the URI.
+                    cam_cfg.source = local_source
                     # Loop local/test file sources so continuous monitoring keeps firing motion.
                     src_l = (rtsp or "").lower()
                     if src_l.startswith("file://") or src_l.endswith(".mp4") or src_l.endswith(".avi"):
@@ -94,14 +100,13 @@ class StoreOrchestrator:
                     self.pipelines[cid] = pipeline
                     self.threads[cid] = t
                     self.state.pipelines[cid] = pipeline
+                    self.source_fingerprints[cid] = self._fingerprint(cam)
 
             # Stop removed cameras
             for cid in list(self.pipelines.keys()):
                 if cid not in active_cam_ids:
                     self.state.log(f"Orchestrator: Stopping pipeline for camera {cid}")
-                    self.pipelines[cid].stop()
-                    del self.pipelines[cid]
-                    del self.threads[cid]
+                    self._remove_pipeline(cid)
 
             time.sleep(10)
 
@@ -111,3 +116,22 @@ class StoreOrchestrator:
             p.stop()
         for t in self.threads.values():
             t.join(timeout=2.0)
+
+    @staticmethod
+    def _fingerprint(cam: dict | None) -> tuple | None:
+        if cam is None:
+            return None
+        return (
+            cam.get("rtspUrl") or "",
+            cam.get("onvifHost") or "",
+            cam.get("onvifPort") or 0,
+            cam.get("status") or "",
+        )
+
+    def _remove_pipeline(self, camera_id: str) -> None:
+        pipeline = self.pipelines.pop(camera_id, None)
+        if pipeline is not None:
+            pipeline.stop()
+        self.threads.pop(camera_id, None)
+        self.source_fingerprints.pop(camera_id, None)
+        self.state.remove_camera(camera_id)

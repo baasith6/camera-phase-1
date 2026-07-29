@@ -38,10 +38,51 @@ class RuntimeState:
 
         # Last captured frame (JPEG bytes) per camera ID for the dashboard
         self.last_frames: dict[str, bytes] = {}
+        self.camera_states: dict[str, dict[str, Any]] = {}
 
         # Active capture pipeline(s) — set from main.py / orchestrator for admin control
         self.pipeline: CapturePipeline | None = None
         self.pipelines: dict[str, Any] = {}
+
+    def publish_frame(
+        self, camera_id: str, jpeg: bytes, width: int, height: int, source_fps: float
+    ) -> None:
+        now = time.time()
+        with self._lock:
+            self.last_frames[camera_id] = jpeg
+            current = self.camera_states.setdefault(camera_id, {})
+            current.update({
+                "cameraId": camera_id,
+                "status": "Live",
+                "lastFrameAt": now,
+                "width": width,
+                "height": height,
+                "sourceFps": round(source_fps, 2),
+                "lastError": None,
+            })
+            current["frameSequence"] = int(current.get("frameSequence", 0)) + 1
+
+    def set_camera_status(self, camera_id: str, status: str, error: str | None = None) -> None:
+        with self._lock:
+            current = self.camera_states.setdefault(camera_id, {"cameraId": camera_id})
+            current["status"] = status
+            current["lastError"] = error
+            if status == "Reconnecting":
+                current["reconnectCount"] = int(current.get("reconnectCount", 0)) + 1
+
+    def remove_camera(self, camera_id: str) -> None:
+        with self._lock:
+            self.last_frames.pop(camera_id, None)
+            self.camera_states.pop(camera_id, None)
+            self.pipelines.pop(camera_id, None)
+
+    def get_frame(self, camera_id: str) -> bytes | None:
+        with self._lock:
+            return self.last_frames.get(camera_id)
+
+    def camera_statuses(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(value) for value in self.camera_states.values()]
 
     def log(self, msg: str) -> None:
         line = f"{time.strftime('%H:%M:%S')} {msg}"
@@ -53,6 +94,11 @@ class RuntimeState:
         with self._lock:
             was = self.capture_paused
             self.capture_paused = paused
+            if paused:
+                self.last_frames.clear()
+                for current in self.camera_states.values():
+                    current["status"] = "Paused"
+                    current["lastError"] = None
         if paused and not was:
             self.log("Capture paused — no new motion clips")
         elif not paused and was:

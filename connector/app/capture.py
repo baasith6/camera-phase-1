@@ -83,6 +83,7 @@ class CapturePipeline:
         self._trigger_lock = threading.Lock()
         self._is_rtsp = cfg.source.lower().startswith("rtsp")
         self._person_hog = None
+        self._source_fps = cfg.fps
         if cfg.use_person_filter:
             self._person_hog = cv2.HOGDescriptor()
             self._person_hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
@@ -158,6 +159,8 @@ class CapturePipeline:
 
         backoff = min(2 ** attempt, self.cfg.rtsp_reconnect_max_sec)
         self.state.rtsp_reconnects += 1
+        if self.cfg.camera_id:
+            self.state.set_camera_status(self.cfg.camera_id, "Reconnecting")
         self.state.log(
             f"RTSP stream lost — reconnect attempt {attempt + 1} "
             f"(waiting {backoff:.0f}s) [{self.cfg.source}]"
@@ -170,7 +173,56 @@ class CapturePipeline:
         new_cap = self._open()
         if new_cap.isOpened():
             self.state.log("RTSP reconnected OK")
+        elif self.cfg.camera_id:
+            self.state.set_camera_status(
+                self.cfg.camera_id, "Offline", "RTSP reconnect failed"
+            )
         return new_cap
+
+    def _publish_preview(self, frame, now: float, fps: float) -> None:
+        if not self.cfg.camera_id or now - getattr(self, "_last_snap", 0) < 0.5:
+            return
+        self._last_snap = now
+        height, width = frame.shape[:2]
+        preview = frame
+        if width > 960:
+            scale = 960 / float(width)
+            preview = cv2.resize(frame, (960, max(1, int(height * scale))))
+        ret, jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if ret:
+            ph, pw = preview.shape[:2]
+            self.state.publish_frame(
+                self.cfg.camera_id, jpeg.tobytes(), pw, ph, fps
+            )
+
+    def _processing_frame(self, frame):
+        """Bound per-camera RAM while retaining enough detail for cloud analysis."""
+        height, width = frame.shape[:2]
+        max_width = self.cfg.processing_max_width
+        if width <= max_width:
+            return frame
+        scale = max_width / float(width)
+        return cv2.resize(
+            frame,
+            (max_width, max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    def _wait_while_paused(self, cap: cv2.VideoCapture | None) -> cv2.VideoCapture | None:
+        if not self.state.capture_paused:
+            return cap
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass
+        if self.cfg.camera_id:
+            self.state.set_camera_status(self.cfg.camera_id, "Paused")
+        while self.state.capture_paused and not self._stop:
+            time.sleep(0.25)
+        if self._stop:
+            return None
+        return self._open_initial()
 
     # ------------------------------------------------------------------
     # Detection helpers
@@ -235,13 +287,22 @@ class CapturePipeline:
         For RTSP sources, read failures trigger automatic reconnect with exponential
         back-off.  The loop only exits when self._stop is set or a file source ends.
         """
-        cap = self._open_initial()
+        cap = self._wait_while_paused(None)
+        if cap is None and not self.state.capture_paused and not self._stop:
+            cap = self._open_initial()
         if not cap:
             self.state.log(f"ERROR: cannot open source {self.cfg.source}")
+            if self.cfg.camera_id:
+                self.state.set_camera_status(
+                    self.cfg.camera_id, "Offline", "Cannot open source"
+                )
             return
 
         src_fps = cap.get(cv2.CAP_PROP_FPS) or self.cfg.fps
         fps = self.cfg.fps if self.cfg.fps > 0 else (src_fps or 10)
+        self._source_fps = max(1.0, float(src_fps or fps or 10))
+        file_frame_interval = 1.0 / self._source_fps
+        next_file_frame_at = time.monotonic()
         pre_len, post_len = self._clip_window_frames(fps)
 
         rolling: deque = deque(maxlen=pre_len)
@@ -255,6 +316,17 @@ class CapturePipeline:
         )
 
         while not self._stop:
+            if self.state.capture_paused:
+                rolling.clear()
+                cap = self._wait_while_paused(cap)
+                bg = cv2.createBackgroundSubtractorMOG2(
+                    history=200, varThreshold=25, detectShadows=False
+                )
+                if cap is None:
+                    break
+                next_file_frame_at = time.monotonic()
+                self.state.log("Capture source reopened after resume")
+                continue
             ok, frame = cap.read()
 
             # ---- Handle read failure ------------------------------------------------
@@ -273,6 +345,7 @@ class CapturePipeline:
                     # File loop: restart from beginning.
                     cap.release()
                     cap = self._open()
+                    next_file_frame_at = time.monotonic()
                     continue
                 else:
                     break   # file ended, stop normally
@@ -280,6 +353,16 @@ class CapturePipeline:
             # ---- Successful read — reset reconnect counter --------------------------
             reconnect_attempt = 0
 
+            if not self._is_rtsp:
+                now_mono = time.monotonic()
+                delay = next_file_frame_at - now_mono
+                if delay > 0:
+                    time.sleep(delay)
+                next_file_frame_at = max(
+                    next_file_frame_at + file_frame_interval, time.monotonic()
+                )
+
+            frame = self._processing_frame(frame)
             rolling.append(frame.copy())
             fgmask = bg.apply(frame)
             now = time.time()
@@ -291,18 +374,9 @@ class CapturePipeline:
                 rolling = deque(list(rolling)[-pre_len:], maxlen=pre_len)
             post_len = new_post
 
-            # Save snapshot to state for the dashboard (max 1 per second)
-            if now - getattr(self, "_last_snap", 0) > 1.0:
-                self._last_snap = now
-                if self.cfg.camera_id:
-                    ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
-                    if ret:
-                        self.state.last_frames[self.cfg.camera_id] = jpeg.tobytes()
+            self._publish_preview(frame, now, self._source_fps)
 
             manual_trigger = self._consume_trigger()
-            if self.state.capture_paused and not manual_trigger:
-                continue
-
             motion = self._has_motion(fgmask)
             should_cut = manual_trigger or (
                 motion and (now - last_trigger) >= self.cfg.cooldown_seconds
@@ -326,7 +400,18 @@ class CapturePipeline:
                             cap.release()
                             cap = self._open()
                         break
+                    if not self._is_rtsp:
+                        now_mono = time.monotonic()
+                        delay = next_file_frame_at - now_mono
+                        if delay > 0:
+                            time.sleep(delay)
+                        next_file_frame_at = max(
+                            next_file_frame_at + file_frame_interval,
+                            time.monotonic(),
+                        )
+                    f2 = self._processing_frame(f2)
                     post_frames.append(f2.copy())
+                    self._publish_preview(f2, time.time(), self._source_fps)
                     reconnect_attempt = 0
 
                 clip_frames = list(rolling) + post_frames
@@ -337,6 +422,9 @@ class CapturePipeline:
                     on_clip(path, duration, reason)
                 rolling.clear()
 
-        cap.release()
+        if cap is not None:
+            cap.release()
         self.state.capturing = False
+        if self.cfg.camera_id:
+            self.state.set_camera_status(self.cfg.camera_id, "Offline", "Capture stopped")
         self.state.log("Capture stopped")

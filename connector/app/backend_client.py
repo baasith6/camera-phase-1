@@ -109,6 +109,14 @@ class BackendClient:
         )
         r.raise_for_status()
 
+    def notify_uninstall(self) -> None:
+        r = requests.post(
+            f"{self.base}/api/connectors/uninstall",
+            headers=self._auth_headers(),
+            timeout=10,
+        )
+        r.raise_for_status()
+
     def update_device_info(self, camera_id: str, info: dict) -> None:
         """Push ONVIF device metadata to the backend camera record (best-effort)."""
         r = requests.put(

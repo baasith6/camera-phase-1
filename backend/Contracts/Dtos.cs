@@ -31,6 +31,7 @@ public record StoreOverviewResponse(
 // ---- Cameras ----
 public record CreateCameraRequest(Guid StoreId, string Name, string RtspUrl, string? OnvifHost, int? OnvifPort);
 public record UpdateCameraRequest(string? Name, string? RtspUrl, string? Status, string? OnvifHost, int? OnvifPort);
+public record BulkDisableCamerasRequest(List<Guid> CameraIds);
 public record UpdateDeviceInfoRequest(
     string? Manufacturer,
     string? Model,

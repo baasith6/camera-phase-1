@@ -2,7 +2,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.instance_lock import InstanceLock
 from app.store import LocalStore
@@ -27,6 +27,19 @@ class InstanceLockTests(unittest.TestCase):
 
 
 class LocalStoreConcurrencyTests(unittest.TestCase):
+    def test_monitoring_pause_setting_survives_reopen(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = LocalStore(temp)
+            self.assertFalse(store.get_bool_setting("monitoring_paused"))
+            store.set_bool_setting("monitoring_paused", True)
+            store.close()
+
+            reopened = LocalStore(temp)
+            self.assertTrue(reopened.get_bool_setting("monitoring_paused"))
+            reopened.set_bool_setting("monitoring_paused", False)
+            self.assertFalse(reopened.get_bool_setting("monitoring_paused"))
+            reopened.close()
+
     def test_parallel_camera_enqueues_are_serialized(self):
         with tempfile.TemporaryDirectory() as temp:
             store = LocalStore(temp)
@@ -47,6 +60,46 @@ class LocalStoreConcurrencyTests(unittest.TestCase):
 
 
 class TrayLogicTests(unittest.TestCase):
+    def test_cancelled_update_prompt_is_remembered_per_version(self):
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "app.tray.default_state_dir", return_value=temp
+        ):
+            app = tray.TrayApplication()
+            self.assertEqual(app._prompted_update_version(), "")
+            app._mark_update_prompted("9.9.9")
+            self.assertEqual(app._prompted_update_version(), "9.9.9")
+
+    def test_update_is_hidden_when_manifest_is_not_newer(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "version": tray.CURRENT_VERSION,
+            "downloadUrl": "https://example.test/connector.exe",
+            "sha256": "abc",
+        }
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "app.tray.default_state_dir", return_value=temp
+        ), patch("app.tray.requests.get", return_value=response):
+            app = tray.TrayApplication()
+            app._check_updates(notify=False)
+        self.assertFalse(app.update_available)
+
+    def test_newer_manifest_enables_update_menu_state(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "version": "99.0.0",
+            "downloadUrl": "https://example.test/connector.exe",
+            "sha256": "abc",
+        }
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "app.tray.default_state_dir", return_value=temp
+        ), patch("app.tray.requests.get", return_value=response):
+            app = tray.TrayApplication()
+            app._check_updates(notify=False)
+        self.assertTrue(app.update_available)
+        self.assertEqual(app.latest_version, "99.0.0")
+
     def test_tray_uses_a_separate_instance_lock(self):
         with tempfile.TemporaryDirectory() as temp:
             service = InstanceLock(temp)

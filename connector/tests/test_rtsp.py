@@ -28,6 +28,7 @@ def _minimal_cfg(**overrides) -> Config:
         cooldown_seconds=60.0,
         motion_area_frac=0.02,
         use_person_filter=False,
+        processing_max_width=640,
         disk_warn_pct=20.0,
         disk_critical_pct=10.0,
         max_upload_retries=5,
@@ -190,6 +191,38 @@ class OrchestratorRestartTests(unittest.TestCase):
         dead_pipeline.stop.assert_called_once()
         mock_pipeline_cls.assert_called_once()
         mock_thread_cls.return_value.start.assert_called_once()
+
+    @patch("app.orchestrator.time.sleep")
+    @patch("app.orchestrator.threading.Thread")
+    @patch("app.orchestrator.CapturePipeline")
+    def test_local_mp4_uri_is_opened_as_native_windows_path(
+        self, mock_pipeline_cls, mock_thread_cls, _sleep
+    ):
+        cfg = _minimal_cfg(camera_id="")
+        state = RuntimeState()
+        client = SimpleNamespace(
+            get_cameras=lambda: [{
+                "id": "cam-video",
+                "rtspUrl": "file://C:\\ProgramData\\ONEVO\\Connector\\media\\demo.mp4",
+            }]
+        )
+        store = SimpleNamespace(pending_count=lambda: 0)
+        orch = StoreOrchestrator(cfg, state, client, store)
+        mock_thread_cls.return_value = MagicMock()
+        mock_pipeline_cls.return_value = MagicMock()
+        iterations = [False, True]
+
+        with patch.object(
+            orch.stop_event, "is_set", side_effect=lambda: iterations.pop(0)
+        ):
+            orch.run()
+
+        pipeline_cfg = mock_pipeline_cls.call_args.args[0]
+        self.assertEqual(
+            pipeline_cfg.source,
+            "C:\\ProgramData\\ONEVO\\Connector\\media\\demo.mp4",
+        )
+        self.assertTrue(pipeline_cfg.loop)
 
 
 if __name__ == "__main__":

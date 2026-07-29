@@ -67,6 +67,15 @@ class LocalStore:
             )
             self._conn.commit()
 
+    def get_bool_setting(self, key: str, default: bool = False) -> bool:
+        value = self.get_cred(f"setting:{key}")
+        if value is None:
+            return default
+        return value.strip().lower() in ("1", "true", "yes", "on")
+
+    def set_bool_setting(self, key: str, value: bool) -> None:
+        self.set_cred(f"setting:{key}", "true" if value else "false")
+
     # ---- queue ----
     def enqueue(self, clip_path: str, camera_id: str, duration_sec: float, trigger: str) -> int:
         with self._lock:

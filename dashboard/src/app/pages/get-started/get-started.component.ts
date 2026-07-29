@@ -171,6 +171,7 @@ export class GetStartedComponent implements OnInit {
   storeUsers: UserAccount[] = [];
   cameraCount = 0;
   onlineConnectorCount = 0;
+  installedConnectorCount = 0;
   hasAlerts = false;
 
   selectedStoreId = '';
@@ -222,6 +223,7 @@ export class GetStartedComponent implements OnInit {
     this.api.listCameras(this.selectedStoreId).subscribe((cams) => {
       this.cameraCount = cams.length;
       this.api.listConnectors(this.selectedStoreId).subscribe((conns) => {
+        this.installedConnectorCount = conns.length;
         this.onlineConnectorCount = conns.filter((c) =>
           (c.status === 'Healthy' || c.status === 'Degraded') && c.lastHeartbeat).length;
         this.api.listAlerts(this.selectedStoreId).subscribe((alerts) => {
@@ -269,17 +271,20 @@ export class GetStartedComponent implements OnInit {
 
     const cameras = overview?.cameraCount ?? this.cameraCount;
     const onlineConnectors = overview?.onlineConnectorCount ?? this.onlineConnectorCount;
+    const registeredConnectors = overview?.connectorCount ?? this.installedConnectorCount;
     const alertsDone = overview
       ? !!(overview.lastAlertAt || overview.pendingAlertCount > 0)
       : this.hasAlerts;
 
-    this.steps = this.buildStepList(hasStore, hasManager, cameras, onlineConnectors, alertsDone);
+    this.steps = this.buildStepList(
+      hasStore, hasManager, cameras, registeredConnectors, onlineConnectors, alertsDone);
   }
 
   private buildStepList(
     hasStore: boolean,
     hasManager: boolean,
     cameraCount: number,
+    registeredConnectors: number,
     onlineConnectors: number,
     hasAlerts: boolean,
   ): ChecklistStep[] {
@@ -305,10 +310,16 @@ export class GetStartedComponent implements OnInit {
       },
       {
         id: 'installer',
-        title: 'Download Windows connector',
-        detail: 'Copy the installer to the shop PC that can reach your cameras (run as Administrator).',
-        done: !!this.installerInfo,
-        inlineAction: 'download',
+        title: onlineConnectors > 0
+          ? 'Windows connector installed'
+          : (registeredConnectors > 0 ? 'Connector offline or uninstalled' : 'Download Windows connector'),
+        detail: onlineConnectors > 0
+          ? 'The shop PC is online. Future code updates appear automatically in its tray.'
+          : (registeredConnectors > 0
+              ? 'No recent heartbeat was received. Download to reinstall, or start the connector on the shop PC.'
+              : 'Download once on the shop PC that can reach your cameras and run as Administrator.'),
+        done: onlineConnectors > 0,
+        inlineAction: onlineConnectors > 0 ? undefined : 'download',
       },
       {
         id: 'code',

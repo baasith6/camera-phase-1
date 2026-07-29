@@ -1,5 +1,5 @@
 #define AppName "ONEVO Local Connector"
-#define AppVersion "1.1.5"
+#define AppVersion "1.1.12"
 #define AppPublisher "ONEVO"
 #define AppExeName "onevo-connector.exe"
 #define AppServiceExe "onevo-connector-service.exe"
@@ -55,14 +55,17 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\ONEVO Connector Status"; Filename: "http://localhost:8099/"; IconFilename: "{app}\assets\onevo.ico"
 
 [Run]
-Filename: "{app}\{#AppServiceExe}"; Parameters: "uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Check: ExistingService
-Filename: "{app}\{#AppServiceExe}"; Parameters: "install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Installing Windows service..."
-Filename: "{app}\{#AppServiceExe}"; Parameters: "start"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Activating connector and starting monitoring..."
+; In-place updates preserve the existing service registration. Unregistering and
+; immediately registering it again creates a race when a tray update overlaps a
+; manually started installer and can leave the connector with no service.
+Filename: "{app}\{#AppServiceExe}"; Parameters: "install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Installing Windows service..."; Check: not ExistingService
+Filename: "{sys}\sc.exe"; Parameters: "config ONEVOConnector start= demand"; Flags: runhidden waituntilterminated; Check: PausedMarkerExists
+Filename: "{app}\{#AppServiceExe}"; Parameters: "start"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Activating connector and starting monitoring..."; Check: not PausedMarkerExists
 Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; WorkingDir: "{app}"; Flags: runasoriginaluser runhidden nowait; StatusMsg: "Starting ONEVO system tray..."
-Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; Flags: postinstall runasoriginaluser runhidden nowait skipifsilent unchecked; Description: "Open ONEVO Local Dashboard"
 
 [UninstallRun]
 Filename: "{app}\{#AppExeName}"; Parameters: "--tray-uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"
+Filename: "{app}\{#AppExeName}"; Parameters: "--notify-uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "NotifyCloud"
 Filename: "{app}\{#AppServiceExe}"; Parameters: "stop"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopSvc"
 Filename: "{app}\{#AppServiceExe}"; Parameters: "uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "UninstallSvc"
 
@@ -88,7 +91,7 @@ var
   RtspCount, OnvifCount, VideoCount: Integer;
   SourceSetupSkipped, NavigatingFromSourceChoice: Boolean;
   ExistingInstall: Boolean;
-  PreviousConfigFound, PreserveExistingConfig, FreshInstallCleanup: Boolean;
+  PreviousConfigFound, PreserveExistingConfig, FreshInstallCleanup, UpdateMode: Boolean;
   InstalledVersion: String;
 
 function JsonEscape(Value: String): String;
@@ -138,10 +141,23 @@ begin
     RegQueryStringValue(HKCU, Key, 'DisplayVersion', Version);
 end;
 
+function CmdLineParamExists(Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Value) = 0 then begin
+      Result := True;
+      Exit;
+    end;
+end;
+
 function InitializeSetup(): Boolean;
 var
   Choice: Integer;
 begin
+  UpdateMode := CmdLineParamExists('/UPDATE');
   ExistingInstall := ReadInstalledVersion(InstalledVersion) or
     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ONEVOConnector');
   PreviousConfigFound :=
@@ -159,7 +175,7 @@ begin
     Exit;
   end;
 
-  if ExistingInstall then begin
+  if ExistingInstall and not UpdateMode then begin
     if InstalledVersion = '' then InstalledVersion := 'an earlier version';
     Choice := MsgBox(
       'ONEVO Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
@@ -184,6 +200,12 @@ end;
 function ExistingService(): Boolean;
 begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ONEVOConnector');
+end;
+
+function PausedMarkerExists(): Boolean;
+begin
+  Result := FileExists(
+    ExpandConstant('{commonappdata}\ONEVO\Connector\data\monitoring.paused'));
 end;
 
 // --- FIX: robustly ensure NOTHING is holding onevo-connector.exe /
@@ -339,12 +361,8 @@ procedure UpdateSourceNextCaption;
 begin
   if (WizardForm.CurPageID = RtspPage.ID) or
      (WizardForm.CurPageID = OnvifPage.ID) or
-     (WizardForm.CurPageID = FilePage.ID) then begin
-    if CurrentSourceHasValue then
-      WizardForm.NextButton.Caption := SetupMessage(msgButtonNext)
-    else
-      WizardForm.NextButton.Caption := 'Skip';
-  end;
+     (WizardForm.CurPageID = FilePage.ID) then
+    WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
 end;
 
 procedure SourceValueChanged(Sender: TObject);
@@ -625,7 +643,17 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if PreserveExistingConfig and (PageID = IdentityPage.ID) then begin
+  if UpdateMode and
+     ((PageID = IdentityPage.ID) or (PageID = SourcePage.ID) or
+      (PageID = RtspPage.ID) or (PageID = OnvifPage.ID) or
+      (PageID = FilePage.ID)) then begin
+    Result := True;
+    Exit;
+  end;
+  if PreserveExistingConfig and
+     ((PageID = IdentityPage.ID) or (PageID = SourcePage.ID) or
+      (PageID = RtspPage.ID) or (PageID = OnvifPage.ID) or
+      (PageID = FilePage.ID)) then begin
     Result := True;
     Exit;
   end;
@@ -669,8 +697,10 @@ begin
       end;
     end;
     if ValidCount = 0 then begin
-      SourceSetupSkipped := True;
-      Result := True;
+      MsgBox('Enter at least one RTSP URL, or go Back and choose Skip camera setup.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
     end;
   end;
   if (CurPageID = RtspPage.ID) and not ValidateRtspUrls(RtspPage.Values[0]) then begin
@@ -692,8 +722,10 @@ begin
       end;
     end;
     if ValidCount = 0 then begin
-      SourceSetupSkipped := True;
-      Result := True;
+      MsgBox('Enter at least one ONVIF camera, or go Back and choose Skip camera setup.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
     end;
   end;
   if CurPageID = FilePage.ID then begin
@@ -709,8 +741,10 @@ begin
       end;
     end;
     if ValidCount = 0 then begin
-      SourceSetupSkipped := True;
-      Result := True;
+      MsgBox('Select at least one MP4 video, or go Back and choose Skip camera setup.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
     end;
   end;
 end;
@@ -727,6 +761,10 @@ begin
               (CurPageID = OnvifPage.ID) or
               (CurPageID = FilePage.ID) then
     UpdateSourceNextCaption
+  else if CurPageID = wpFinished then
+    WizardForm.NextButton.Caption := SetupMessage(msgButtonFinish)
+  else if CurPageID = wpReady then
+    WizardForm.NextButton.Caption := SetupMessage(msgButtonInstall)
   else
     WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
 end;
@@ -737,6 +775,7 @@ var
   I, Base: Integer;
 begin
   if CurStep <> ssInstall then Exit;
+  if UpdateMode then Exit;
     ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector'));
     ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\data'));
     ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\media'));

@@ -23,7 +23,8 @@ public enum CameraStatus
     Pending,
     Active,
     AnalyticsOnly,
-    Offline
+    Offline,
+    Disabled
 }
 
 public enum ConnectorStatus

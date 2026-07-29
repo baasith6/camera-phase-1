@@ -83,7 +83,7 @@ services:
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD}
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
-      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.5}
+      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.12}
       ConnectorInstaller__Path: /app/connector-dist
       ConnectorInstaller__DownloadUrl: ${CONNECTOR_INSTALLER_URL:-}
       Smtp__Enabled: ${SMTP_ENABLE:-false}

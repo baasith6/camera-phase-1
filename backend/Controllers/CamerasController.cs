@@ -88,6 +88,32 @@ public class CamerasController : ControllerBase
         return Ok(cam);
     }
 
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin,Manager,Installer")]
+    public async Task<IActionResult> Disable(Guid id)
+    {
+        var cam = await _db.Cameras.FindAsync(id);
+        if (cam is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
+        cam.Status = CameraStatus.Disabled;
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true, cameraId = cam.Id });
+    }
+
+    [HttpPost("bulk-disable")]
+    [Authorize(Roles = "Admin,Manager,Installer")]
+    public async Task<IActionResult> BulkDisable(BulkDisableCamerasRequest req)
+    {
+        var ids = (req.CameraIds ?? []).Distinct().ToList();
+        if (ids.Count == 0) return BadRequest(new { error = "Select at least one camera" });
+        var cameras = await TenantAccess.ScopeCameras(_db.Cameras, User)
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync();
+        foreach (var camera in cameras) camera.Status = CameraStatus.Disabled;
+        await _db.SaveChangesAsync();
+        return Ok(new { ok = true, disabled = cameras.Count });
+    }
+
     // Called by the connector after ONVIF query — stores device identity in the DB.
     [HttpPut("{id:guid}/device-info")]
     [AllowAnonymous]   // authenticated by connector's X-Connector-Key header (checked below)
