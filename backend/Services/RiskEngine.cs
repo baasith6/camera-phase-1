@@ -14,7 +14,7 @@ public class RiskConfig
         [nameof(AiEventType.Dwell)] = 20,            // max contribution; scaled by dwell duration
         [nameof(AiEventType.RepeatedHandling)] = 15,
         [nameof(AiEventType.BagOpen)] = 20,
-        [nameof(AiEventType.Concealment)] = 20,
+        [nameof(AiEventType.Concealment)] = 40,   // directly observed act of hiding an item — strongest single camera signal
         [nameof(AiEventType.ExitWithoutCheckout)] = 20,
         [nameof(AiEventType.ShelfPickupNoCheckout)] = 25,
         [nameof(AiEventType.BlindSpotMovement)] = 15,
@@ -36,7 +36,7 @@ public class RiskConfig
     public int MediumBand { get; set; } = 70; // >=70 medium alert
     public int HighBand { get; set; } = 90;   // >=90 high alert
 
-    public const string RuleVersion = "v4-starter-1.1";
+    public const string RuleVersion = "v4-starter-1.2";
 
     public bool IsLowStaffHour(int hour)
     {
