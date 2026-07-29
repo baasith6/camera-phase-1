@@ -37,8 +37,8 @@ pipeline {
         stage('Connector tests') {
           steps {
             dir('connector') {
-              bat 'python -m pip install -r requirements.txt pytest'
-              bat 'set PYTHONPATH=.&& python -m pytest tests/ -q'
+              bat '"C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe" -m pip install -r requirements.txt pytest'
+              bat 'set PYTHONPATH=.&& "C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe" -m pytest tests/ -q'
             }
           }
         }
