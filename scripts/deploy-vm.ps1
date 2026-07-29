@@ -121,7 +121,9 @@ docker compose ps --format 'table {{.Name}}\t{{.Status}}'
 
 Write-Host "==> Running remote deploy..."
 try {
-  Invoke-Checked "SSH deploy" { ssh @sshArgs "${VmUser}@${VmHost}" $remoteScript }
+  Invoke-Checked "SSH deploy" {
+    $remoteScript | ssh @sshArgs "${VmUser}@${VmHost}" "bash -s"
+  }
 } finally {
   if ($preparedKey -and (Test-Path $preparedKey)) { Remove-Item $preparedKey -Force -ErrorAction SilentlyContinue }
 }
