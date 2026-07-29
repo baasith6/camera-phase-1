@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from .backend_client import BackendClient
 from .capture import validate_rtsp_stream
@@ -36,6 +37,11 @@ def parse_rtsp_urls(rtsp_text: str) -> list[str]:
 
 
 WIZARD_ROUTE_PREFIX = "/setup"
+
+
+class WizardClaimBody(BaseModel):
+    setupCode: str = ""
+    name: str = ""
 
 
 def wizard_page_html(route_prefix: str = "") -> str:
@@ -197,8 +203,13 @@ WIZARD_HTML = """<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ setupCode: code, name })
         });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.detail || data.error || 'Claim failed');
+        const text = await r.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text || r.statusText }; }
+        if (!r.ok) {
+          const err = data.detail || data.error || data.message || text || 'Claim failed';
+          throw new Error(typeof err === 'string' ? err : JSON.stringify(err));
+        }
         show(msg, true, 'Linked to store. Next: add cameras.');
         setTimeout(() => setStep(1), 500);
       } catch (e) { show(msg, false, e.message || String(e)); }
@@ -214,8 +225,13 @@ WIZARD_HTML = """<!DOCTYPE html>
       fd.append('loop_file', document.getElementById('loopFile').checked ? 'true' : 'false');
       try {
         const r = await fetch('wizard/sources', { method: 'POST', body: fd });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.detail || data.error || 'Save failed');
+        const text = await r.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text || r.statusText }; }
+        if (!r.ok) {
+          const err = data.detail || data.error || text || 'Save failed';
+          throw new Error(typeof err === 'string' ? err : JSON.stringify(err));
+        }
         document.getElementById('doneText').textContent =
           `Monitoring ${data.cameraCount} source(s). Clips upload on motion.`;
         setStep(2);
@@ -268,18 +284,18 @@ def attach_wizard_routes(
         }
 
     @app.post(f"{api_prefix}/claim")
-    def wizard_claim(body: dict):
-        code = (body.get("setupCode") or body.get("setup_code") or "").strip()
-        name = (body.get("name") or cfg.connector_name or "edge-connector-1").strip()
+    def wizard_claim(body: WizardClaimBody):
+        code = (body.setupCode or "").strip().upper()
+        name = (body.name or cfg.connector_name or "edge-connector-1").strip()
         if not code:
-            raise HTTPException(400, "setupCode is required")
+            raise HTTPException(status_code=400, detail="setupCode is required")
         try:
             w = load_wizard_config() or WizardConfig()
             w.setup_code = code
             w.connector_name = name
             cid, store_id = claim_setup(client, store, w, cfg.version)
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(400, str(exc)) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         state.connector_id = cid
         state.log(f"Wizard: claimed setup code → connector {cid} store {store_id}")
         w = load_wizard_config() or WizardConfig()

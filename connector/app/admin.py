@@ -55,7 +55,8 @@ def build_app(
 
     @app.middleware("http")
     async def admin_auth_middleware(request, call_next):
-        if request.url.path in ("/health",):
+        path = request.url.path
+        if path in ("/health",) or path.startswith("/setup"):
             return await call_next(request)
         if admin_token:
             provided = request.headers.get("X-Admin-Token") or request.query_params.get("admin_token")
