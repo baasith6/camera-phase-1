@@ -14,14 +14,37 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $tarball = Join-Path $env:TEMP "onevo-deploy.tar.gz"
 
-function Get-SshArgs {
-  if ($SshKeyPath -and (Test-Path $SshKeyPath)) {
-    return @("-i", $SshKeyPath, "-o", "StrictHostKeyChecking=no")
+function Prepare-SshKey([string]$KeyPath) {
+  if (-not $KeyPath -or -not (Test-Path $KeyPath)) {
+    throw "SSH key not found (pass -SshKeyPath or configure default ~/.ssh key). Got: '$KeyPath'"
   }
-  return @()
+  $dest = Join-Path $env:TEMP ("onevo-deploy-key-{0}" -f [Guid]::NewGuid().ToString("N"))
+  $raw = [IO.File]::ReadAllText($KeyPath) -replace "`r`n", "`n" -replace "`r", "`n"
+  if (-not $raw.EndsWith("`n")) { $raw += "`n" }
+  [IO.File]::WriteAllText($dest, $raw)
+  $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  & icacls $dest /inheritance:r /grant:r "${identity}:(R)" | Out-Null
+  return $dest
 }
 
-$sshArgs = Get-SshArgs
+function Invoke-Checked {
+  param([string]$Label, [scriptblock]$Command)
+  & $Command
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Label failed (exit $LASTEXITCODE)"
+  }
+}
+
+function Get-SshArgs([string]$KeyPath) {
+  if ($KeyPath -and (Test-Path $KeyPath)) {
+    return @("-i", $KeyPath, "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes")
+  }
+  return @("-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes")
+}
+
+$preparedKey = $null
+if ($SshKeyPath) { $preparedKey = Prepare-SshKey $SshKeyPath }
+$sshArgs = Get-SshArgs $preparedKey
 $scpArgs = @($sshArgs) + @("${VmUser}@${VmHost}:")
 
 Write-Host "==> Packaging app (excluding large artifacts)..."
@@ -51,16 +74,18 @@ try {
 }
 
 Write-Host "==> Uploading to ${VmUser}@${VmHost}..."
-scp @sshArgs $tarball "${VmUser}@${VmHost}:/tmp/onevo-deploy.tar.gz"
+Invoke-Checked "SCP tarball" { scp @sshArgs $tarball "${VmUser}@${VmHost}:/tmp/onevo-deploy.tar.gz" }
 
 $installerExe = $null
 if (-not $SkipInstaller) {
+  Write-Host "==> Ensuring installer tools (ffmpeg, WinSW)..."
+  & (Join-Path $root "scripts\ensure-installer-tools.ps1")
   Write-Host "==> Building Windows installer..."
   & (Join-Path $root "scripts\build-installer.ps1") -BackendUrl $BackendUrl -AllowHttp
   $installerExe = Get-ChildItem (Join-Path $root "connector\dist\ONEVO-Connector-Setup-*.exe") |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
   if (-not $installerExe) { throw "Installer EXE not found after build" }
-  scp @sshArgs $installerExe.FullName "${VmUser}@${VmHost}:/tmp/$($installerExe.Name)"
+  Invoke-Checked "SCP installer" { scp @sshArgs $installerExe.FullName "${VmUser}@${VmHost}:/tmp/$($installerExe.Name)" }
   $installerRemoteName = $installerExe.Name
 } else {
   $installerRemoteName = ""
@@ -95,7 +120,11 @@ docker compose ps --format 'table {{.Name}}\t{{.Status}}'
 "@ -replace "`r`n", "`n"
 
 Write-Host "==> Running remote deploy..."
-ssh @sshArgs "${VmUser}@${VmHost}" $remoteScript
+try {
+  Invoke-Checked "SSH deploy" { ssh @sshArgs "${VmUser}@${VmHost}" $remoteScript }
+} finally {
+  if ($preparedKey -and (Test-Path $preparedKey)) { Remove-Item $preparedKey -Force -ErrorAction SilentlyContinue }
+}
 
 Write-Host ""
 Write-Host "Deploy complete."

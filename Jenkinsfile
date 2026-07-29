@@ -61,7 +61,7 @@ pipeline {
                 -VmHost ${params.VM_HOST} ^
                 -VmUser ${params.VM_USER} ^
                 -BackendUrl ${params.BACKEND_URL} ^
-                -SshKeyPath %SSH_KEY%${extra}
+                -SshKeyPath "${env.SSH_KEY}"${extra}
             """
           }
         }

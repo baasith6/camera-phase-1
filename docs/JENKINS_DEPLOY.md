@@ -88,9 +88,10 @@ powershell -ExecutionPolicy Bypass -File scripts/deploy-vm.ps1 -SkipInstaller
 
 | Issue | Fix |
 |-------|-----|
-| SSH permission denied | Check `onevo-vm-ssh-key` credential; test `ssh azureuser@20.193.69.220` from Jenkins service account |
+| SSH permission denied | Re-check `onevo-vm-ssh-key` credential; deploy script copies the key with strict ACLs for OpenSSH on Windows |
 | GPU compose error | Keep `USE_GPU=false` on CPU VM |
-| Installer build fails | Install Inno Setup; run `scripts/build-installer.ps1` manually once |
+| Missing `ffmpeg.exe` | First build auto-downloads to `%ProgramData%\onevo\installer-tools\`; or run `scripts/ensure-installer-tools.ps1` once |
+| Installer build fails | Install Inno Setup 6 + PyInstaller; run `scripts/build-installer.ps1` manually once |
 | Backend unhealthy after deploy | SSH to VM: `cd /opt/onevo/app && docker compose logs backend --tail 50` |
 
 ## Related
