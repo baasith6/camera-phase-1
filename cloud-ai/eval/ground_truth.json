@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "description": "Ground-truth labels for ONEVO Phase 1A camera evaluation. Source: Shoplifting Dataset (2022) - CV Laboratory MNNIT Allahabad. label: 'shoplifting' (positive) or 'normal' (negative).",
+  "description": "Ground-truth labels for ONEVO Phase 1A camera evaluation. Custom local test videos. label: 'shoplifting' (positive) or 'normal' (negative).",
   "alert_threshold": 70,
   "default_zone": {
     "name": "Whole Frame (High Value)",
@@ -26,23 +26,28 @@
   },
   "clips": [
     {
-      "id": "normal_001",
-      "file": "clips/normal_001.mp4",
-      "label": "normal"
-    },
-    {
-      "id": "normal_002",
-      "file": "clips/normal_002.mp4",
-      "label": "normal"
-    },
-    {
-      "id": "shoplifting_001",
-      "file": "clips/shoplifting_001.mp4",
+      "id": "shoplifting_1",
+      "file": "clips/1.mp4",
       "label": "shoplifting"
     },
     {
-      "id": "shoplifting_002",
-      "file": "clips/shoplifting_002.mp4",
+      "id": "shoplifting_2",
+      "file": "clips/2.mp4",
+      "label": "shoplifting"
+    },
+    {
+      "id": "normal_3",
+      "file": "clips/3.mp4",
+      "label": "normal"
+    },
+    {
+      "id": "shoplifting_4",
+      "file": "clips/4.mp4",
+      "label": "shoplifting"
+    },
+    {
+      "id": "shoplifting_testvideo",
+      "file": "clips/testvideo.mp4",
       "label": "shoplifting"
     }
   ]

@@ -343,6 +343,8 @@ def attach_wizard_routes(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Failed to configure cameras: {exc}") from exc
 
+        w = load_wizard_config() or WizardConfig()
+        w.activation_error = ""
         complete_setup(w, created)
         state.log(f"Wizard: configured {len(created)} source(s)")
 

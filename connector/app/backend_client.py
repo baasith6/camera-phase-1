@@ -95,16 +95,29 @@ class BackendClient:
         )
         r.raise_for_status()
 
-    def heartbeat(self, disk_free_pct: float, queue_depth: int, degraded_reason: str | None, version: str) -> None:
+    def heartbeat(
+        self,
+        disk_free_pct: float,
+        queue_depth: int,
+        degraded_reason: str | None,
+        version: str,
+        admin_host: str | None = None,
+        admin_port: int | None = None,
+    ) -> None:
+        payload: dict = {
+            "diskFreePct": disk_free_pct,
+            "uploadQueueDepth": queue_depth,
+            "degradedReason": degraded_reason,
+            "version": version,
+        }
+        if admin_host:
+            payload["adminHost"] = admin_host
+        if admin_port:
+            payload["adminPort"] = admin_port
         r = requests.post(
             f"{self.base}/api/connectors/heartbeat",
             headers=self._auth_headers(),
-            json={
-                "diskFreePct": disk_free_pct,
-                "uploadQueueDepth": queue_depth,
-                "degradedReason": degraded_reason,
-                "version": version,
-            },
+            json=payload,
             timeout=15,
         )
         r.raise_for_status()

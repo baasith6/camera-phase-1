@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { API_BASE } from './api.config';
-import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone } from './models';
+import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone, AnalyticsSummary, SystemLogs } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -112,6 +112,36 @@ export class ApiService {
     return this.http.delete<{ ok: boolean; clipId: string }>(`${API_BASE}/api/clips/${id}`);
   }
 
+  bulkDeleteClips(body: {
+    storeId?: string;
+    ids?: string[];
+    deleteAllInStore?: boolean;
+  }): Observable<{ deleted: number; skipped: number; errors: string[] }> {
+    return this.http.post<{ deleted: number; skipped: number; errors: string[] }>(
+      `${API_BASE}/api/clips/bulk-delete`,
+      {
+        storeId: body.storeId ?? null,
+        ids: body.ids ?? null,
+        deleteAllInStore: body.deleteAllInStore ?? false,
+      },
+    );
+  }
+
+  bulkDeleteAlerts(body: {
+    storeId?: string;
+    ids?: string[];
+    deleteAllInStore?: boolean;
+  }): Observable<{ deleted: number; skipped: number; errors: string[] }> {
+    return this.http.post<{ deleted: number; skipped: number; errors: string[] }>(
+      `${API_BASE}/api/alerts/bulk-delete`,
+      {
+        storeId: body.storeId ?? null,
+        ids: body.ids ?? null,
+        deleteAllInStore: body.deleteAllInStore ?? false,
+      },
+    );
+  }
+
   // Connectors / health
   listConnectors(storeId?: string): Observable<Connector[]> {
     const q = storeId ? `?storeId=${storeId}` : '';
@@ -120,6 +150,27 @@ export class ApiService {
 
   getPipelineHealth(): Observable<PipelineHealth> {
     return this.http.get<PipelineHealth>(`${API_BASE}/api/health/pipeline`);
+  }
+
+  getMonitoring(): Observable<any> {
+    return this.http.get<any>(`${API_BASE}/api/health/monitoring`);
+  }
+
+  getAnalyticsSummary(storeId?: string): Observable<AnalyticsSummary> {
+    const q = storeId ? `?storeId=${storeId}` : '';
+    return this.http.get<AnalyticsSummary>(`${API_BASE}/api/analytics/summary${q}`);
+  }
+
+  getSystemLogs(storeId?: string): Observable<SystemLogs> {
+    const q = storeId ? `?storeId=${storeId}` : '';
+    return this.http.get<SystemLogs>(`${API_BASE}/api/logs/system${q}`);
+  }
+
+  changePassword(currentPassword: string, newPassword: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${API_BASE}/api/auth/change-password`, {
+      currentPassword,
+      newPassword,
+    });
   }
 
   getInstallerInfo(): Observable<InstallerInfo> {

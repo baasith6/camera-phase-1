@@ -4,6 +4,7 @@ namespace Onevo.Api.Contracts;
 
 // ---- Auth ----
 public record LoginRequest(string Email, string Password);
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 public record LoginResponse(string Token, string Email, string Role, Guid? StoreId);
 
 // ---- Users ----
@@ -48,7 +49,13 @@ public record UpdateZoneRequest(string? Name, string? ZoneType, string? PolygonJ
 // ---- Connectors ----
 public record RegisterConnectorRequest(Guid StoreId, string Name, string Version, string BootstrapKey);
 public record RegisterConnectorResponse(Guid ConnectorId, string ApiKey);
-public record HeartbeatRequest(double DiskFreePct, int UploadQueueDepth, string? DegradedReason, string Version);
+public record HeartbeatRequest(
+    double DiskFreePct,
+    int UploadQueueDepth,
+    string? DegradedReason,
+    string Version,
+    string? AdminHost = null,
+    int? AdminPort = null);
 public record CreateSetupCodeRequest(Guid StoreId);
 public record CreateSetupCodeResponse(string Code, Guid StoreId, DateTimeOffset ExpiresAt);
 public record ClaimSetupCodeRequest(string SetupCode, string Name, string Version);
@@ -114,6 +121,33 @@ public record ClipDetailResponse(
 
 public record PipelineHealthResponse(int RedisQueueDepth, int FailedJobs);
 
+public record AnalyticsSummaryResponse(
+    int TotalAlerts,
+    int PendingAlerts,
+    int HighRiskAlerts,
+    int MediumRiskAlerts,
+    int FalsePositives,
+    int TotalClips,
+    int AnalyzedClips,
+    Dictionary<string, int> AlertsByType);
+
+public record ConnectorLogEntry(
+    Guid Id,
+    Guid StoreId,
+    string Name,
+    string Status,
+    string Version,
+    DateTimeOffset? LastHeartbeat,
+    string? DegradedReason,
+    int UploadQueueDepth,
+    double DiskFreePct);
+
+public record SystemLogsResponse(
+    List<ConnectorLogEntry> Connectors,
+    int RedisQueueDepth,
+    int FailedJobs,
+    DateTimeOffset GeneratedAt);
+
 // ---- AI events (posted by cloud-ai worker) ----
 public record AiEventDto(
     int TrackId,
@@ -130,3 +164,7 @@ public record AiEventsBatchRequest(Guid ClipId, string ModelVersion, List<AiEven
 
 // ---- Alerts / reviews ----
 public record ReviewRequest(string Action, string? ReasonCode, string? Notes);
+
+public record BulkDeleteRequest(Guid? StoreId, List<Guid>? Ids, bool DeleteAllInStore = false);
+
+public record BulkDeleteResponse(int Deleted, int Skipped, List<string> Errors);

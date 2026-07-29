@@ -57,19 +57,37 @@ def run_uploader(cfg: Config, client: BackendClient, store: LocalStore,
 
 def run_heartbeat(cfg: Config, client: BackendClient, store: LocalStore,
                   state: RuntimeState, stop: threading.Event) -> None:
+    from .network_util import admin_public_host
+
+    admin_host = admin_public_host()
     while not stop.is_set():
         free = disk_free_pct(cfg.state_dir)
         state.disk_free_pct = free
-        degraded = None
+        operational = None
         if free < cfg.disk_critical_pct:
-            degraded = f"disk_critical:{free:.1f}%"
+            operational = f"disk_critical:{free:.1f}%"
         elif free < cfg.disk_warn_pct:
-            degraded = f"disk_warning:{free:.1f}%"
+            operational = f"disk_warning:{free:.1f}%"
         if store.pending_count() > 50:
-            degraded = (degraded + ";" if degraded else "") + "queue_backlog"
-        state.degraded_reason = degraded
+            operational = (operational + ";" if operational else "") + "queue_backlog"
+
+        with state._lock:
+            existing = state.degraded_reason
+            if existing and (
+                existing.startswith("Setup")
+                or "activation" in existing.lower()
+                or "pending" in existing.lower()
+            ):
+                degraded = f"{existing};{operational}" if operational else existing
+            else:
+                degraded = operational
+                state.degraded_reason = operational
+
         try:
-            client.heartbeat(free, store.pending_count(), degraded, cfg.version)
+            client.heartbeat(
+                free, store.pending_count(), degraded, cfg.version,
+                admin_host=admin_host, admin_port=cfg.admin_port,
+            )
             state.last_heartbeat = time.time()
         except Exception as e:  # noqa: BLE001
             state.log(f"Heartbeat error: {e}")

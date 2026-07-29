@@ -23,6 +23,11 @@ CHECKOUT = "Checkout"
 BLIND_SPOT = "BlindSpot"
 SHELF_LIKE = {SHELF, HIGH_VALUE}
 
+# Bag/concealment cues must be seen on at least this many detections before they can
+# fire BagOpen / Concealment / count toward HighValueActivity. Rejects one-off false
+# positives (e.g. a normal shopper adjusting a jacket for a few frames).
+SUSTAINED_CUE_DETECTIONS = 10
+
 
 def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone]) -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
@@ -38,9 +43,11 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
     open_bag_zone: str | None = None
     open_bag_conf = 0.0
     open_bag_last_idx = -1
+    open_bag_dets = 0
     bag_fallback_zone: str | None = None
     bag_fallback_conf = 0.0
     bag_last_idx = -1
+    bag_dets = 0
 
     # Product-in-hand handling episodes + first occurrence (for concealment ordering).
     handling_episodes = 0
@@ -48,6 +55,12 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
     prev_handling = False
     product_first_idx = -1
     product_in_shelf = False
+
+    # Direct concealment cue (item being hidden inside jacket/clothing).
+    conceal_dets = 0
+    conceal_zone: str | None = None
+    conceal_last_idx = -1
+    conceal_in_hv = False
 
     # High-value zone activity categories.
     hv_has_person = hv_has_product = hv_has_bag = False
@@ -81,6 +94,7 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
                     hv_zone_id = hv_zone_id or hv_zone.id
 
             elif d.cue == "open_bag":
+                open_bag_dets += 1
                 for z in shelf_zones:
                     if d.conf >= open_bag_conf:
                         open_bag_zone, open_bag_conf, open_bag_last_idx = z.id, d.conf, idx
@@ -88,6 +102,7 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
                     hv_has_bag = True
 
             elif d.cue == "bag":
+                bag_dets += 1
                 for z in shelf_zones:
                     if d.conf >= bag_fallback_conf:
                         bag_fallback_zone, bag_fallback_conf, bag_last_idx = z.id, d.conf, idx
@@ -103,6 +118,14 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
                         product_first_idx = idx
                 if hv_zone is not None:
                     hv_has_product = True
+
+            elif d.cue == "concealment":
+                conceal_dets += 1
+                conceal_last_idx = idx
+                if shelf_zones:
+                    conceal_zone = conceal_zone or shelf_zones[0].id
+                if hv_zone is not None:
+                    conceal_in_hv = True
 
         if handling_now and not prev_handling:
             handling_episodes += 1
@@ -176,6 +199,17 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
             blind_spot_zone = blind_spot_zone or blindspot_zone_id
 
     # --- Emit events (all evidence is observable-signal language, never conclusions) ---
+    # Gate bag/concealment cues on sustained detection counts so a handful of
+    # one-off detections (jacket adjust, misfire) cannot drive BagOpen/Concealment.
+    open_bag_sustained = open_bag_dets >= SUSTAINED_CUE_DETECTIONS
+    bag_sustained = bag_dets >= SUSTAINED_CUE_DETECTIONS
+    if not open_bag_sustained:
+        open_bag_zone = None
+    if not bag_sustained:
+        bag_fallback_zone = None
+    if not (open_bag_sustained or bag_sustained):
+        hv_has_bag = False
+
     if high_value_seen_zone is not None:
         events.append(_ev("HighValueZoneEntry", high_value_seen_zone, 1.0, 0.9, now))
 
@@ -187,10 +221,18 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
     elif max_reentries > 0:
         events.append(_ev("RepeatedHandling", reentry_zone, float(max_reentries), 0.7, now))
 
-    # Concealment: item handled at a shelf, then a bag/open-bag cue appears afterwards.
+    # Concealment requires evidence of an ITEM being hidden — a product in hand alone,
+    # or an open bag alone, is never concealment. Two valid paths:
+    #   A) product handled at a shelf, THEN a bag/open-bag cue appears afterwards
+    #      (item picked up -> moved into a bag), or
+    #   B) a sustained direct concealment cue ("hiding item inside jacket" style) —
+    #      the detection itself encodes item-being-hidden.
     latest_bag_idx = max(open_bag_last_idx, bag_last_idx)
-    concealment_zone = open_bag_zone or bag_fallback_zone or handling_zone
-    if product_in_shelf and product_first_idx >= 0 and latest_bag_idx > product_first_idx:
+    conceal_sustained = conceal_dets >= SUSTAINED_CUE_DETECTIONS
+    handled_then_bag = product_in_shelf and product_first_idx >= 0 and latest_bag_idx > product_first_idx
+    if handled_then_bag or conceal_sustained:
+        concealment_zone = (conceal_zone if conceal_sustained else None) \
+            or open_bag_zone or bag_fallback_zone or handling_zone
         events.append(_ev("Concealment", concealment_zone, 1.0, 0.7, now))
 
     # Exit without checkout, and its stronger "carried a product out" variant.
@@ -215,6 +257,10 @@ def extract_events(fps: float, frames: list[list[Detection]], zones: list[Zone])
 
     if max_group >= 2:
         events.append(_ev("GroupDistraction", group_zone, float(max_group), 0.7, now))
+
+    # A sustained concealment cue in a high-value zone implies an item is involved.
+    if conceal_sustained and conceal_in_hv:
+        hv_has_product = True
 
     hv_activity = int(hv_has_person) + int(hv_has_product) + int(hv_has_bag)
     if hv_activity >= 2:

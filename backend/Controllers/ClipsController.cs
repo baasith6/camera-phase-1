@@ -247,6 +247,78 @@ public class ClipsController : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
+        var result = await TryDeleteClipAsync(id);
+        return result switch
+        {
+            DeleteClipResult.Deleted => Ok(new { ok = true, clipId = id }),
+            DeleteClipResult.NotFound => NotFound(),
+            DeleteClipResult.SkippedConfirmed => Conflict(new { error = "Cannot delete clip linked to a confirmed alert" }),
+            _ => NotFound(),
+        };
+    }
+
+    [Authorize(Roles = "Admin,Manager")]
+    [HttpPost("bulk-delete")]
+    public async Task<ActionResult<BulkDeleteResponse>> BulkDelete(BulkDeleteRequest req)
+    {
+        if (req.DeleteAllInStore)
+        {
+            if (req.StoreId is null)
+                return BadRequest(new { error = "storeId is required for delete all" });
+            if (!TenantAccess.CanAccessStore(User, req.StoreId.Value))
+                return Forbid();
+        }
+
+        var targetIds = await ResolveClipDeleteIdsAsync(req);
+        if (targetIds is null)
+            return BadRequest(new { error = "Provide ids or set deleteAllInStore with storeId" });
+
+        var deleted = 0;
+        var skipped = 0;
+        var errors = new List<string>();
+
+        foreach (var id in targetIds.Distinct())
+        {
+            var result = await TryDeleteClipAsync(id);
+            switch (result)
+            {
+                case DeleteClipResult.Deleted:
+                    deleted++;
+                    break;
+                case DeleteClipResult.SkippedConfirmed:
+                    skipped++;
+                    break;
+                case DeleteClipResult.NotFound:
+                    break;
+            }
+        }
+
+        return Ok(new BulkDeleteResponse(deleted, skipped, errors));
+    }
+
+    private async Task<List<Guid>?> ResolveClipDeleteIdsAsync(BulkDeleteRequest req)
+    {
+        if (req.DeleteAllInStore)
+        {
+            if (req.StoreId is null) return null;
+            if (!TenantAccess.CanAccessStore(User, req.StoreId.Value)) return null;
+
+            return await (
+                from clip in _db.Clips
+                join cam in TenantAccess.ScopeCameras(_db.Cameras, User) on clip.CameraId equals cam.Id
+                where cam.StoreId == req.StoreId
+                select clip.Id
+            ).ToListAsync();
+        }
+
+        if (req.Ids is { Count: > 0 }) return req.Ids;
+        return null;
+    }
+
+    private enum DeleteClipResult { Deleted, NotFound, SkippedConfirmed }
+
+    private async Task<DeleteClipResult> TryDeleteClipAsync(Guid id)
+    {
         var row = await (
             from clip in _db.Clips
             where clip.Id == id
@@ -254,14 +326,14 @@ public class ClipsController : ControllerBase
             select new { clip, cam }
         ).FirstOrDefaultAsync();
 
-        if (row is null) return NotFound();
+        if (row is null) return DeleteClipResult.NotFound;
 
         var alert = await _db.Alerts
             .Include(a => a.Reviews)
             .FirstOrDefaultAsync(a => a.ClipId == id);
 
         if (alert is not null && alert.Status == AlertStatus.Confirmed)
-            return Conflict(new { error = "Cannot delete clip linked to a confirmed alert" });
+            return DeleteClipResult.SkippedConfirmed;
 
         if (!string.IsNullOrEmpty(row.clip.ObjectKey))
             await _s3.DeleteAsync(row.clip.ObjectKey);
@@ -279,6 +351,6 @@ public class ClipsController : ControllerBase
 
         _db.Clips.Remove(row.clip);
         await _db.SaveChangesAsync();
-        return Ok(new { ok = true, clipId = id });
+        return DeleteClipResult.Deleted;
     }
 }

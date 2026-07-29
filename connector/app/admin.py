@@ -91,6 +91,18 @@ def build_app(
 ) -> FastAPI:
     app = FastAPI(title="ONEVO Connector Admin")
 
+    admin_token = (cfg.admin_token or "").strip()
+
+    @app.middleware("http")
+    async def admin_auth_middleware(request, call_next):
+        if request.url.path in ("/health",):
+            return await call_next(request)
+        if admin_token:
+            provided = request.headers.get("X-Admin-Token") or request.query_params.get("admin_token")
+            if provided != admin_token:
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
     @app.get("/status")
     def status():
         return state.snapshot()
@@ -581,7 +593,11 @@ def build_app(
     @app.get("/snapshot")
     def snapshot(camera_id: str):
         """Return a live snapshot from the CapturePipeline's recent frames."""
-        frame = state.get_frame(camera_id)
+        frame = state.last_frames.get(camera_id)
+        if not frame and len(state.last_frames) == 1:
+            # Single-source connector: tolerate a camera-id mismatch between the
+            # dashboard GUID and the locally configured source.
+            frame = next(iter(state.last_frames.values()))
         if not frame:
             raise HTTPException(status_code=404, detail="No snapshot available yet")
         return Response(content=frame, media_type="image/jpeg")
@@ -1207,6 +1223,16 @@ def start_admin(
     enable_setup_wizard: bool = False,
     on_wizard_configured: Callable | None = None,
 ) -> threading.Thread:
+    from .backend_client import BackendClient
+
+    client: BackendClient | None = None
+    if store is not None:
+        client = BackendClient(cfg.backend_url)
+        connector_id = store.get_cred("connector_id")
+        api_key = store.get_cred("api_key")
+        if connector_id and api_key:
+            client.set_credentials(connector_id, api_key)
+
     app = build_app(
         state,
         cfg,
@@ -1230,6 +1256,7 @@ def start_admin(
     # must be an explicit deployment choice.
     admin_host = os.getenv("CONNECTOR_ADMIN_HOST", "127.0.0.1").strip() or "127.0.0.1"
     config = uvicorn.Config(app, host=admin_host, port=port, log_level="warning")
+    config = uvicorn.Config(app, host=cfg.admin_bind_host, port=port, log_level="warning")
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Onevo.Api.Auth;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
@@ -17,14 +18,18 @@ public class ZonesController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid cameraId)
-        => Ok(await _db.CameraZones.Where(z => z.CameraId == cameraId).ToListAsync());
+    {
+        var camera = await AuthorizeCameraAsync(cameraId);
+        if (camera is null) return Forbid();
+        return Ok(await _db.CameraZones.Where(z => z.CameraId == cameraId).ToListAsync());
+    }
 
     [HttpPost]
     [Authorize(Roles = "Admin,Manager,Installer")]
     public async Task<IActionResult> Create(CreateZoneRequest req)
     {
-        if (!await _db.Cameras.AnyAsync(c => c.Id == req.CameraId))
-            return BadRequest(new { error = "Unknown camera" });
+        var camera = await AuthorizeCameraAsync(req.CameraId);
+        if (camera is null) return Forbid();
         if (!Enum.TryParse<ZoneType>(req.ZoneType, true, out var zt))
             return BadRequest(new { error = "Invalid zoneType" });
 
@@ -46,6 +51,7 @@ public class ZonesController : ControllerBase
     {
         var zone = await _db.CameraZones.FindAsync(id);
         if (zone is null) return NotFound();
+        if (await AuthorizeCameraAsync(zone.CameraId) is null) return Forbid();
         if (req.Name is not null) zone.Name = req.Name;
         if (req.PolygonJson is not null) zone.PolygonJson = req.PolygonJson;
         if (req.ZoneType is not null && Enum.TryParse<ZoneType>(req.ZoneType, true, out var zt))
@@ -60,8 +66,16 @@ public class ZonesController : ControllerBase
     {
         var zone = await _db.CameraZones.FindAsync(id);
         if (zone is null) return NotFound();
+        if (await AuthorizeCameraAsync(zone.CameraId) is null) return Forbid();
         _db.CameraZones.Remove(zone);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    private async Task<Camera?> AuthorizeCameraAsync(Guid cameraId)
+    {
+        var camera = await _db.Cameras.FindAsync(cameraId);
+        if (camera is null) return null;
+        return TenantAccess.CanAccessStore(User, camera.StoreId) ? camera : null;
     }
 }

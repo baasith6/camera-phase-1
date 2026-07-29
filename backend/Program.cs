@@ -120,6 +120,25 @@ var allowedOrigins = (cfg["CORS_ORIGINS"] ?? "http://localhost:4200")
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 
+// ---- Production secret validation ----
+const string DefaultJwtKey = "dev-super-secret-signing-key-change-me-please-32+";
+if (!builder.Environment.IsDevelopment())
+{
+    if (jwtOpts.SigningKey == DefaultJwtKey || jwtOpts.SigningKey.Length < 32)
+        throw new InvalidOperationException(
+            "Jwt:SigningKey must be set to a strong value (>= 32 chars) in Production.");
+
+    var bootstrap = ServiceAuth.ConnectorBootstrapKey(cfg);
+    if (bootstrap == ServiceAuth.DefaultBootstrapKey)
+        throw new InvalidOperationException(
+            "Seed:ConnectorBootstrapKey must be changed from the default in Production.");
+
+    var cloudAiKey = ServiceAuth.CloudAiServiceKey(cfg);
+    if (cloudAiKey == ServiceAuth.DefaultBootstrapKey)
+        throw new InvalidOperationException(
+            "CloudAi:ServiceKey must be set to a dedicated value in Production.");
+}
+
 var app = builder.Build();
 
 // ---- Migrate/seed on startup (dev convenience; uses EnsureCreated) ----

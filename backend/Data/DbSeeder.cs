@@ -8,7 +8,14 @@ public static class DbSeeder
 {
     public static async Task SeedAsync(OnevoDbContext db, IConfiguration cfg)
     {
-        await db.Database.EnsureCreatedAsync();
+        try
+        {
+            await db.Database.MigrateAsync();
+        }
+        catch
+        {
+            await db.Database.EnsureCreatedAsync();
+        }
         // Legacy development databases were created with EnsureCreated, which does not
         // add newly introduced tables. Keep this bootstrap idempotent for both existing
         // installations and clean databases.
@@ -152,13 +159,22 @@ public static class DbSeeder
             ALTER TABLE "Users" ADD COLUMN IF NOT EXISTS "StoreId" uuid NULL;
             CREATE INDEX IF NOT EXISTS "IX_Users_StoreId" ON "Users" ("StoreId");
             ALTER TABLE "Stores" ADD COLUMN IF NOT EXISTS "NotificationEmail" text NULL;
+            ALTER TABLE "Connectors" ADD COLUMN IF NOT EXISTS "AdminHost" text NULL;
+            ALTER TABLE "Connectors" ADD COLUMN IF NOT EXISTS "AdminPort" integer NULL;
             """
         );
 
-        // Seed admin user.
+        // Seed admin user (skip default credentials in Production unless explicitly enabled).
+        var isProduction = string.Equals(
+            cfg["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase);
+        var allowDefaultSeed = bool.TryParse(cfg["Seed:AllowDefaultInProduction"], out var allowSeed) && allowSeed;
         var adminEmail = cfg["Seed:AdminEmail"] ?? "admin@onevo.local";
         var adminPassword = cfg["Seed:AdminPassword"] ?? "Admin123!";
-        if (!await db.Users.AnyAsync(u => u.Email == adminEmail))
+        var skipDefaultAdmin = isProduction && !allowDefaultSeed
+            && adminEmail == "admin@onevo.local"
+            && adminPassword == "Admin123!";
+
+        if (!skipDefaultAdmin && !await db.Users.AnyAsync(u => u.Email == adminEmail))
         {
             db.Users.Add(new User
             {
@@ -178,8 +194,10 @@ public static class DbSeeder
             });
         }
 
-        // Seed a demo store + camera + high-value zone for immediate end-to-end testing.
-        if (!await db.Stores.AnyAsync())
+        // Seed demo store in Development; in Production only when Seed:DemoStore=true.
+        var seedDemo = !isProduction
+            || (bool.TryParse(cfg["Seed:DemoStore"], out var demoOn) && demoOn);
+        if (seedDemo && !await db.Stores.AnyAsync())
         {
             var mode = Enum.TryParse<AlertVisibilityMode>(cfg["Pilot:AlertVisibilityMode"], true, out var m)
                 ? m : AlertVisibilityMode.Silent;
