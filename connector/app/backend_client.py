@@ -35,9 +35,10 @@ class BackendClient:
         )
         if not r.ok:
             try:
-                detail = r.json().get("error") or r.json().get("detail") or r.text
+                payload = r.json()
+                detail = payload.get("error") or payload.get("detail") or r.text
             except Exception:  # noqa: BLE001
-                detail = r.text
+                detail = r.text or f"claim failed ({r.status_code})"
             raise RuntimeError(detail or f"claim failed ({r.status_code})")
         data = r.json()
         self.connector_id = data["connectorId"]
