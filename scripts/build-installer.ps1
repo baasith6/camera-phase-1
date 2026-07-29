@@ -3,6 +3,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$BackendUrl,
   [string]$PythonPath = "",
+  [string]$IsccPath = "",
   [switch]$AllowHttp
 )
 
@@ -17,6 +18,7 @@ if (-not (Test-Path $buildScript)) {
 Write-Host "Building ONEVO connector installer for $BackendUrl ..."
 $buildArgs = @{ BackendUrl = $BackendUrl }
 if ($PythonPath) { $buildArgs.PythonPath = $PythonPath }
+if ($IsccPath) { $buildArgs.IsccPath = $IsccPath }
 if ($AllowHttp) { $buildArgs.AllowHttp = $true }
 & $buildScript @buildArgs
 

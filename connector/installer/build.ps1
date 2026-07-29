@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$BackendUrl,
     [string]$PythonPath = "",
+    [string]$IsccPath = "",
     [switch]$AllowHttp
 )
 
@@ -24,17 +25,28 @@ function Assert-BackendUrl([string]$Url, [bool]$AllowHttp) {
     throw "Production requires HTTPS (or http://localhost / http://127.0.0.1 for local builds). Got: $Url. Use -AllowHttp for MVP pilot without TLS."
 }
 
-function Find-ISCC {
+function Find-ISCC([string]$ExplicitPath) {
     $candidates = @(
+        $ExplicitPath,
+        $env:ONEVO_ISCC,
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
         "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
         (Get-Command ISCC -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-    ) | Where-Object { $_ -and (Test-Path $_) }
-    if (-not $candidates) {
-        throw "Inno Setup 6 (ISCC.exe) was not found. Install from https://jrsoftware.org/isdl.php"
+    )
+    $userRoots = Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') }
+    foreach ($user in $userRoots) {
+        $candidates += @(
+            (Join-Path $user.FullName 'AppData\Local\Programs\Inno Setup 6\ISCC.exe'),
+            (Join-Path $user.FullName 'AppData\Local\Programs\Inno Setup 6\Compil32.exe')
+        )
     }
-    return ($candidates | Select-Object -First 1)
+    $found = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    if (-not $found) {
+        throw "Inno Setup 6 (ISCC.exe) was not found. Install from https://jrsoftware.org/isdl.php or set ONEVO_ISCC."
+    }
+    return $found
 }
 
 function Find-Python([string]$ExplicitPath) {
@@ -115,7 +127,7 @@ if (-not (Test-Path $pyinstallerOut)) {
 }
 Write-Host "==> Built $pyinstallerOut"
 
-$iscc = Find-ISCC
+$iscc = Find-ISCC $IsccPath
 Write-Host "==> Inno Setup: $iscc"
 & $iscc $IssFile
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit $LASTEXITCODE)" }

@@ -13,6 +13,7 @@ pipeline {
   environment {
     VM_APP_DIR = '/opt/onevo/app'
     ONEVO_PYTHON = 'C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe'
+    ONEVO_ISCC = 'C:\\Users\\Abdul Baasith\\AppData\\Local\\Programs\\Inno Setup 6\\ISCC.exe'
   }
 
   stages {
@@ -57,14 +58,15 @@ pipeline {
             keyFileVariable: 'SSH_KEY',
             usernameVariable: 'SSH_USER'
           )]) {
-            bat """
+            bat '''
               powershell -ExecutionPolicy Bypass -File scripts/deploy-vm.ps1 ^
-                -VmHost ${params.VM_HOST} ^
-                -VmUser ${params.VM_USER} ^
-                -BackendUrl ${params.BACKEND_URL} ^
+                -VmHost ''' + params.VM_HOST + ''' ^
+                -VmUser ''' + params.VM_USER + ''' ^
+                -BackendUrl ''' + params.BACKEND_URL + ''' ^
                 -PythonPath "%ONEVO_PYTHON%" ^
-                -SshKeyPath "${env.SSH_KEY}"${extra}
-            """
+                -IsccPath "%ONEVO_ISCC%" ^
+                -SshKeyPath "%SSH_KEY%"''' + extra + '''
+            '''
           }
         }
       }
