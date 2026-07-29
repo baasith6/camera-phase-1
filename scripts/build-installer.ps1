@@ -2,6 +2,8 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$BackendUrl,
+  [string]$PythonPath = "",
+  [string]$IsccPath = "",
   [switch]$AllowHttp
 )
 
@@ -14,11 +16,11 @@ if (-not (Test-Path $buildScript)) {
 }
 
 Write-Host "Building ONEVO connector installer for $BackendUrl ..."
-if ($AllowHttp) {
-  & $buildScript -BackendUrl $BackendUrl -AllowHttp
-} else {
-  & $buildScript -BackendUrl $BackendUrl
-}
+$buildArgs = @{ BackendUrl = $BackendUrl }
+if ($PythonPath) { $buildArgs.PythonPath = $PythonPath }
+if ($IsccPath) { $buildArgs.IsccPath = $IsccPath }
+if ($AllowHttp) { $buildArgs.AllowHttp = $true }
+& $buildScript @buildArgs
 
 $dist = Join-Path $root "connector\dist"
 Get-ChildItem $dist -Filter "ONEVO-Connector-Setup-*.exe" | ForEach-Object {

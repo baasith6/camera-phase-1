@@ -12,6 +12,8 @@ pipeline {
 
   environment {
     VM_APP_DIR = '/opt/onevo/app'
+    ONEVO_PYTHON = 'C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe'
+    ONEVO_ISCC = 'C:\\Users\\Abdul Baasith\\AppData\\Local\\Programs\\Inno Setup 6\\ISCC.exe'
   }
 
   stages {
@@ -37,8 +39,8 @@ pipeline {
         stage('Connector tests') {
           steps {
             dir('connector') {
-              bat '"C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe" -m pip install -r requirements.txt pytest'
-              bat 'set PYTHONPATH=.&& "C:\\Users\\Abdul Baasith\\AppData\\Local\\Python\\bin\\python.exe" -m pytest tests/ -q'
+              bat '"%ONEVO_PYTHON%" -m pip install -r requirements.txt pytest'
+              bat 'set PYTHONPATH=.&& "%ONEVO_PYTHON%" -m pytest tests/ -q'
             }
           }
         }
@@ -56,13 +58,15 @@ pipeline {
             keyFileVariable: 'SSH_KEY',
             usernameVariable: 'SSH_USER'
           )]) {
-            bat """
+            bat '''
               powershell -ExecutionPolicy Bypass -File scripts/deploy-vm.ps1 ^
-                -VmHost ${params.VM_HOST} ^
-                -VmUser ${params.VM_USER} ^
-                -BackendUrl ${params.BACKEND_URL} ^
-                -SshKeyPath "${env.SSH_KEY}"${extra}
-            """
+                -VmHost ''' + params.VM_HOST + ''' ^
+                -VmUser ''' + params.VM_USER + ''' ^
+                -BackendUrl ''' + params.BACKEND_URL + ''' ^
+                -PythonPath "%ONEVO_PYTHON%" ^
+                -IsccPath "%ONEVO_ISCC%" ^
+                -SshKeyPath "%SSH_KEY%"''' + extra + '''
+            '''
           }
         }
       }
