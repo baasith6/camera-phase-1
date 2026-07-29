@@ -22,7 +22,7 @@ from app.zones import Zone
 # Local mirror of the backend Risk Engine starter weights (keep in sync with RiskEngine.cs).
 WEIGHTS = {
     "HighValueZoneEntry": 15, "Dwell": 20, "RepeatedHandling": 15, "BagOpen": 20,
-    "Concealment": 20, "ExitWithoutCheckout": 20, "ShelfPickupNoCheckout": 25,
+    "Concealment": 40, "ExitWithoutCheckout": 20, "ShelfPickupNoCheckout": 25,
     "BlindSpotMovement": 15, "GroupDistraction": 10, "HighValueActivity": 15,
     "LowStaffRemoval": 10,
 }

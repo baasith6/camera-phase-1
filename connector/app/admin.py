@@ -431,6 +431,10 @@ def build_app(
     def snapshot(camera_id: str):
         """Return a live snapshot from the CapturePipeline's recent frames."""
         frame = state.last_frames.get(camera_id)
+        if not frame and len(state.last_frames) == 1:
+            # Single-source connector: tolerate a camera-id mismatch between the
+            # dashboard GUID and the locally configured source.
+            frame = next(iter(state.last_frames.values()))
         if not frame:
             raise HTTPException(status_code=404, detail="No snapshot available yet")
         return Response(content=frame, media_type="image/jpeg")

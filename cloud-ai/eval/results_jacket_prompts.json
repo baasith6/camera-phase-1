@@ -1,0 +1,121 @@
+{
+  "prompts": {
+    "person": "person",
+    "backpack": "bag",
+    "handbag": "bag",
+    "open bag": "open_bag",
+    "open backpack": "open_bag",
+    "product in hand": "product_in_hand",
+    "item in hand": "product_in_hand",
+    "person hiding item inside jacket": "open_bag",
+    "person putting object under clothing": "open_bag",
+    "hand inside jacket": "open_bag",
+    "person holding a bottle": "product_in_hand",
+    "person holding clothes": "product_in_hand"
+  },
+  "alert_threshold": 70,
+  "per_clip": [
+    {
+      "id": "shoplifting_1",
+      "gt_label": "shoplifting",
+      "score": 105,
+      "predicted": "alert",
+      "cue_counts": {
+        "person": 694,
+        "open_bag": 246,
+        "product_in_hand": 14,
+        "bag": 37
+      },
+      "events": [
+        "HighValueZoneEntry=1.0",
+        "Dwell=13.4",
+        "RepeatedHandling=3.0",
+        "Concealment=1.0",
+        "GroupDistraction=6.0",
+        "HighValueActivity=3.0",
+        "LowStaffRemoval=1.0",
+        "BagOpen=1.0"
+      ],
+      "elapsed_s": 151.82
+    },
+    {
+      "id": "shoplifting_2",
+      "gt_label": "shoplifting",
+      "score": 62,
+      "predicted": "no_alert",
+      "cue_counts": {
+        "person": 655,
+        "bag": 14,
+        "open_bag": 12
+      },
+      "events": [
+        "HighValueZoneEntry=1.0",
+        "Dwell=44.0",
+        "RepeatedHandling=1.0",
+        "GroupDistraction=2.0",
+        "HighValueActivity=2.0",
+        "BagOpen=1.0"
+      ],
+      "elapsed_s": 190.1
+    },
+    {
+      "id": "normal_3",
+      "gt_label": "normal",
+      "score": 70,
+      "predicted": "alert",
+      "cue_counts": {
+        "person": 597,
+        "open_bag": 4
+      },
+      "events": [
+        "HighValueZoneEntry=1.0",
+        "Dwell=32.0",
+        "RepeatedHandling=1.0",
+        "GroupDistraction=4.0",
+        "HighValueActivity=2.0",
+        "BagOpen=1.0"
+      ],
+      "elapsed_s": 169.78
+    },
+    {
+      "id": "shoplifting_4",
+      "gt_label": "shoplifting",
+      "score": 50,
+      "predicted": "no_alert",
+      "cue_counts": {
+        "person": 211,
+        "open_bag": 36
+      },
+      "events": [
+        "HighValueZoneEntry=1.0",
+        "Dwell=21.0",
+        "RepeatedHandling=1.0",
+        "HighValueActivity=2.0",
+        "BagOpen=1.0"
+      ],
+      "elapsed_s": 112.1
+    },
+    {
+      "id": "shoplifting_testvideo",
+      "gt_label": "shoplifting",
+      "score": 80,
+      "predicted": "alert",
+      "cue_counts": {
+        "person": 789,
+        "open_bag": 165,
+        "bag": 65,
+        "product_in_hand": 2
+      },
+      "events": [
+        "HighValueZoneEntry=1.0",
+        "Dwell=30.7",
+        "RepeatedHandling=2.0",
+        "GroupDistraction=4.0",
+        "HighValueActivity=3.0",
+        "LowStaffRemoval=1.0",
+        "BagOpen=1.0"
+      ],
+      "elapsed_s": 158.37
+    }
+  ]
+}
