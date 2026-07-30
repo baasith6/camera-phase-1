@@ -131,6 +131,10 @@ public record AnalyticsSummaryResponse(
     int AnalyzedClips,
     Dictionary<string, int> AlertsByType);
 
+public record AnalyticsTrendPoint(string Date, int Count);
+
+public record AnalyticsTrendsResponse(int Days, List<AnalyticsTrendPoint> Points);
+
 public record ConnectorLogEntry(
     Guid Id,
     Guid StoreId,

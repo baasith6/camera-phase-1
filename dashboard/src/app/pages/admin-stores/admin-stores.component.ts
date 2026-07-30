@@ -5,16 +5,23 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { InstallerInfo, SetupCodeResponse, StoreOverview, UserAccount } from '../../core/models';
 
+import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-components';
+
 @Component({
   selector: 'app-admin-stores',
   standalone: true,
-  imports: [FormsModule, DecimalPipe, RouterLink],
+  imports: [FormsModule, DecimalPipe, RouterLink, PageContainerComponent, PageHeaderComponent],
   template: `
-    <h2>Admin — Store Management</h2>
-    <p class="muted">Create stores, assign managers, generate connector setup codes, and download the Windows installer.</p>
+    <app-page-container>
+      <app-page-header title="Admin" subtitle="Manage stores, users, and connector installer." />
 
-    <div class="grid2">
-      <div class="card">
+      <div class="stepper" role="tablist">
+        <button type="button" class="stepper-btn" [class.active]="tab === 'stores'" (click)="tab = 'stores'">Stores</button>
+        <button type="button" class="stepper-btn" [class.active]="tab === 'users'" (click)="tab = 'users'">Users</button>
+      </div>
+
+      @if (tab === 'stores') {
+    <div class="card">
         <h3>Create store</h3>
         <label>Store name</label>
         <input [(ngModel)]="newStoreName" placeholder="Downtown Market" />
@@ -34,37 +41,6 @@ import { InstallerInfo, SetupCodeResponse, StoreOverview, UserAccount } from '..
         </button>
         @if (storeError) { <p class="err">{{ storeError }}</p> }
       </div>
-
-      <div class="card">
-        <h3>Create manager user</h3>
-        <label>Store</label>
-        <select [(ngModel)]="userStoreId">
-          <option value="">Select store…</option>
-          @for (s of stores; track s.id) {
-            <option [value]="s.id">{{ s.name }}</option>
-          }
-        </select>
-
-        <label>Email</label>
-        <input [(ngModel)]="userEmail" type="email" placeholder="manager@store.com" />
-
-        <label>Temporary password</label>
-        <input [(ngModel)]="userPassword" type="password" />
-
-        <label>Role</label>
-        <select [(ngModel)]="userRole">
-          <option value="Manager">Manager</option>
-          <option value="Reviewer">Reviewer</option>
-          <option value="Installer">Installer</option>
-        </select>
-
-        <button (click)="createUser()" [disabled]="!userStoreId || !userEmail || !userPassword || creatingUser">
-          {{ creatingUser ? 'Creating…' : 'Create user' }}
-        </button>
-        @if (userError) { <p class="err">{{ userError }}</p> }
-        @if (userSuccess) { <p class="ok">{{ userSuccess }}</p> }
-      </div>
-    </div>
 
     <div class="card">
       <h3>Connector installer</h3>
@@ -116,10 +92,42 @@ import { InstallerInfo, SetupCodeResponse, StoreOverview, UserAccount } from '..
         </div>
       }
     </div>
+      }
+
+      @if (tab === 'users') {
+      <div class="card">
+        <h3>Create user</h3>
+        <label>Store</label>
+        <select [(ngModel)]="userStoreId">
+          <option value="">Select store…</option>
+          @for (s of stores; track s.id) {
+            <option [value]="s.id">{{ s.name }}</option>
+          }
+        </select>
+
+        <label>Email</label>
+        <input [(ngModel)]="userEmail" type="email" placeholder="manager@store.com" />
+
+        <label>Temporary password</label>
+        <input [(ngModel)]="userPassword" type="password" />
+
+        <label>Role</label>
+        <select [(ngModel)]="userRole">
+          <option value="Manager">Manager</option>
+          <option value="Reviewer">Reviewer</option>
+          <option value="Installer">Installer</option>
+        </select>
+
+        <button (click)="createUser()" [disabled]="!userStoreId || !userEmail || !userPassword || creatingUser">
+          {{ creatingUser ? 'Creating…' : 'Create user' }}
+        </button>
+        @if (userError) { <p class="err">{{ userError }}</p> }
+        @if (userSuccess) { <p class="ok">{{ userSuccess }}</p> }
+      </div>
 
     @if (storeUsers.length) {
       <div class="card">
-        <h3>Users — {{ selectedStoreName }}</h3>
+        <h3>Users — {{ selectedStoreName || 'select a store' }}</h3>
         @for (u of storeUsers; track u.id) {
           <div class="user-row">
             <span>{{ u.email }}</span>
@@ -127,7 +135,11 @@ import { InstallerInfo, SetupCodeResponse, StoreOverview, UserAccount } from '..
           </div>
         }
       </div>
+    } @else {
+      <p class="muted">Select a store under Stores tab to view users, or create a user above.</p>
     }
+      }
+    </app-page-container>
   `,
   styles: [`
     .muted { color: var(--text-muted); }
@@ -153,8 +165,8 @@ import { InstallerInfo, SetupCodeResponse, StoreOverview, UserAccount } from '..
     button.ghost { background:transparent; border-color:var(--border-strong); color:var(--text-muted); }
     button.small { font-size:.78rem; padding:.25rem .55rem; margin-top:0; }
     button:disabled { opacity:.5; cursor:not-allowed; }
-    .err { color:#f07070; font-size:.85rem; }
-    .ok { color:#5cdb7f; font-size:.85rem; }
+    .err { color: var(--danger); font-size: .85rem; }
+    .ok { color: var(--success); font-size: .85rem; }
     .row { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
     .store-row {
       display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;
@@ -180,6 +192,7 @@ import { InstallerInfo, SetupCodeResponse, StoreOverview, UserAccount } from '..
   `],
 })
 export class AdminStoresComponent implements OnInit {
+  tab: 'stores' | 'users' = 'stores';
   stores: StoreOverview[] = [];
   storeUsers: UserAccount[] = [];
 

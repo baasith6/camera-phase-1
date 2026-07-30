@@ -52,7 +52,10 @@
               }
             ],
             "styles": [
-              "src/styles.css"
+              "src/app/shared/styles/_tokens.css",
+              "src/styles.css",
+              "src/app/shared/styles/_utilities.css",
+              "src/app/shared/styles/_components.css"
             ],
             "scripts": []
           },
@@ -82,6 +85,9 @@
         },
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
+          "options": {
+            "proxyConfig": "proxy.conf.json"
+          },
           "configurations": {
             "production": {
               "buildTarget": "dashboard:build:production"
@@ -110,7 +116,10 @@
               }
             ],
             "styles": [
-              "src/styles.css"
+              "src/app/shared/styles/_tokens.css",
+              "src/styles.css",
+              "src/app/shared/styles/_utilities.css",
+              "src/app/shared/styles/_components.css"
             ],
             "scripts": []
           }

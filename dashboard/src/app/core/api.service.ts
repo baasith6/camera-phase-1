@@ -161,6 +161,14 @@ export class ApiService {
     return this.http.get<AnalyticsSummary>(`${API_BASE}/api/analytics/summary${q}`);
   }
 
+  getAnalyticsTrends(storeId?: string, days = 7): Observable<{ days: number; points: { date: string; count: number }[] }> {
+    const params: string[] = [`days=${days}`];
+    if (storeId) params.push(`storeId=${storeId}`);
+    return this.http.get<{ days: number; points: { date: string; count: number }[] }>(
+      `${API_BASE}/api/analytics/trends?${params.join('&')}`,
+    );
+  }
+
   getSystemLogs(storeId?: string): Observable<SystemLogs> {
     const q = storeId ? `?storeId=${storeId}` : '';
     return this.http.get<SystemLogs>(`${API_BASE}/api/logs/system${q}`);
