@@ -13,7 +13,7 @@ export const routes: Routes = [
     component: ShellComponent,
     canActivate: [authGuard],
     children: [
-      { path: '', redirectTo: 'get-started', pathMatch: 'full' },
+      { path: '', redirectTo: 'alerts', pathMatch: 'full' },
       {
         path: 'get-started',
         loadComponent: () =>

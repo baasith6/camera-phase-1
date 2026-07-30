@@ -1,23 +1,34 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models';
+import { ConfirmDialogService } from '../../shared/confirm-dialog.service';
+import { PageContainerComponent } from '../../shared/ui-components';
 
 @Component({
   selector: 'app-setup',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RouterLink, PageContainerComponent],
   template: `
+    <app-page-container>
     <h2>Setup &amp; Zones</h2>
 
-    <!-- Local Connector install -->
+    <div class="stepper" role="tablist" aria-label="Setup steps">
+      @for (s of steps; track s.id) {
+        <button type="button" class="stepper-btn" [class.active]="step === s.id" [class.done]="step > s.id" (click)="goToStep(s.id)">
+          {{ s.label }}
+        </button>
+      }
+    </div>
+
+    @if (step === 1) {
     <div class="card connector-card">
       <div class="conn-header">
         <div>
-          <h3>ONEVO Local Connector</h3>
+          <h3>onetix Local Connector</h3>
           <p class="muted small">Install on the shop PC that can reach the cameras. The setup wizard asks for a code, then RTSP links or a test MP4.</p>
         </div>
         <div class="conn-status" [class.on]="storeConnectorOnline" [class.off]="!storeConnectorOnline">
@@ -80,7 +91,9 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         </div>
       }
     </div>
+    }
 
+    @if (step === 2) {
     <div class="grid3">
       <!-- Stores -->
       <div class="card">
@@ -141,7 +154,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             </div>
             <div class="onvif-section">
               <div class="onvif-header" (click)="showOnvifForm = !showOnvifForm">
-                <span>⚙ ONVIF (optional — auto-fetch RTSP URL)</span>
+                <span>ONVIF (optional — auto-fetch RTSP URL)</span>
                 <span class="toggle">{{ showOnvifForm ? '▲' : '▼' }}</span>
               </div>
               @if (showOnvifForm) {
@@ -186,11 +199,11 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             </button>
             <button class="ghost small danger-text" (click)="removeCamera(selectedCamera.id)">Remove</button>
             <button class="ghost small" (click)="testStream()" [disabled]="testingStream">
-              {{ testingStream ? 'Testing…' : '🔌 Test Stream' }}
+              {{ testingStream ? 'Testing…' : 'Test stream' }}
             </button>
             @if (selectedCamera.id) {
               <a class="btn-link" [href]="liveSnapshotUrl" target="_blank">
-                📷 Live Snapshot
+                Live snapshot
               </a>
             }
           </div>
@@ -256,9 +269,9 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         }
       </div>
     }
+    }
 
-    <!-- Zone drawing canvas -->
-    @if (cameraId) {
+    @if (step === 3 && cameraId) {
       <div class="card" style="margin-top:1rem">
         <div class="zone-header">
           <div>
@@ -282,16 +295,16 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
           <button class="ghost" (click)="undoPoint()" [disabled]="draftPoints.length === 0">↩ Undo Point</button>
           <button class="ghost" (click)="clearDraft()" [disabled]="draftPoints.length === 0">Clear points</button>
           <button class="ghost" (click)="loadSnapshot()" [disabled]="loadingSnapshot">
-            {{ loadingSnapshot ? 'Loading…' : '🔄 Refresh frame' }}
+            {{ loadingSnapshot ? 'Loading…' : 'Refresh frame' }}
           </button>
           <button class="btn-primary" (click)="saveZone()" [disabled]="draftPoints.length < 3 || !draftName">
-            💾 Save Zone ({{ draftPoints.length }} pts)
+            Save zone ({{ draftPoints.length }} pts)
           </button>
         </div>
 
         @if (snapshotError) {
           <p class="err-text" style="margin:0 0 .5rem">
-            ⚠ {{ snapshotError }} — zones can still be drawn on the blank canvas.
+            {{ snapshotError }} — zones can still be drawn on the blank canvas.
           </p>
         }
 
@@ -302,14 +315,38 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
                   (mouseup)="onCanvasMouseUp($event)"
                   (mouseleave)="onCanvasMouseUp($event)"></canvas>
           <div class="canvas-hint muted small">
-            💡 <strong>Tip:</strong> Click 2 opposite corners to draw a Box, or keep clicking to add points. Drag yellow dots to adjust points anytime!
+            <strong>Tip:</strong> Click 2 opposite corners to draw a box, or keep clicking to add points. Drag yellow dots to adjust points anytime.
           </div>
         </div>
       </div>
     }
+
+    @if (step === 4) {
+      <div class="card">
+        <h3>Verify setup</h3>
+        <p class="muted">Confirm connector status, cameras, and zones before going live.</p>
+        <ul class="verify-list">
+          <li [class.ok]="storeConnectorOnline">Connector {{ storeConnectorOnline ? 'online' : 'offline or not installed' }}</li>
+          <li [class.ok]="cameras.length > 0">{{ cameras.length }} camera(s) configured</li>
+          <li [class.ok]="zones.length > 0">{{ zones.length }} zone(s) on selected camera</li>
+        </ul>
+        <div class="verify-actions">
+          <a class="btn-link" routerLink="/app/health">View health dashboard</a>
+          <a class="btn-link" routerLink="/app/tuning">Open tuning</a>
+          <button type="button" class="ghost" (click)="goToStep(1)">Back to connector</button>
+        </div>
+      </div>
+    }
+    </app-page-container>
   `,
   styles: [`
     .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
+    @media (max-width: 992px) { .grid3 { grid-template-columns: 1fr; } }
+    .canvas-container canvas { max-width: 100%; height: auto; }
+    .verify-list { list-style: none; padding: 0; margin: 0 0 1rem; }
+    .verify-list li { padding: 8px 0; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+    .verify-list li.ok { color: var(--success); }
+    .verify-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .row-item { padding:.4rem .5rem; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; }
     .row-item:hover { background:var(--accent-soft); }
     .row-item.sel { background:var(--accent-soft); border-left:2px solid var(--accent); }
@@ -350,7 +387,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
     .badge.offline, .badge.degraded, .badge.unknown { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
     .btn-link { display:inline-block; padding:.3rem .65rem; border-radius:var(--radius-sm); font-size:.78rem;
                 background:var(--accent-soft); color:var(--accent-2); text-decoration:none; border:1px solid var(--border-strong); }
-    .btn-link:hover { background:rgba(139,92,246,.22); border-color:var(--accent); }
+    .btn-link:hover { background: var(--accent-soft); border-color: var(--accent); }
     .test-result { margin-top:.75rem; padding:.5rem .75rem; border-radius:var(--radius-sm); font-size:.82rem; }
     .test-result.ok { background:var(--success-soft); color:var(--success); }
     .test-result.err { background:var(--danger-soft); color:var(--danger); }
@@ -378,6 +415,14 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
 })
 export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('zoneCanvas') canvasRef?: ElementRef<HTMLCanvasElement>;
+
+  step = 1;
+  readonly steps = [
+    { id: 1, label: '1. Connector' },
+    { id: 2, label: '2. Cameras' },
+    { id: 3, label: '3. Zones' },
+    { id: 4, label: '4. Verify' },
+  ];
 
   stores: Store[] = [];
   cameras: Camera[] = [];
@@ -431,6 +476,8 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     private api: ApiService,
     public auth: AuthService,
     private route: ActivatedRoute,
+    private router: Router,
+    private confirm: ConfirmDialogService,
   ) {}
 
   get effectiveSnapshotUrl(): string {
@@ -465,6 +512,11 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     this.loadInstallerInfo();
     this.route.queryParamMap.subscribe((params) => {
       const fromQuery = params.get('storeId');
+      const stepParam = params.get('step');
+      if (stepParam) {
+        const n = parseInt(stepParam, 10);
+        if (n >= 1 && n <= 4) this.step = n;
+      }
       const scoped = this.auth.storeId();
       this.api.listStores().subscribe((s) => {
         this.stores = s;
@@ -479,6 +531,13 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     if (this.pollTimer) clearInterval(this.pollTimer);
+  }
+
+  goToStep(id: number): void {
+    this.step = id;
+    const tree = this.router.parseUrl(this.router.url);
+    tree.queryParams['step'] = String(id);
+    this.router.navigateByUrl(tree, { replaceUrl: true });
   }
 
   ngAfterViewInit(): void { this.redraw(); }
@@ -516,7 +575,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = this.installerInfo?.fileName || 'ONEVO-Connector-Setup.exe';
+        anchor.download = this.installerInfo?.fileName || 'onetix-Connector-Setup.exe';
         anchor.click();
         URL.revokeObjectURL(url);
       },
@@ -691,14 +750,27 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     else this.selectedCameraIds = new Set(this.cameras.map(camera => camera.id));
   }
 
-  removeCamera(id: string): void {
-    if (!confirm('Remove this camera from monitoring?')) return;
+  async removeCamera(id: string): Promise<void> {
+    const ok = await this.confirm.open({
+      title: 'Remove camera',
+      message: 'Remove this camera from monitoring?',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     this.api.deleteCamera(id).subscribe(() => this.selectStore(this.storeId));
   }
 
-  removeSelectedCameras(): void {
+  async removeSelectedCameras(): Promise<void> {
     const ids = [...this.selectedCameraIds];
-    if (!ids.length || !confirm(`Remove ${ids.length} selected camera(s) from monitoring?`)) return;
+    if (!ids.length) return;
+    const ok = await this.confirm.open({
+      title: 'Remove cameras',
+      message: `Remove ${ids.length} selected camera(s) from monitoring?`,
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     this.api.bulkDisableCameras(ids).subscribe(() => this.selectStore(this.storeId));
   }
 
@@ -874,7 +946,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
         ctx.shadowBlur = 4;
         ctx.fill();
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#8b5cf6';
+        ctx.strokeStyle = '#2563eb';
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }

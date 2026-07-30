@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./out-tsc/e2e",
+    "noEmit": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "types": ["node", "@playwright/test"]
+  },
+  "include": [
+    "e2e/**/*.ts",
+    "playwright.config.ts"
+  ]
+}

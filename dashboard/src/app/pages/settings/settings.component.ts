@@ -1,34 +1,39 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { AuthService } from '../../core/auth.service';
+import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
+import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-components';
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, PageContainerComponent, PageHeaderComponent],
   template: `
-    <h2>Account Settings</h2>
-    <div class="card">
-      <h3>Change password</h3>
-      <label>Current password<input type="password" [(ngModel)]="currentPassword" /></label>
-      <label>New password<input type="password" [(ngModel)]="newPassword" /></label>
-      <button (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Update password' }}</button>
-      @if (message) { <p class="ok">{{ message }}</p> }
-      @if (error) { <p class="err">{{ error }}</p> }
-    </div>
-    <div class="card muted">
-      Signed in as <strong>{{ auth.email() }}</strong> ({{ auth.role() }}).
-    </div>
+    <app-page-container>
+      <app-page-header title="Settings" subtitle="Account and security." />
+      <div class="card form-card">
+        <h3>Change password</h3>
+        <label for="cur">Current password</label>
+        <input id="cur" type="password" [(ngModel)]="currentPassword" />
+        <label for="new">New password</label>
+        <input id="new" type="password" [(ngModel)]="newPassword" />
+        <button type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Update password' }}</button>
+        @if (message) { <p class="ok" role="status">{{ message }}</p> }
+        @if (error) { <p class="err" role="alert">{{ error }}</p> }
+      </div>
+      <div class="card muted">
+        Signed in as <strong>{{ auth.email() }}</strong> ({{ auth.role() }}).
+      </div>
+    </app-page-container>
   `,
   styles: [`
-    .card { margin-bottom:1rem; display:flex; flex-direction:column; gap:.65rem; max-width:420px; }
-    label { display:flex; flex-direction:column; gap:.25rem; font-size:.85rem; }
-    input { padding:.45rem .55rem; border-radius:var(--radius-sm); border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); }
-    button { align-self:flex-start; padding:.45rem .85rem; border-radius:var(--radius-sm); border:1px solid var(--accent); background:var(--accent-soft); color:var(--accent-2); cursor:pointer; }
-    .ok { color:var(--success); }
-    .err { color:var(--danger); }
-    .muted { color:var(--text-muted); font-size:.9rem; }
+    .form-card { max-width: 420px; display: flex; flex-direction: column; gap: 8px; }
+    .form-card h3 { margin: 0 0 8px; font-size: 0.95rem; }
+    label { display: flex; flex-direction: column; gap: 4px; }
+    .ok { color: var(--success); font-size: 0.9rem; }
+    .err { color: var(--danger); font-size: 0.9rem; }
+    .muted { color: var(--text-muted); font-size: 0.9rem; }
   `],
 })
 export class SettingsComponent {

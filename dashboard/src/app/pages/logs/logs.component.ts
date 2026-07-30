@@ -1,92 +1,136 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { ConnectorLogEntry, Store, SystemLogs } from '../../core/models';
+import { StoreContextService } from '../../core/store-context.service';
+import { ConnectorLogEntry, SystemLogs } from '../../core/models';
+import { PageContainerComponent, PageHeaderComponent, DataTableComponent, ErrorBannerComponent, SkeletonListComponent } from '../../shared/ui-components';
+import { StatusBadgeComponent } from '../../shared/status-badge.component';
 
 @Component({
   selector: 'app-logs',
   standalone: true,
-  imports: [FormsModule, DatePipe],
+  imports: [
+    FormsModule,
+    DatePipe,
+    PageHeaderComponent,
+    PageContainerComponent,
+    DataTableComponent,
+    StatusBadgeComponent,
+    ErrorBannerComponent,
+    SkeletonListComponent,
+  ],
   template: `
-    <div class="header-row">
-      <h2>System Logs</h2>
-      <div class="actions">
-        <select [(ngModel)]="storeId" (change)="load()">
-          <option value="">All stores</option>
-          @for (s of stores; track s.id) { <option [value]="s.id">{{ s.name }}</option> }
-        </select>
-        <button class="ghost" (click)="load()">Refresh</button>
-      </div>
-    </div>
+    <app-page-container>
+      <app-page-header title="System logs" subtitle="Connector heartbeats and pipeline queue status.">
+        <div actions>
+          <select [(ngModel)]="levelFilter" aria-label="Status filter">
+            <option value="">All statuses</option>
+            <option value="Healthy">Healthy</option>
+            <option value="Degraded">Degraded</option>
+            <option value="Offline">Offline</option>
+          </select>
+          <button class="ghost" type="button" (click)="load()">Refresh</button>
+        </div>
+      </app-page-header>
 
-    @if (loading) { <div class="card muted">Loading…</div> }
-    @else if (error) { <div class="err">{{ error }}</div> }
-    @else if (logs) {
-      <div class="grid">
-        <div class="card stat"><div class="label">Redis queue</div><div class="value">{{ logs.redisQueueDepth }}</div></div>
-        <div class="card stat"><div class="label">Failed jobs</div><div class="value" [class.danger]="logs.failedJobs > 0">{{ logs.failedJobs }}</div></div>
-      </div>
+      @if (error) {
+        <app-error-banner [message]="error">
+          <button class="ghost small" type="button" (click)="load()">Retry</button>
+        </app-error-banner>
+      }
 
-      <div class="card">
-        <h3>Connector status</h3>
-        @if (!logs.connectors.length) {
-          <p class="muted">No connectors registered.</p>
-        } @else {
-          <table class="table">
+      @if (loading) {
+        <app-skeleton-list />
+      } @else if (logs) {
+        <div class="card meta-row">
+          <span class="muted small">Generated {{ logs.generatedAt | date:'medium' }}</span>
+          <span class="muted small">Queue depth: {{ logs.redisQueueDepth }} · Failed jobs: {{ logs.failedJobs }}</span>
+        </div>
+
+        <app-data-table>
+          <table desktop class="table">
             <thead>
-              <tr><th>Name</th><th>Status</th><th>Version</th><th>Last heartbeat</th><th>Degraded reason</th><th>Queue</th></tr>
+              <tr>
+                <th>Connector</th>
+                <th>Status</th>
+                <th>Version</th>
+                <th>Queue</th>
+                <th>Disk free</th>
+                <th>Heartbeat</th>
+                <th>Degraded reason</th>
+              </tr>
             </thead>
             <tbody>
-              @for (c of logs.connectors; track c.id) {
+              @for (c of filteredConnectors(); track c.id) {
                 <tr>
                   <td>{{ c.name }}</td>
-                  <td>{{ c.status }}</td>
-                  <td>{{ c.version }}</td>
-                  <td>{{ c.lastHeartbeat ? (c.lastHeartbeat | date:'MMM d, h:mm a') : '—' }}</td>
-                  <td>{{ c.degradedReason || '—' }}</td>
+                  <td><app-status-badge [level]="c.status" [label]="c.status" /></td>
+                  <td class="mono">{{ c.version }}</td>
                   <td>{{ c.uploadQueueDepth }}</td>
+                  <td>{{ c.diskFreePct }}%</td>
+                  <td>{{ c.lastHeartbeat ? (c.lastHeartbeat | date:'MMM d, h:mm a') : '—' }}</td>
+                  <td class="muted small">{{ c.degradedReason || '—' }}</td>
                 </tr>
+              } @empty {
+                <tr><td colspan="7" class="muted">No connector logs for this filter.</td></tr>
               }
             </tbody>
           </table>
-        }
-      </div>
-    }
+        </app-data-table>
+      }
+    </app-page-container>
   `,
   styles: [`
-    .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
-    .actions { display:flex; gap:.5rem; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:.75rem; margin-bottom:1rem; }
-    .stat .label { font-size:.8rem; color:var(--text-muted); }
-    .stat .value { font-size:1.4rem; font-weight:700; }
-    .value.danger { color:var(--danger); }
-    .table { width:100%; border-collapse:collapse; font-size:.85rem; }
-    .table th, .table td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--border); vertical-align:top; }
-    button.ghost { background:transparent; border:1px solid var(--border-strong); color:var(--text-muted); padding:.35rem .65rem; border-radius:var(--radius-sm); cursor:pointer; }
-    .err { color:var(--danger); }
-    .muted { color:var(--text-muted); }
+    .meta-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
   `],
 })
-export class LogsComponent implements OnInit {
-  stores: Store[] = [];
-  storeId = '';
+export class LogsComponent implements OnInit, OnDestroy {
   logs: SystemLogs | null = null;
   loading = false;
   error = '';
+  levelFilter = '';
+  storeId = '';
+  private timer?: ReturnType<typeof setInterval>;
 
-  constructor(private api: ApiService) {}
+  constructor(
+    private api: ApiService,
+    private route: ActivatedRoute,
+    private storeCtx: StoreContextService,
+  ) {}
 
   ngOnInit(): void {
-    this.api.listStores().subscribe((s) => { this.stores = s; this.load(); });
+    this.route.queryParamMap.subscribe((params) => {
+      this.storeId = params.get('storeId') ?? this.storeCtx.storeId() ?? '';
+      this.load();
+    });
+    this.timer = setInterval(() => this.load(true), 30000);
   }
 
-  load(): void {
-    this.loading = true;
+  ngOnDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  filteredConnectors(): ConnectorLogEntry[] {
+    if (!this.logs) return [];
+    let list = this.logs.connectors;
+    if (this.levelFilter) list = list.filter((c) => c.status === this.levelFilter);
+    return list;
+  }
+
+  load(silent = false): void {
+    if (!silent) this.loading = true;
     this.error = '';
     this.api.getSystemLogs(this.storeId || undefined).subscribe({
-      next: (l) => { this.logs = l; this.loading = false; },
-      error: (e) => { this.loading = false; this.error = e?.error?.error || 'Failed to load logs'; },
+      next: (l) => {
+        this.logs = l;
+        this.loading = false;
+      },
+      error: (e) => {
+        this.loading = false;
+        this.error = e?.error?.error || 'Failed to load logs';
+      },
     });
   }
 }
