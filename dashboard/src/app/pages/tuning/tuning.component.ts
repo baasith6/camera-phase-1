@@ -2,7 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service';
 import { RiskConfig, Store } from '../../core/models';
-import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-components';
+import { PageContainerComponent, PageHeaderComponent, ErrorBannerComponent } from '../../shared/ui-components';
 
 const DEFAULT_CONFIG: RiskConfig = {
   weights: {
@@ -32,7 +32,7 @@ const DEFAULT_CONFIG: RiskConfig = {
 @Component({
   selector: 'app-tuning',
   standalone: true,
-  imports: [FormsModule, PageContainerComponent, PageHeaderComponent],
+  imports: [FormsModule, PageContainerComponent, PageHeaderComponent, ErrorBannerComponent],
   template: `
     <app-page-container>
       <app-page-header title="Risk tuning" subtitle="Adjust signal weights and alert thresholds.">
@@ -43,6 +43,10 @@ const DEFAULT_CONFIG: RiskConfig = {
           </select>
         </div>
       </app-page-header>
+
+      @if (error) {
+        <app-error-banner [message]="error" />
+      }
 
       <div class="tuning-grid">
         <div class="card">
@@ -96,6 +100,7 @@ export class TuningComponent implements OnInit {
   cfg: RiskConfig = structuredClone(DEFAULT_CONFIG);
   saving = false;
   saved = false;
+  error = '';
 
   constructor(private api: ApiService) {}
 
@@ -120,9 +125,13 @@ export class TuningComponent implements OnInit {
   save(): void {
     this.saving = true;
     this.saved = false;
+    this.error = '';
     this.api.upsertRuleConfig(this.cfg, this.storeId || undefined).subscribe({
       next: () => { this.saving = false; this.saved = true; },
-      error: () => { this.saving = false; },
+      error: (e) => {
+        this.saving = false;
+        this.error = e?.error?.error || 'Failed to save config';
+      },
     });
   }
 }

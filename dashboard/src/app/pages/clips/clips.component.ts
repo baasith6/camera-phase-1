@@ -83,7 +83,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                   (keydown.enter)="openClip(c.id)">
                   @if (auth.isManagerOrAdmin()) {
                     <td class="chk-col" (click)="$event.stopPropagation()">
-                      <input type="checkbox" [checked]="selectedIds.has(c.id)" (change)="toggleSelect(c.id, $event)" />
+                      <input type="checkbox" [checked]="selectedIds.has(c.id)" (change)="toggleSelect(c.id, $event)" aria-label="Select clip" />
                     </td>
                   }
                   <td>{{ c.createdAt | date:'MMM d, h:mm a' }}</td>
@@ -102,6 +102,28 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
               }
             </tbody>
           </table>
+
+          <div mobile class="alert-cards">
+            @for (c of clips; track c.id) {
+              <div class="alert-card-mobile" (click)="openClip(c.id)" tabindex="0" (keydown.enter)="openClip(c.id)">
+                <div class="alert-card-mobile-head">
+                  <strong>{{ c.cameraName }}</strong>
+                  <app-status-badge [level]="c.status" [label]="c.status" />
+                </div>
+                <div class="alert-card-mobile-meta">
+                  <span class="muted">{{ c.createdAt | date:'MMM d, h:mm a' }}</span>
+                  <span class="muted">{{ c.durationSec }}s · {{ c.eventCount }} events</span>
+                  <span class="muted">Risk {{ c.riskScore ?? '—' }}</span>
+                </div>
+                <div class="alert-card-mobile-actions" (click)="$event.stopPropagation()">
+                  <button class="ghost small" type="button" [routerLink]="['/app/clips', c.id]">View</button>
+                  @if (c.alertId) {
+                    <a class="alert-link" [routerLink]="['/app/alerts', c.alertId]">Alert</a>
+                  }
+                </div>
+              </div>
+            }
+          </div>
         </app-data-table>
       }
     </app-page-container>
@@ -109,6 +131,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
   styles: [`
     .chk-col { width: 40px; text-align: center; }
     .alert-link { margin-left: 8px; font-size: 0.78rem; }
+    .alert-card-mobile-actions { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
     button.danger { color: var(--danger); border-color: rgba(248, 113, 113, 0.35); }
   `],
 })

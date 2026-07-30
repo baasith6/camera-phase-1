@@ -9,7 +9,7 @@ async function login(page: import('@playwright/test').Page): Promise<void> {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/app\/alerts/);
-  await expect(page.getByRole('heading', { name: 'Alerts' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible();
 }
 
 test.describe('onetix dashboard smoke', () => {
@@ -18,6 +18,7 @@ test.describe('onetix dashboard smoke', () => {
   });
 
   test('alerts list loads and opens alert review', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await login(page);
     const reviewBtn = page.getByRole('button', { name: 'Review' }).first();
     const hasAlerts = await reviewBtn.isVisible().catch(() => false);
@@ -25,8 +26,8 @@ test.describe('onetix dashboard smoke', () => {
 
     await reviewBtn.click();
     await expect(page).toHaveURL(/\/app\/alerts\/.+/);
-    await expect(page.getByRole('heading', { name: 'Review' })).toBeVisible();
-    await page.getByRole('button', { name: 'Submit review' }).click();
+    await expect(page.getByRole('heading', { name: 'Your review', level: 4 })).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm incident' }).click();
     await expect(page.getByText('Review saved.')).toBeVisible({ timeout: 15_000 });
   });
 
@@ -62,5 +63,22 @@ test.describe('mobile shell', () => {
     await page.locator('.sidebar-backdrop.open').click();
     await expect(page.locator('.sidebar.open')).toHaveCount(0);
     await expect(menuBtn).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('clips page shows mobile cards', async ({ page }) => {
+    await login(page);
+    await page.goto('/app/clips');
+    await expect(page.getByRole('heading', { name: 'Clips' })).toBeVisible();
+
+    const emptyState = page.getByText('No clips uploaded yet');
+    const mobileCards = page.locator('.alert-card-mobile');
+    const hasEmpty = await emptyState.isVisible().catch(() => false);
+    const cardCount = await mobileCards.count();
+
+    expect(hasEmpty || cardCount > 0).toBeTruthy();
+    if (cardCount > 0) {
+      await expect(mobileCards.first()).toBeVisible();
+      await expect(page.locator('.data-table-desktop')).toBeHidden();
+    }
   });
 });

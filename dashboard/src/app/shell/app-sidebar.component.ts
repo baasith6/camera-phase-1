@@ -1,7 +1,8 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../core/auth.service';
-import { NAV_SECTIONS, NavItem } from '../shared/nav.config';
+import { LiveAlertsService } from '../core/live-alerts.service';
+import { navSectionsForRole, NavSection } from '../shared/nav.config';
 
 @Component({
   selector: 'app-sidebar',
@@ -51,7 +52,10 @@ import { NAV_SECTIONS, NavItem } from '../shared/nav.config';
                     <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
                   }
                 }
-                {{ item.label }}
+                <span class="nav-label">{{ item.label }}</span>
+                @if (item.badgeKey === 'pending' && live.pendingCount() > 0) {
+                  <span class="nav-badge">{{ live.pendingCount() }} pending</span>
+                }
               </a>
             }
           }
@@ -91,6 +95,16 @@ import { NAV_SECTIONS, NavItem } from '../shared/nav.config';
       color: var(--accent-2);
       border-left: 2px solid var(--accent);
     }
+    .nav-label { flex: 1; }
+    .nav-badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-2);
+      white-space: nowrap;
+    }
     .svg-icon { width: 16px; height: 16px; flex-shrink: 0; }
     .icon { display: none; }
     @media (max-width: 991px) {
@@ -111,7 +125,13 @@ import { NAV_SECTIONS, NavItem } from '../shared/nav.config';
 export class AppSidebarComponent {
   @Input() open = false;
   @Output() navigate = new EventEmitter<void>();
-  readonly sections = NAV_SECTIONS;
 
-  constructor(public auth: AuthService) {}
+  readonly sections: NavSection[];
+
+  constructor(
+    public auth: AuthService,
+    public live: LiveAlertsService,
+  ) {
+    this.sections = navSectionsForRole(this.auth.isAdmin());
+  }
 }

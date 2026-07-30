@@ -1,10 +1,9 @@
 import { Component, isDevMode } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { forkJoin, of } from 'rxjs';
-import { catchError, switchMap } from 'rxjs/operators';
+import { of } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 import { AuthService } from '../../core/auth.service';
-import { ApiService } from '../../core/api.service';
 
 @Component({
   selector: 'app-login',
@@ -14,7 +13,7 @@ import { ApiService } from '../../core/api.service';
     <div class="login-wrap">
       <form class="card login-card" (ngSubmit)="submit()">
         <h1>onetix</h1>
-        <p class="muted">Staff Console</p>
+        <p class="muted">Sign in to review store alerts</p>
         <label for="email">Email</label>
         <input id="email" [(ngModel)]="email" name="email" type="email" autocomplete="username" />
         <label for="password">Password</label>
@@ -67,7 +66,6 @@ export class LoginComponent {
 
   constructor(
     private auth: AuthService,
-    private api: ApiService,
     private router: Router,
   ) {}
 
@@ -75,7 +73,7 @@ export class LoginComponent {
     this.loading = true;
     this.error = '';
     this.auth.login(this.email, this.password).pipe(
-      switchMap(() => this.resolvePostLoginRoute()),
+      switchMap(() => of(['/app/alerts'] as [string])),
     ).subscribe({
       next: (route) => {
         this.loading = false;
@@ -86,26 +84,5 @@ export class LoginComponent {
         this.error = e?.error?.error || 'Login failed';
       },
     });
-  }
-
-  private resolvePostLoginRoute() {
-    const role = (this.auth.role() ?? '').toLowerCase();
-    if (role === 'admin' || role === 'installer') return of(['/app/get-started']);
-    if (role !== 'manager') return of(['/app/get-started']);
-
-    const storeId = this.auth.storeId();
-    if (!storeId) return of(['/app/get-started']);
-
-    return forkJoin({
-      cameras: this.api.listCameras(storeId).pipe(catchError(() => of([]))),
-      connectors: this.api.listConnectors(storeId).pipe(catchError(() => of([]))),
-    }).pipe(
-      switchMap(({ cameras, connectors }) => {
-        const online = connectors.some((c) =>
-          (c.status === 'Healthy' || c.status === 'Degraded') && c.lastHeartbeat);
-        const complete = cameras.length > 0 && online;
-        return of(complete ? ['/app/alerts'] : ['/app/get-started']);
-      }),
-    );
   }
 }

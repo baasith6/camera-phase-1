@@ -1,23 +1,25 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink, ActivatedRoute } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { LiveAlertsService } from '../../core/live-alerts.service';
 import { StoreContextService } from '../../core/store-context.service';
 import { Alert, Store } from '../../core/models';
-import { alertTypeLabel } from '../../shared/alert-labels';
+import { alertTypeLabel, pillLabel, relativeTime } from '../../shared/alert-labels';
+import { AlertReviewPaneComponent } from '../../shared/alert-review-pane.component';
 import { ConfirmDialogService } from '../../shared/confirm-dialog.service';
 import {
   BulkActionBarComponent,
   DataTableComponent,
   EmptyStateComponent,
   ErrorBannerComponent,
+  FilterBarComponent,
   PageContainerComponent,
+  PageHeaderComponent,
   SkeletonListComponent,
 } from '../../shared/ui-components';
-import { PageHeaderComponent } from '../../shared/page-header.component';
 import { StatusBadgeComponent } from '../../shared/status-badge.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 
@@ -28,7 +30,6 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
   standalone: true,
   imports: [
     FormsModule,
-    RouterLink,
     DatePipe,
     PageHeaderComponent,
     PageContainerComponent,
@@ -37,26 +38,30 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
     BulkActionBarComponent,
     DataTableComponent,
     EmptyStateComponent,
+    FilterBarComponent,
     SkeletonListComponent,
     ErrorBannerComponent,
+    AlertReviewPaneComponent,
   ],
   template: `
     <app-page-container>
-      <app-page-header title="Alerts">
-        <div actions class="filters">
-          <select [(ngModel)]="status" (change)="load()" aria-label="Status filter">
-            <option value="">All statuses</option>
-            <option value="PendingReview">Pending review</option>
-            <option value="Confirmed">Confirmed</option>
-            <option value="Dismissed">Dismissed</option>
-            <option value="FalsePositive">False positive</option>
-            <option value="NeedsFollowUp">Needs follow-up</option>
-          </select>
+      <app-page-header title="Review" subtitle="Review flagged activity from your cameras">
+        <div actions>
+          <app-filter-bar>
+            <select [(ngModel)]="status" (change)="load()" aria-label="Status filter">
+              <option value="PendingReview">Needs review</option>
+              <option value="">All statuses</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="Dismissed">Not suspicious</option>
+              <option value="FalsePositive">False alarm</option>
+              <option value="NeedsFollowUp">Follow-up</option>
+            </select>
+          </app-filter-bar>
           <button class="ghost" type="button" (click)="load()">Refresh</button>
         </div>
         <div below class="filter-chips">
           <button type="button" class="chip" [class.active]="quickFilter === ''" (click)="setQuick('')">All</button>
-          <button type="button" class="chip" [class.active]="quickFilter === 'pending'" (click)="setQuick('pending')">Pending</button>
+          <button type="button" class="chip" [class.active]="quickFilter === 'pending'" (click)="setQuick('pending')">Needs review</button>
           <button type="button" class="chip" [class.active]="quickFilter === 'high'" (click)="setQuick('high')">High risk</button>
           <button type="button" class="chip" [class.active]="quickFilter === 'today'" (click)="setQuick('today')">Today</button>
         </div>
@@ -88,7 +93,7 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
       @if (loading) {
         <app-skeleton-list />
       } @else if (filteredAlerts.length === 0) {
-        <app-empty-state title="No alerts — all clear" detail="Store may be in silent or manager-only pilot mode." />
+        <app-empty-state title="No alerts — all clear" detail="When the system flags activity, it will appear here for your review." />
       } @else {
         @if (newCount > 0) {
           <div class="new-banner" role="status" (click)="dismissNewBanner()">
@@ -96,74 +101,111 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
           </div>
         }
 
-        <app-data-table>
-          <table desktop class="table">
-            <thead>
-              <tr>
-                @if (auth.isManagerOrAdmin()) { <th class="chk-col"></th> }
-                <th>Alert</th>
-                <th>Risk</th>
-                <th>Score</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (a of pagedAlerts(); track a.id) {
-                <tr
-                  [class.selected-row]="selectedIds.has(a.id)"
-                  [class.new-row]="newIds.has(a.id)"
-                  (click)="openAlert(a.id)"
-                  tabindex="0"
-                  (keydown.enter)="openAlert(a.id)">
-                  @if (auth.isManagerOrAdmin()) {
-                    <td class="chk-col" (click)="$event.stopPropagation()">
-                      <input type="checkbox" [checked]="selectedIds.has(a.id)" (change)="toggleSelect(a.id, $event)" aria-label="Select alert" />
-                    </td>
+        <div class="inbox-layout" [class.has-detail]="isDesktop && selectedId">
+          <div class="inbox-list">
+            <app-data-table>
+              <table desktop class="table compact">
+                <thead>
+                  <tr>
+                    @if (auth.isManagerOrAdmin()) { <th class="chk-col"></th> }
+                    <th>Alert</th>
+                    <th>Risk</th>
+                    <th>Status</th>
+                    @if (!isDesktop) { <th></th> }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (a of pagedAlerts(); track a.id) {
+                    <tr
+                      [class.selected-row]="selectedIds.has(a.id) || (isDesktop && selectedId === a.id)"
+                      [class.new-row]="newIds.has(a.id)"
+                      [class.active-row]="isDesktop && selectedId === a.id"
+                      (click)="openAlert(a.id)"
+                      tabindex="0"
+                      (keydown.enter)="openAlert(a.id)">
+                      @if (auth.isManagerOrAdmin()) {
+                        <td class="chk-col" (click)="$event.stopPropagation()">
+                          <input type="checkbox" [checked]="selectedIds.has(a.id)" (change)="toggleSelect(a.id, $event)" aria-label="Select alert" />
+                        </td>
+                      }
+                      <td>
+                        <div class="alert-type">{{ labelType(a.alertType) }}</div>
+                        <div class="muted small">{{ relative(a.createdAt) }} · {{ a.createdAt | date:'MMM d, h:mm a' }}</div>
+                      </td>
+                      <td><app-status-badge [level]="a.riskLevel" /></td>
+                      <td><app-status-pill [status]="a.status" /></td>
+                      @if (!isDesktop) {
+                        <td (click)="$event.stopPropagation()">
+                          <button class="ghost small" type="button" (click)="openAlert(a.id)">Review</button>
+                        </td>
+                      }
+                    </tr>
                   }
-                  <td>
-                    <div class="alert-type">{{ labelType(a.alertType) }}</div>
-                    <div class="muted small">{{ a.createdAt | date:'MMM d, h:mm a' }}</div>
-                  </td>
-                  <td><app-status-badge [level]="a.riskLevel" /></td>
-                  <td><span class="score-num">{{ a.riskScore }}</span></td>
-                  <td><app-status-pill [status]="a.status" /></td>
-                  <td (click)="$event.stopPropagation()">
-                    <button class="ghost small" type="button" [routerLink]="['/app/alerts', a.id]">Review</button>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
+                </tbody>
+              </table>
 
-          <div mobile class="alert-cards">
-          @for (a of pagedAlerts(); track a.id) {
-            <div class="alert-card-mobile" (click)="openAlert(a.id)" tabindex="0" (keydown.enter)="openAlert(a.id)">
-              <div class="alert-card-mobile-head">
-                <strong>{{ labelType(a.alertType) }}</strong>
-                <app-status-badge [level]="a.riskLevel" />
+              <div mobile class="alert-cards">
+                @for (a of pagedAlerts(); track a.id) {
+                  <div class="alert-card-mobile" (click)="openAlert(a.id)" tabindex="0" (keydown.enter)="openAlert(a.id)">
+                    <div class="alert-card-mobile-head">
+                      <strong>{{ labelType(a.alertType) }}</strong>
+                      <app-status-badge [level]="a.riskLevel" />
+                    </div>
+                    <div class="alert-card-mobile-meta">
+                      <app-status-pill [status]="a.status" />
+                      <span class="muted">{{ relative(a.createdAt) }}</span>
+                    </div>
+                  </div>
+                }
               </div>
-              <div class="alert-card-mobile-meta">
-                <app-status-pill [status]="a.status" />
-                <span class="muted">Score {{ a.riskScore }}</span>
-                <span class="muted">{{ a.createdAt | date:'MMM d, h:mm a' }}</span>
+            </app-data-table>
+
+            @if (totalPages() > 1) {
+              <div class="pagination">
+                <button class="ghost pg-btn" type="button" (click)="prevPage()" [disabled]="page === 1">Prev</button>
+                <span class="pg-info muted">{{ rangeStart() }}–{{ rangeEnd() }} of {{ filteredAlerts.length }}</span>
+                <button class="ghost pg-btn" type="button" (click)="nextPage()" [disabled]="page === totalPages()">Next</button>
               </div>
+            }
+          </div>
+
+          @if (isDesktop) {
+            <div class="inbox-detail">
+              <app-alert-review-pane
+                [alertId]="selectedId"
+                [showNav]="true"
+                [hasPrev]="!!prevId"
+                [hasNext]="!!nextId"
+                (prev)="selectById(prevId)"
+                (next)="selectById(nextId)"
+                (reviewed)="onReviewed($event)" />
             </div>
           }
         </div>
-        </app-data-table>
-
-        @if (totalPages() > 1) {
-          <div class="pagination">
-            <button class="ghost pg-btn" type="button" (click)="prevPage()" [disabled]="page === 1">Prev</button>
-            <span class="pg-info muted">{{ rangeStart() }}–{{ rangeEnd() }} of {{ filteredAlerts.length }}</span>
-            <button class="ghost pg-btn" type="button" (click)="nextPage()" [disabled]="page === totalPages()">Next</button>
-          </div>
-        }
       }
     </app-page-container>
   `,
   styles: [`
+    .inbox-layout { display: block; }
+    @media (min-width: 1024px) {
+      .inbox-layout.has-detail {
+        display: grid;
+        grid-template-columns: minmax(280px, 38%) 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      .inbox-list { max-height: calc(100vh - 220px); overflow-y: auto; }
+      .inbox-detail {
+        position: sticky;
+        top: 0;
+        max-height: calc(100vh - 180px);
+        overflow-y: auto;
+        border-left: 1px solid var(--border);
+        padding-left: 16px;
+      }
+      .table.compact th:last-child, .table.compact td:last-child { display: none; }
+    }
+    .active-row td { background: var(--accent-soft) !important; }
     .new-banner {
       background: var(--accent-soft);
       color: var(--accent-2);
@@ -176,8 +218,7 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
       font-weight: 500;
     }
     .chk-col { width: 40px; text-align: center; }
-    .score-num { font-variant-numeric: tabular-nums; font-weight: 700; }
-    .alert-type { font-weight: 600; }
+    .alert-type { font-weight: 600; font-size: 0.9rem; }
     .new-row td { animation: fadeIn 0.8s ease; }
     @keyframes fadeIn { from { background: var(--accent-soft); } to { background: transparent; } }
     .pagination { display: flex; align-items: center; gap: 12px; margin-top: 16px; justify-content: center; }
@@ -189,7 +230,7 @@ export class AlertsComponent implements OnInit, OnDestroy {
   stores: Store[] = [];
   alerts: Alert[] = [];
   storeId = '';
-  status = '';
+  status = 'PendingReview';
   quickFilter: QuickFilter = '';
   loading = false;
   error = '';
@@ -199,6 +240,10 @@ export class AlertsComponent implements OnInit, OnDestroy {
   readonly pageSize = 20;
   bulkDeleting = false;
   selectedIds = new Set<string>();
+  selectedId = '';
+  prevId = '';
+  nextId = '';
+  isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 1024 : false;
   private liveSub?: { unsubscribe: () => void };
 
   constructor(
@@ -228,11 +273,18 @@ export class AlertsComponent implements OnInit, OnDestroy {
     return this.filteredAlerts.length > 0 && this.filteredAlerts.every((a) => this.selectedIds.has(a.id));
   }
 
+  @HostListener('window:resize')
+  onResize(): void {
+    this.isDesktop = window.innerWidth >= 1024;
+  }
+
   ngOnInit(): void {
     this.api.listStores().subscribe((s) => (this.stores = s));
     this.route.queryParamMap.subscribe((params) => {
       const fromQuery = params.get('storeId') ?? this.storeCtx.storeId();
       if (fromQuery) this.storeId = fromQuery;
+      const idParam = params.get('id') ?? '';
+      if (this.isDesktop && idParam) this.selectedId = idParam;
       this.load();
     });
     this.liveSub = this.live.newAlert$.subscribe(({ alert }) => {
@@ -251,12 +303,24 @@ export class AlertsComponent implements OnInit, OnDestroy {
     return alertTypeLabel(type);
   }
 
+  statusLabel(status: string): string {
+    return pillLabel(status);
+  }
+
+  relative(iso: string): string {
+    return relativeTime(iso);
+  }
+
   setQuick(filter: QuickFilter): void {
     this.quickFilter = filter;
     this.page = 1;
   }
 
   openAlert(id: string): void {
+    if (this.isDesktop) {
+      this.selectById(id);
+      return;
+    }
     this.router.navigate(['/app/alerts', id], {
       queryParams: {
         storeId: this.storeId || null,
@@ -264,6 +328,26 @@ export class AlertsComponent implements OnInit, OnDestroy {
         quick: this.quickFilter || null,
       },
     });
+  }
+
+  selectById(id: string): void {
+    if (!id) return;
+    this.selectedId = id;
+    this.updateQueueNav();
+    const tree = this.router.parseUrl(this.router.url);
+    tree.queryParams['id'] = id;
+    if (this.storeId) tree.queryParams['storeId'] = this.storeId;
+    this.router.navigateByUrl(tree, { replaceUrl: true });
+  }
+
+  onReviewed(alert: Alert): void {
+    const idx = this.alerts.findIndex((a) => a.id === alert.id);
+    if (idx >= 0) this.alerts[idx] = alert;
+    this.live.refreshPendingCount(this.storeId || undefined);
+    const pending = this.filteredAlerts.filter((a) => a.status === 'PendingReview' && a.id !== alert.id);
+    if (pending.length) {
+      setTimeout(() => this.selectById(pending[0].id), 500);
+    }
   }
 
   load(): void {
@@ -275,12 +359,29 @@ export class AlertsComponent implements OnInit, OnDestroy {
         this.alerts = a;
         this.loading = false;
         this.page = 1;
+        if (this.isDesktop) {
+          const idFromRoute = this.route.snapshot.queryParamMap.get('id');
+          const pending = a.find((x) => x.status === 'PendingReview');
+          const pick = idFromRoute && a.some((x) => x.id === idFromRoute)
+            ? idFromRoute
+            : pending?.id ?? a[0]?.id ?? '';
+          if (pick) this.selectById(pick);
+          else this.selectedId = '';
+        }
+        this.updateQueueNav();
       },
       error: (e) => {
         this.loading = false;
         this.error = e?.error?.error || 'Failed to load alerts';
       },
     });
+  }
+
+  private updateQueueNav(): void {
+    const list = this.filteredAlerts;
+    const idx = list.findIndex((a) => a.id === this.selectedId);
+    this.prevId = idx > 0 ? list[idx - 1].id : '';
+    this.nextId = idx >= 0 && idx < list.length - 1 ? list[idx + 1].id : '';
   }
 
   pagedAlerts(): Alert[] {

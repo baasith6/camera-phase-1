@@ -5,16 +5,18 @@ import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ClipDetail } from '../../core/models';
 import { ConfirmDialogService } from '../../shared/confirm-dialog.service';
-import { PageContainerComponent, PageHeaderComponent, ErrorBannerComponent } from '../../shared/ui-components';
+import { PageContainerComponent, PageHeaderComponent, ErrorBannerComponent, SkeletonListComponent } from '../../shared/ui-components';
 import { StatusBadgeComponent } from '../../shared/status-badge.component';
 
 @Component({
   selector: 'app-clip-detail',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, RouterLink, PageContainerComponent, PageHeaderComponent, ErrorBannerComponent, StatusBadgeComponent],
+  imports: [DatePipe, DecimalPipe, RouterLink, PageContainerComponent, PageHeaderComponent, ErrorBannerComponent, SkeletonListComponent, StatusBadgeComponent],
   template: `
     <app-page-container>
-      @if (clip) {
+      @if (loading) {
+        <app-skeleton-list [count]="4" />
+      } @else if (clip) {
         <app-page-header [title]="clip.cameraName">
           <div actions class="header-actions">
             <app-status-badge [level]="clip.status" [label]="clip.status" />
@@ -118,8 +120,6 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
         </div>
       } @else if (error) {
         <app-error-banner [message]="error" />
-      } @else {
-        <p class="muted">Loading…</p>
       }
     </app-page-container>
   `,
@@ -157,6 +157,7 @@ export class ClipDetailComponent implements OnInit {
   clip?: ClipDetail;
   error = '';
   deleting = false;
+  loading = true;
 
   constructor(
     private route: ActivatedRoute,
@@ -169,8 +170,14 @@ export class ClipDetailComponent implements OnInit {
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id')!;
     this.api.getClip(id).subscribe({
-      next: (c) => { this.clip = c; },
-      error: (e) => { this.error = e?.error?.error || 'Failed to load clip'; },
+      next: (c) => {
+        this.clip = c;
+        this.loading = false;
+      },
+      error: (e) => {
+        this.loading = false;
+        this.error = e?.error?.error || 'Failed to load clip';
+      },
     });
   }
 

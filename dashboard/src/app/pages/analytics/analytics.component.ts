@@ -9,7 +9,7 @@ import { Alert, AnalyticsSummary } from '../../core/models';
 import { alertTypeLabel } from '../../shared/alert-labels';
 import { countByRisk, countReviewOutcomes } from '../../shared/analytics.utils';
 import { ChartComponent } from '../../shared/chart.component';
-import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBannerComponent, SkeletonListComponent } from '../../shared/ui-components';
+import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBannerComponent, SkeletonListComponent, EmptyStateComponent } from '../../shared/ui-components';
 
 @Component({
   selector: 'app-analytics',
@@ -22,6 +22,7 @@ import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBa
     ChartComponent,
     ErrorBannerComponent,
     SkeletonListComponent,
+    EmptyStateComponent,
   ],
   template: `
     <app-page-container>
@@ -42,6 +43,11 @@ import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBa
           <button class="ghost small" type="button" (click)="load()">Retry</button>
         </app-error-banner>
       } @else if (summary) {
+        @if (summary.totalAlerts === 0 && summary.totalClips === 0) {
+          <app-empty-state
+            title="No activity yet"
+            detail="Charts will populate once clips are uploaded and alerts are generated for this store." />
+        } @else {
         <div class="grid-stats">
           <app-stat-card label="Total alerts" [value]="summary.totalAlerts" />
           <app-stat-card label="Pending review" [value]="summary.pendingAlerts" tone="warn" />
@@ -71,6 +77,7 @@ import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBa
             @if (outcomeConfig) { <app-chart [config]="outcomeConfig" /> }
           </div>
         </div>
+        }
       }
     </app-page-container>
   `,

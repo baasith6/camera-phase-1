@@ -13,7 +13,8 @@ import { RouterLink } from '@angular/router';
         <p class="lead">
           Connect in-store cameras to AI analysis and staff alerts — review suspicious activity quickly and confidently.
         </p>
-        <a class="cta" routerLink="/login">Sign in to Staff Console</a>
+        <p class="reassurance muted">Takes about 15 minutes to set up your first store.</p>
+        <a class="cta" routerLink="/login">Sign in</a>
       </header>
 
       <section class="steps card">
@@ -63,10 +64,11 @@ import { RouterLink } from '@angular/router';
     }
     .lead {
       color: var(--text-muted);
-      margin: 0 0 28px;
+      margin: 0 0 12px;
       line-height: 1.6;
       font-size: 1.05rem;
     }
+    .reassurance { margin: 0 0 28px; font-size: 0.95rem; }
     .cta {
       display: inline-block;
       padding: 10px 20px;
