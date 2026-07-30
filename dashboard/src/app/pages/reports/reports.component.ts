@@ -1,11 +1,19 @@
 import { Component, OnInit } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { StoreContextService } from '../../core/store-context.service';
 import { Alert } from '../../core/models';
 import { alertTypeLabel } from '../../shared/alert-labels';
-import { PageContainerComponent, PageHeaderComponent, DataTableComponent, ErrorBannerComponent, SkeletonListComponent } from '../../shared/ui-components';
+import {
+  EmptyStateComponent,
+  PageContainerComponent,
+  PageHeaderComponent,
+  DataTableComponent,
+  ErrorBannerComponent,
+  SkeletonListComponent,
+} from '../../shared/ui-components';
 import { StatusBadgeComponent } from '../../shared/status-badge.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 
@@ -14,6 +22,7 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
   standalone: true,
   imports: [
     FormsModule,
+    DatePipe,
     PageHeaderComponent,
     PageContainerComponent,
     DataTableComponent,
@@ -21,6 +30,7 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
     StatusPillComponent,
     ErrorBannerComponent,
     SkeletonListComponent,
+    EmptyStateComponent,
   ],
   template: `
     <app-page-container>
@@ -39,6 +49,8 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
         <app-error-banner [message]="error">
           <button class="ghost small" type="button" (click)="load()">Retry</button>
         </app-error-banner>
+      } @else if (alerts.length === 0) {
+        <app-empty-state title="No alerts to export" detail="Alerts will appear here once the pipeline generates them for this store." />
       } @else {
         <div class="card">
           <p class="muted">{{ alerts.length }} alert(s) ready for export.</p>
@@ -57,7 +69,7 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
               <tbody>
                 @for (a of alerts; track a.id) {
                   <tr>
-                    <td>{{ a.createdAt }}</td>
+                    <td>{{ a.createdAt | date:'MMM d, yyyy h:mm a' }}</td>
                     <td>{{ labelType(a.alertType) }}</td>
                     <td><app-status-badge [level]="a.riskLevel" /></td>
                     <td>{{ a.riskScore }}</td>
@@ -67,6 +79,22 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
                 }
               </tbody>
             </table>
+
+            <div mobile class="alert-cards">
+              @for (a of alerts; track a.id) {
+                <div class="alert-card-mobile">
+                  <div class="alert-card-mobile-head">
+                    <strong>{{ labelType(a.alertType) }}</strong>
+                    <app-status-badge [level]="a.riskLevel" />
+                  </div>
+                  <div class="alert-card-mobile-meta">
+                    <app-status-pill [status]="a.status" />
+                    <span class="muted">Score {{ a.riskScore }}</span>
+                    <span class="muted">{{ a.createdAt | date:'MMM d, h:mm a' }}</span>
+                  </div>
+                </div>
+              }
+            </div>
           </app-data-table>
         </div>
       }

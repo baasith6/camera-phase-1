@@ -22,10 +22,12 @@ import { StoreContextService } from '../core/store-context.service';
             <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
         </button>
-        <div class="brand"><span class="brand-mark">◆</span> onetix</div>
+        <div class="brand">onetix</div>
       </div>
       <div class="center">
+        <label class="store-label muted small" for="store-select">Store:</label>
         <select
+          id="store-select"
           [ngModel]="storeCtx.storeId()"
           (ngModelChange)="onStoreChange($event)"
           aria-label="Store filter">
@@ -39,6 +41,7 @@ import { StoreContextService } from '../core/store-context.service';
         </span>
       </div>
       <div class="right">
+        <span class="role-mobile">{{ auth.role() }}</span>
         <div class="user-block">
           <span class="email muted">{{ auth.email() }}</span>
           <span class="role">{{ auth.role() }}</span>
@@ -67,11 +70,8 @@ import { StoreContextService } from '../core/store-context.service';
       font-size: 1.15rem;
       letter-spacing: -0.02em;
       color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 6px;
     }
-    .brand-mark { font-size: 0.85rem; color: var(--accent); }
+    .store-label { white-space: nowrap; }
     .user-block { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
     .email { font-size: 0.78rem; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .role {
@@ -82,10 +82,19 @@ import { StoreContextService } from '../core/store-context.service';
       font-weight: 600;
     }
     select { min-width: 140px; max-width: 220px; }
+    .role-mobile {
+      display: none;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+    }
     @media (max-width: 991px) {
       .menu-btn { display: inline-flex; align-items: center; justify-content: center; }
       .center { justify-content: flex-start; }
       .user-block { display: none; }
+      .role-mobile { display: inline-block; }
     }
     @media (max-width: 600px) {
       .center select { max-width: 120px; }

@@ -1,6 +1,7 @@
-import { Injectable, OnDestroy, signal } from '@angular/core';
+import { Injectable, OnDestroy, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import { API_BASE } from './api.config';
+import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import { Alert } from './models';
 
@@ -12,9 +13,11 @@ export interface LiveAlertEvent {
 @Injectable({ providedIn: 'root' })
 export class LiveAlertsService implements OnDestroy {
   readonly connected = signal(false);
+  readonly pendingCount = signal(0);
   readonly newAlert$ = new Subject<LiveAlertEvent>();
   readonly toastMessage = signal('');
 
+  private api = inject(ApiService);
   private es?: EventSource;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private toastTimer?: ReturnType<typeof setTimeout>;
@@ -52,6 +55,7 @@ export class LiveAlertsService implements OnDestroy {
         };
         const message = `New ${data.riskLevel} risk alert`;
         this.newAlert$.next({ alert, message });
+        this.pendingCount.update((n) => n + 1);
         this.showToast(`${message} — ${data.alertType}`);
       } catch {
         /* ignore malformed events */
@@ -82,6 +86,13 @@ export class LiveAlertsService implements OnDestroy {
   clearToast(): void {
     this.toastMessage.set('');
     clearTimeout(this.toastTimer);
+  }
+
+  refreshPendingCount(storeId?: string): void {
+    this.api.listAlerts(storeId || undefined, 'PendingReview').subscribe({
+      next: (alerts) => this.pendingCount.set(alerts.length),
+      error: () => this.pendingCount.set(0),
+    });
   }
 
   ngOnDestroy(): void {

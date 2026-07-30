@@ -47,6 +47,7 @@ import { AppTopBarComponent } from './app-top-bar.component';
 export class ShellComponent implements OnInit, OnDestroy {
   sidebarOpen = false;
   private sub?: Subscription;
+  private pendingSub?: Subscription;
   private lastFocused?: HTMLElement;
 
   constructor(
@@ -65,7 +66,9 @@ export class ShellComponent implements OnInit, OnDestroy {
         this.storeCtx.setStoreId(this.auth.storeId()!);
       }
       this.syncStoreFromRoute();
+      this.refreshPending();
     });
+    this.pendingSub = this.live.newAlert$.subscribe(() => this.refreshPending());
     this.sub = this.router.events
       .pipe(filter((e) => e instanceof NavigationEnd))
       .subscribe(() => {
@@ -76,6 +79,7 @@ export class ShellComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.sub?.unsubscribe();
+    this.pendingSub?.unsubscribe();
   }
 
   toggleSidebar(): void {
@@ -122,6 +126,11 @@ export class ShellComponent implements OnInit, OnDestroy {
     if (storeId) tree.queryParams['storeId'] = storeId;
     else delete tree.queryParams['storeId'];
     this.router.navigateByUrl(tree);
+    this.refreshPending();
+  }
+
+  private refreshPending(): void {
+    this.live.refreshPendingCount(this.storeCtx.storeId() || undefined);
   }
 
   private focusSidebar(): void {
