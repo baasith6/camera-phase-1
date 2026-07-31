@@ -65,8 +65,7 @@ public record ConnectorCreateCameraRequest(
     string Name,
     string RtspUrl,
     string? OnvifHost,
-    int? OnvifPort,
-    bool UseDemoZones = false);
+    int? OnvifPort);
 public record FinalizeConnectorSetupRequest(List<string> SourceKeys);
 public record InstallerInfoResponse(string Version, string FileName, long SizeBytes, string Sha256, string DownloadPath);
 

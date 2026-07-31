@@ -146,6 +146,13 @@ public class ConnectorsController : ControllerBase
     {
         var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
+        // An uninstall is terminal for these credentials. This also closes the
+        // small race where an already in-flight heartbeat arrives after the
+        // Windows uninstaller has marked the connector as removed.
+        if (string.Equals(
+                connector.DegradedReason, "uninstalled",
+                StringComparison.OrdinalIgnoreCase))
+            return Conflict(new { error = "Connector has been uninstalled" });
 
         connector.DiskFreePct = req.DiskFreePct;
         connector.UploadQueueDepth = req.UploadQueueDepth;
@@ -180,6 +187,36 @@ public class ConnectorsController : ControllerBase
         return Ok(new { ok = true });
     }
 
+    /// <summary>
+    /// Lets an authorized store user clear a connector that was removed outside
+    /// the Windows uninstaller. An active connector cannot be reset this way.
+    /// </summary>
+    [Authorize(Roles = "Admin,Manager,Installer")]
+    [HttpPost("{id:guid}/mark-uninstalled")]
+    public async Task<IActionResult> MarkUninstalled(Guid id)
+    {
+        var connector = await _db.Connectors.FindAsync([id], HttpContext.RequestAborted);
+        if (connector is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, connector.StoreId)) return Forbid();
+
+        var activeCutoff = DateTimeOffset.UtcNow.AddMinutes(-2);
+        if (connector.LastHeartbeat >= activeCutoff &&
+            (connector.Status == ConnectorStatus.Healthy ||
+             connector.Status == ConnectorStatus.Degraded))
+        {
+            return Conflict(new {
+                error = "This connector is online. Uninstall it from the shop PC instead."
+            });
+        }
+
+        connector.Status = ConnectorStatus.Offline;
+        connector.LastHeartbeat = null;
+        connector.DegradedReason = "uninstalled";
+        connector.UploadQueueDepth = 0;
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        return Ok(new { ok = true });
+    }
+
     // Health list for the dashboard.
     [Authorize]
     [HttpGet]
@@ -201,18 +238,6 @@ public class ConnectorsController : ControllerBase
     {
         var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
-
-        // Self-heal MP4 cameras created by installer versions that predate
-        // automatic demo-zone provisioning. Real RTSP/ONVIF cameras are untouched.
-        var testVideoCameras = await _db.Cameras
-            .Include(c => c.Zones)
-            .Where(c => c.StoreId == connector.StoreId &&
-                        c.ConnectorId == connector.Id &&
-                        c.RtspUrl.StartsWith("file://"))
-            .ToListAsync(HttpContext.RequestAborted);
-        await _cameraProvisioning.EnsureDemoZonesAsync(
-            testVideoCameras,
-            HttpContext.RequestAborted);
 
         var cameras = await _db.Cameras
             .Where(c => c.StoreId == connector.StoreId &&
@@ -250,7 +275,6 @@ public class ConnectorsController : ControllerBase
             req.RtspUrl,
             req.OnvifHost,
             req.OnvifPort,
-            req.UseDemoZones,
             HttpContext.RequestAborted);
         return Ok(cam);
     }
@@ -295,6 +319,117 @@ public class ConnectorsController : ControllerBase
 
         await transaction.CommitAsync(HttpContext.RequestAborted);
         return Ok(new { ok = true, activeCameraCount = sourceKeys.Count, detached });
+    }
+
+    [AllowAnonymous]
+    [HttpGet("cameras/{cameraId:guid}/zones")]
+    public async Task<IActionResult> ConnectorZones(Guid cameraId)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        if (!await OwnsCameraAsync(connector.Id, cameraId)) return Forbid();
+        return Ok(await _db.CameraZones
+            .Where(z => z.CameraId == cameraId)
+            .OrderBy(z => z.Name)
+            .ToListAsync(HttpContext.RequestAborted));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("cameras/{cameraId:guid}/zones")]
+    public async Task<IActionResult> CreateConnectorZone(Guid cameraId, CreateZoneRequest req)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        if (req.CameraId != cameraId || !await OwnsCameraAsync(connector.Id, cameraId))
+            return Forbid();
+        if (!Enum.TryParse<ZoneType>(req.ZoneType, true, out var zoneType))
+            return BadRequest(new { error = "Invalid zoneType" });
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { error = "Zone name is required" });
+        if (!ZonePolygonValidator.IsValid(req.PolygonJson))
+            return BadRequest(new { error = "polygonJson must be normalized [[x,y], ...] with at least three points" });
+
+        var zone = new CameraZone {
+            CameraId = cameraId,
+            Name = req.Name.Trim(),
+            ZoneType = zoneType,
+            PolygonJson = req.PolygonJson
+        };
+        _db.CameraZones.Add(zone);
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        return Ok(zone);
+    }
+
+    [AllowAnonymous]
+    [HttpPut("zones/{zoneId:guid}")]
+    public async Task<IActionResult> UpdateConnectorZone(Guid zoneId, UpdateZoneRequest req)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        var zone = await _db.CameraZones.FindAsync([zoneId], HttpContext.RequestAborted);
+        if (zone is null) return NotFound();
+        if (!await OwnsCameraAsync(connector.Id, zone.CameraId)) return Forbid();
+        if (req.Name is not null) zone.Name = req.Name.Trim();
+        if (req.PolygonJson is not null)
+        {
+            if (!ZonePolygonValidator.IsValid(req.PolygonJson))
+                return BadRequest(new { error = "polygonJson must be normalized [[x,y], ...] with at least three points" });
+            zone.PolygonJson = req.PolygonJson;
+        }
+        if (req.ZoneType is not null)
+        {
+            if (!Enum.TryParse<ZoneType>(req.ZoneType, true, out var zoneType))
+                return BadRequest(new { error = "Invalid zoneType" });
+            zone.ZoneType = zoneType;
+        }
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        return Ok(zone);
+    }
+
+    [AllowAnonymous]
+    [HttpDelete("zones/{zoneId:guid}")]
+    public async Task<IActionResult> DeleteConnectorZone(Guid zoneId)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        var zone = await _db.CameraZones.FindAsync([zoneId], HttpContext.RequestAborted);
+        if (zone is null) return NotFound();
+        if (!await OwnsCameraAsync(connector.Id, zone.CameraId)) return Forbid();
+        _db.CameraZones.Remove(zone);
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        return NoContent();
+    }
+
+    private Task<bool> OwnsCameraAsync(Guid connectorId, Guid cameraId) =>
+        _db.Cameras.AnyAsync(
+            c => c.Id == cameraId && c.ConnectorId == connectorId,
+            HttpContext.RequestAborted);
+
+    /// <summary>Public tray-update manifest. The installer hash is calculated from disk.</summary>
+    [AllowAnonymous]
+    [HttpGet("updates/latest")]
+    public IActionResult LatestUpdate()
+    {
+        if (!_installer.TryGetInfo(out _, out var size, out var sha))
+            return NotFound(new { error = "Installer not found" });
+        var downloadUrl =
+            $"{Request.Scheme}://{Request.Host}/api/connectors/updates/download";
+        return Ok(new {
+            version = _installer.Version,
+            fileName = _installer.FileName,
+            downloadUrl,
+            sizeBytes = size,
+            sha256 = sha
+        });
+    }
+
+    [AllowAnonymous]
+    [HttpGet("updates/download")]
+    public IActionResult DownloadUpdate()
+    {
+        if (!_installer.TryGetInfo(out var path, out _, out _))
+            return NotFound(new { error = "Installer not found" });
+        return PhysicalFile(path, "application/octet-stream", _installer.FileName);
     }
 
     /// <summary>Installer metadata (version / size / sha256). File must exist on disk.</summary>

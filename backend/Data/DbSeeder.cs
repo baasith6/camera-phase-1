@@ -225,8 +225,6 @@ public static class DbSeeder
             db.Cameras.Add(camera2);
 
             // Shared installer/seed templates keep test-video behavior identical.
-            db.CameraZones.AddRange(DemoZoneTemplates.Create(camera.Id));
-            db.CameraZones.AddRange(DemoZoneTemplates.Create(camera2.Id));
         }
 
         await db.SaveChangesAsync();

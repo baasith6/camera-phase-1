@@ -56,7 +56,11 @@ public class StoresController : ControllerBase
         var overview = stores.Select(s =>
         {
             var storeConnectors = connectors.Where(c => c.StoreId == s.Id).ToList();
-            var online = storeConnectors.Count(c =>
+            var installedConnectors = storeConnectors
+                .Where(c => !string.Equals(
+                    c.DegradedReason, "uninstalled", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var online = installedConnectors.Count(c =>
                 (c.Status == ConnectorStatus.Healthy || c.Status == ConnectorStatus.Degraded) &&
                 c.LastHeartbeat > DateTimeOffset.UtcNow.AddMinutes(-5));
             var stats = alertStats.FirstOrDefault(a => a.StoreId == s.Id);
@@ -66,7 +70,7 @@ public class StoresController : ControllerBase
                 s.AlertVisibilityMode.ToString(),
                 s.NotificationEmail,
                 cameraCounts.GetValueOrDefault(s.Id),
-                storeConnectors.Count,
+                installedConnectors.Count,
                 online,
                 stats?.Pending ?? 0,
                 stats?.LastAt);

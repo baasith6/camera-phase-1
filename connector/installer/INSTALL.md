@@ -66,7 +66,7 @@ connector/dist/ONEVO-Connector-Setup-1.1.0.exe
 5. Service claims the setup code, registers cameras on the cloud backend, then monitors continuously
 6. Motion clips upload via signed URLs to the backend
 
-If activation fails, the service **still** keeps the admin UI running at `http://localhost:8099/` with logs and a **Retry setup** link at `/setup`. Generate a new setup code in the dashboard before retrying.
+If activation fails, the service **still** keeps the admin UI running at `http://localhost:8099/`. Open **Sources** (`/#sources`) to retry camera setup and **Zones** (`/#zones`) to draw detection areas. Generate a new setup code in the dashboard before retrying.
 
 ## 4. Publish it
 
@@ -102,8 +102,8 @@ Mismatch = backend looks for a filename that doesn't exist =
 | `Production requires HTTPS...` | `-BackendUrl` isn't https/localhost |
 | `Inno Setup 6 (ISCC.exe) was not found` | Inno Setup not installed / not on PATH |
 | `PyInstaller build failed` | Check `pip install -r requirements-build.txt` ran in the active venv |
-| `localhost:8099` refused after install | Check `ONEVO Local Connector` service in `services.msc`; read `onevo-connector-service.out.log` in the install folder; verify setup code is fresh; open `/setup` to retry |
-| Setup code already used | Generate a new code in the dashboard, then open `http://localhost:8099/setup` or reinstall |
+| `localhost:8099` refused after install | Check `ONEVO Local Connector` service in `services.msc`; read `onevo-connector-service.out.log` in the install folder; verify setup code is fresh; open `http://localhost:8099/#sources` to retry |
+| Setup code already used | Generate a new code in the dashboard, then open `http://localhost:8099/#sources` or reinstall |
 | Upload timeout to `:9000` | ONEVO admin must open Azure NSG port **9000** and set `S3_PUBLIC_ENDPOINT=http://<VM_IP>:9000`; from shop PC run `Test-NetConnection <VM_IP> -Port 9000` |
 | `disk_critical` / `disk_warning` | Free space on C: (connector checks the whole drive); pause monitoring at http://localhost:8099 and use **Clear local clips** |
 | Clips queue but Uploads OK stays 0 | Check logs for `:9000` timeout; fix MinIO reachability first, then restart ONEVO Connector service |

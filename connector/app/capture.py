@@ -9,6 +9,7 @@ RTSP reliability:
   File sources loop as before.
 """
 import os
+import json
 import subprocess
 import threading
 import time
@@ -75,7 +76,13 @@ def validate_rtsp_stream(source: str, read_frame: bool = True) -> tuple[bool, st
 
 
 class CapturePipeline:
-    def __init__(self, cfg: Config, state: RuntimeState):
+    def __init__(
+        self,
+        cfg: Config,
+        state: RuntimeState,
+        zone_provider: Callable[[], list[dict]] | None = None,
+        zone_revision: Callable[[], int] | None = None,
+    ):
         self.cfg = cfg
         self.state = state
         self._stop = False
@@ -84,6 +91,13 @@ class CapturePipeline:
         self._is_rtsp = cfg.source.lower().startswith("rtsp")
         self._person_hog = None
         self._source_fps = cfg.fps
+        self._zone_provider = zone_provider
+        self._zone_revision = zone_revision
+        self._zone_points: list[np.ndarray] = []
+        self._zone_mask: np.ndarray | None = None
+        self._zone_mask_shape: tuple[int, int] | None = None
+        self._zone_loaded_at = 0.0
+        self._zone_loaded_revision = -1
         if cfg.use_person_filter:
             self._person_hog = cv2.HOGDescriptor()
             self._person_hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
@@ -228,9 +242,72 @@ class CapturePipeline:
     # Detection helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_zone_points(zone: dict) -> np.ndarray | None:
+        raw = zone.get("polygonJson", zone.get("PolygonJson", zone.get("polygon", [])))
+        try:
+            points = json.loads(raw) if isinstance(raw, str) else raw
+            polygon = np.asarray(points, dtype=np.float32)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if polygon.ndim != 2 or polygon.shape[0] < 3 or polygon.shape[1] != 2:
+            return None
+        if not np.isfinite(polygon).all() or (polygon < 0).any() or (polygon > 1).any():
+            return None
+        return polygon
+
+    def _refresh_zones(self, frame_shape: tuple[int, int]) -> None:
+        """Reload saved zones on edits and periodically; failed fetches fail closed."""
+        if self._zone_provider is None:
+            self._zone_points = []
+            self._zone_mask = None
+            return
+        now = time.monotonic()
+        revision = self._zone_revision() if self._zone_revision else 0
+        if (
+            self._zone_mask_shape == frame_shape
+            and self._zone_loaded_revision == revision
+            and now - self._zone_loaded_at < 10.0
+        ):
+            return
+        try:
+            zones = self._zone_provider() or []
+            self._zone_points = [
+                polygon for zone in zones
+                if isinstance(zone, dict)
+                for polygon in [self._parse_zone_points(zone)]
+                if polygon is not None
+            ]
+            self._zone_loaded_revision = revision
+            self._zone_loaded_at = now
+        except Exception as exc:  # noqa: BLE001
+            self._zone_points = []
+            self.state.log(f"WARNING: could not refresh camera zones: {exc}")
+        height, width = frame_shape
+        mask = np.zeros((height, width), dtype=np.uint8)
+        for polygon in self._zone_points:
+            pixels = np.round(
+                polygon * np.array([max(width - 1, 1), max(height - 1, 1)], dtype=np.float32)
+            ).astype(np.int32)
+            cv2.fillPoly(mask, [pixels], 255)
+        self._zone_mask = mask
+        self._zone_mask_shape = frame_shape
+        if self.cfg.camera_id:
+            self.state.set_camera_status(
+                self.cfg.camera_id,
+                "Live" if self._zone_points else "Waiting for zones",
+                None if self._zone_points else "No saved detection zones",
+            )
+
     def _has_motion(self, fgmask) -> bool:
-        nonzero = int(np.count_nonzero(fgmask))
-        frac = nonzero / float(fgmask.size)
+        if self._zone_mask is None or not np.any(self._zone_mask):
+            return False
+        masked = cv2.bitwise_and(fgmask, fgmask, mask=self._zone_mask)
+        zone_pixels = int(np.count_nonzero(self._zone_mask))
+        if zone_pixels == 0:
+            return False
+        nonzero = int(np.count_nonzero(masked))
+        frac = nonzero / float(zone_pixels)
         return frac >= self.cfg.motion_area_frac
 
     def _has_person(self, frame) -> bool:
@@ -238,7 +315,14 @@ class CapturePipeline:
             return True  # person filter disabled -> do not block
         small = cv2.resize(frame, (min(640, frame.shape[1]), min(360, frame.shape[0])))
         rects, _ = self._person_hog.detectMultiScale(small, winStride=(8, 8))
-        return len(rects) > 0
+        if not len(rects) or not self._zone_points:
+            return False
+        height, width = small.shape[:2]
+        for x, y, w, h in rects:
+            point = (float(x + w / 2) / width, float(y + h / 2) / height)
+            if any(cv2.pointPolygonTest(polygon, point, False) >= 0 for polygon in self._zone_points):
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Clip writing
@@ -325,6 +409,10 @@ class CapturePipeline:
                 if cap is None:
                     break
                 next_file_frame_at = time.monotonic()
+                # RuntimeState is set to not-capturing while paused. Once the
+                # source is successfully reopened, immediately reflect the
+                # real running state in the local dashboard.
+                self.state.capturing = True
                 self.state.log("Capture source reopened after resume")
                 continue
             ok, frame = cap.read()
@@ -364,6 +452,7 @@ class CapturePipeline:
 
             frame = self._processing_frame(frame)
             rolling.append(frame.copy())
+            self._refresh_zones(frame.shape[:2])
             fgmask = bg.apply(frame)
             now = time.time()
 

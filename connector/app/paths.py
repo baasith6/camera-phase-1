@@ -75,6 +75,40 @@ class CameraSource:
 
 
 @dataclass
+class PendingZone:
+    """Zone drawn in the native installer before the backend camera exists."""
+    source_index: int
+    name: str
+    zone_type: str
+    # Canonical backend/AI contract: normalized [[x, y], ...] coordinates.
+    polygon: list[list[float]] = field(default_factory=list)
+
+
+def normalize_polygon(value: object) -> list[list[float]]:
+    """Convert legacy point objects to the canonical [[x, y], ...] format."""
+    if not isinstance(value, list):
+        raise ValueError("polygon must be a list of points")
+
+    normalized: list[list[float]] = []
+    for point in value:
+        if isinstance(point, dict):
+            x, y = point.get("x"), point.get("y")
+        elif isinstance(point, (list, tuple)) and len(point) == 2:
+            x, y = point
+        else:
+            raise ValueError("each polygon point must contain x and y")
+
+        x, y = float(x), float(y)
+        if not 0 <= x <= 1 or not 0 <= y <= 1:
+            raise ValueError("polygon points must be normalized between 0 and 1")
+        normalized.append([x, y])
+
+    if len(normalized) < 3:
+        raise ValueError("polygon must contain at least three points")
+    return normalized
+
+
+@dataclass
 class WizardConfig:
     """Persisted after the setup wizard completes."""
     setup_complete: bool = False
@@ -85,6 +119,7 @@ class WizardConfig:
     use_backend_cameras: bool = True
     setup_code: str = ""
     activation_error: str = ""
+    pending_zones: list[PendingZone] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +130,7 @@ class WizardConfig:
             "setup_code": self.setup_code,
             "activation_error": self.activation_error,
             "sources": [asdict(s) for s in self.sources],
+            "pending_zones": [asdict(z) for z in self.pending_zones],
         }
 
     @classmethod
@@ -149,6 +185,19 @@ class WizardConfig:
                         loop=bool(data.get("loop_file", True)),
                     )
                 )
+        zone_allowed = set(PendingZone.__dataclass_fields__)
+        pending_zones: list[PendingZone] = []
+        for zone in data.get("pending_zones") or []:
+            if not isinstance(zone, dict):
+                continue
+            values = {key: value for key, value in zone.items() if key in zone_allowed}
+            try:
+                values["polygon"] = normalize_polygon(values.get("polygon") or [])
+                pending_zones.append(PendingZone(**values))
+            except (TypeError, ValueError):
+                # A malformed legacy zone must not prevent the connector from
+                # starting; it is skipped rather than sent to the backend.
+                continue
         return cls(
             setup_complete=bool(data.get("setup_complete")),
             store_id=str(data.get("store_id") or ""),
@@ -157,6 +206,7 @@ class WizardConfig:
             setup_code=str(data.get("setup_code") or ""),
             activation_error=str(data.get("activation_error") or ""),
             sources=sources,
+            pending_zones=pending_zones,
         )
 
 

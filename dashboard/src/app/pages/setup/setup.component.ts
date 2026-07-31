@@ -22,20 +22,25 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         </div>
         <div class="conn-status" [class.on]="storeConnectorOnline" [class.off]="!storeConnectorOnline">
           <span class="dot"></span>
-          {{ storeConnectorOnline ? 'Installed · Online' : (storeConnectors.length ? 'Offline or uninstalled' : 'Not installed') }}
+          {{ storeConnectorOnline ? 'Installed · Online' : (storeConnectorInstalled ? 'Installed · Offline' : 'Not installed') }}
         </div>
       </div>
 
       <div class="conn-actions">
-        @if (!storeConnectorOnline) {
+        @if (!storeConnectorInstalled) {
           <button (click)="downloadInstaller()" [disabled]="!installerInfo">
-            {{ storeConnectors.length ? 'Download / reinstall connector' : 'Download Windows connector' }}
+            Download Windows connector
           </button>
           <button class="ghost" (click)="generateSetupCode()" [disabled]="!storeId || generatingCode">
             {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
           </button>
         } @else {
           <button disabled>Installed</button>
+          @if (offlineConnectorIds.length) {
+            <button class="ghost danger-text" (click)="markOfflineConnectorsUninstalled()" [disabled]="markingConnectors">
+              {{ markingConnectors ? 'Resetting…' : 'This connector was removed' }}
+            </button>
+          }
           @if (connectorUpdateAvailable) {
             <span class="update-note">Update v{{ installerInfo?.version }} available in the shop PC tray</span>
           } @else {
@@ -167,9 +172,9 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
         <h3>Zones</h3>
         @if (!cameraId) { <p class="muted">Select a camera.</p> }
         @for (z of zones; track z.id) {
-          <div class="row-item">
+          <div class="row-item" (click)="editZone(z)">
             {{ z.name }} <span class="muted small">[{{ z.zoneType }}]</span>
-            <button class="ghost small" (click)="deleteZone(z.id)">x</button>
+            <button class="ghost small" (click)="deleteZone(z.id); $event.stopPropagation()">x</button>
           </div>
         }
       </div>
@@ -190,6 +195,9 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             </button>
             @if (selectedCamera.id) {
               <a class="btn-link" [href]="'http://' + connectorAdminHost + ':8099/snapshot?camera_id=' + selectedCamera.id" target="_blank">
+                📸 Snapshot
+              </a>
+            }
             @if (selectedCamera.onvifHost) {
               <a class="btn-link" [href]="liveSnapshotUrl" target="_blank">
                 📷 Live Snapshot
@@ -266,7 +274,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
           <div>
             <h3>Zone Editor &amp; Visual Canvas</h3>
             <p class="muted small">
-              Click on the canvas to draw a box or multi-point zone. Drag yellow corner points anytime to adjust exact boundaries.
+              Draw freely over the camera frame, then drag yellow points to correct the saved zone boundary.
             </p>
           </div>
         </div>
@@ -282,29 +290,29 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
             <option value="Staff">Staff</option>
           </select>
           <button class="ghost" (click)="undoPoint()" [disabled]="draftPoints.length === 0">↩ Undo Point</button>
-          <button class="ghost" (click)="clearDraft()" [disabled]="draftPoints.length === 0">Clear points</button>
+          <button class="ghost" (click)="clearDraft()" [disabled]="draftPoints.length === 0">New zone</button>
           <button class="ghost" (click)="loadSnapshot()" [disabled]="loadingSnapshot">
             {{ loadingSnapshot ? 'Loading…' : '🔄 Refresh frame' }}
           </button>
-          <button class="btn-primary" (click)="saveZone()" [disabled]="draftPoints.length < 3 || !draftName">
-            💾 Save Zone ({{ draftPoints.length }} pts)
+          <button class="btn-primary" (click)="saveZone()" [disabled]="!frameReady || draftPoints.length < 3 || !draftName">
+            💾 {{ selectedZoneId ? 'Update' : 'Save' }} Zone ({{ draftPoints.length }} pts)
           </button>
         </div>
 
         @if (snapshotError) {
           <p class="err-text" style="margin:0 0 .5rem">
-            ⚠ {{ snapshotError }} — zones can still be drawn on the blank canvas.
+            ⚠ {{ snapshotError }} — connect this camera and refresh its frame before drawing zones.
           </p>
         }
 
         <div class="canvas-container">
           <canvas #zoneCanvas width="640" height="360"
-                  (mousedown)="onCanvasMouseDown($event)"
-                  (mousemove)="onCanvasMouseMove($event)"
-                  (mouseup)="onCanvasMouseUp($event)"
-                  (mouseleave)="onCanvasMouseUp($event)"></canvas>
+                  (pointerdown)="onCanvasPointerDown($event)"
+                  (pointermove)="onCanvasPointerMove($event)"
+                  (pointerup)="onCanvasPointerUp($event)"
+                  (pointercancel)="onCanvasPointerUp($event)"></canvas>
           <div class="canvas-hint muted small">
-            💡 <strong>Tip:</strong> Click 2 opposite corners to draw a Box, or keep clicking to add points. Drag yellow dots to adjust points anytime!
+            💡 <strong>Tip:</strong> Click and drag to draw. Select a saved zone to edit it, then drag its yellow dots to adjust points.
           </div>
         </div>
       </div>
@@ -405,11 +413,10 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   draftName = '';
   draftType = 'HighValue';
   draftPoints: [number, number][] = [];
-  rectStart: [number, number] | null = null;
-  rectCurrent: [number, number] | null = null;
-
+  selectedZoneId: string | null = null;
   draggedPointIndex: number | null = null;
   hoverPointIndex: number | null = null;
+  drawing = false;
 
   testingStream = false;
   streamTestResult: { ok: boolean; message: string } | null = null;
@@ -418,6 +425,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   loadingSnapshot = false;
   snapshotError = '';
+  frameReady = false;
   private snapshotImg: HTMLImageElement | null = null;
 
   generatingCode = false;
@@ -425,6 +433,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   setupCode = '';
   setupCodeExpires = '';
   storeConnectors: Connector[] = [];
+  markingConnectors = false;
   installerInfo: InstallerInfo | null = null;
   installerError = '';
   private pollTimer?: ReturnType<typeof setInterval>;
@@ -456,6 +465,20 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  get storeConnectorInstalled(): boolean {
+    return this.storeConnectors.some(
+      (connector) => (connector.degradedReason || '').toLowerCase() !== 'uninstalled');
+  }
+
+  get offlineConnectorIds(): string[] {
+    const cutoff = Date.now() - 120_000;
+    return this.storeConnectors
+      .filter((connector) =>
+        (connector.degradedReason || '').toLowerCase() !== 'uninstalled' &&
+        (!connector.lastHeartbeat || new Date(connector.lastHeartbeat).getTime() < cutoff))
+      .map((connector) => connector.id);
+  }
+
   get installerSizeMb(): string {
     return this.installerInfo?.sizeBytes
       ? (this.installerInfo.sizeBytes / 1048576).toFixed(1)
@@ -476,7 +499,13 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     });
     this.pollTimer = setInterval(() => {
       if (this.storeId) this.refreshConnectors();
-    }, 15_000);
+      if (this.cameraId) {
+        this.api.listZones(this.cameraId).subscribe((zones) => {
+          this.zones = zones;
+          this.redraw();
+        });
+      }
+    }, 5_000);
   }
 
   ngOnDestroy(): void {
@@ -513,19 +542,7 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
       window.location.assign(path);
       return;
     }
-    this.api.downloadInstaller(path).subscribe({
-      next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = this.installerInfo?.fileName || 'ONEVO-Connector-Setup.exe';
-        anchor.click();
-        URL.revokeObjectURL(url);
-      },
-      error: (err) => {
-        this.installerError = err?.error?.error || 'Installer download failed';
-      },
-    });
+    window.location.assign('/api/connectors/updates/download');
   }
 
   generateSetupCode(): void {
@@ -565,6 +582,35 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  markOfflineConnectorsUninstalled(): void {
+    const ids = this.offlineConnectorIds;
+    if (!ids.length || !confirm(
+      'Mark the offline connector as uninstalled? This enables a fresh installer download and setup code for this store.'
+    )) return;
+
+    this.markingConnectors = true;
+    let remaining = ids.length;
+    for (const id of ids) {
+      this.api.markConnectorUninstalled(id).subscribe({
+        next: () => {
+          remaining--;
+          if (remaining === 0) {
+            this.markingConnectors = false;
+            this.refreshConnectors();
+          }
+        },
+        error: (err) => {
+          remaining--;
+          this.setupCodeError = err?.error?.error || 'Could not reset the connector status';
+          if (remaining === 0) {
+            this.markingConnectors = false;
+            this.refreshConnectors();
+          }
+        },
+      });
+    }
+  }
+
   selectStore(id: string): void {
     this.storeId = id; this.cameraId = ''; this.zones = []; this.selectedCamera = null;
     this.setupCode = ''; this.setupCodeExpires = '';
@@ -577,14 +623,12 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cameraId = id;
     this.streamTestResult = null;
     this.selectedCamera = this.cameras.find(c => c.id === id) ?? null;
-    this.draftPoints = [];
-    this.rectStart = null;
-    this.rectCurrent = null;
+    this.clearDraft();
     this.snapshotImg = null;
+    this.frameReady = false;
     this.snapshotError = '';
     this.api.getCamera(id).subscribe(cam => {
       this.selectedCamera = cam;
-      if (cam.onvifHost) this.connectorAdminHost = cam.onvifHost;
       this.loadSnapshot();
     });
     this.api.listZones(id).subscribe((z) => { this.zones = z; setTimeout(() => this.redraw()); });
@@ -593,21 +637,29 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   loadSnapshot(): void {
     if (!this.cameraId) return;
     this.loadingSnapshot = true;
+    this.frameReady = false;
     this.snapshotError = '';
     const img = new Image();
     // No crossOrigin: the connector admin API sends no CORS headers, and we only
     // draw the frame (never read pixels back), so a tainted canvas is fine.
     // Cache-buster so "Refresh frame" always pulls the connector's latest frame.
-    img.src = `http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId}&t=${Date.now()}`;
+    const browserHost = window.location.hostname;
+    const connectorHost =
+      browserHost === 'localhost' || browserHost === '127.0.0.1'
+        ? '127.0.0.1'
+        : this.connectorAdminHost;
+    img.src = `http://${connectorHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId}&t=${Date.now()}`;
     img.onload = () => {
       this.snapshotImg = img;
+      this.frameReady = true;
       this.loadingSnapshot = false;
       this.redraw();
     };
     img.onerror = () => {
       this.snapshotImg = null;
+      this.frameReady = false;
       this.loadingSnapshot = false;
-      this.snapshotError = `No frame from connector (${this.connectorAdminHost}:8099). Is the connector running with this camera?`;
+      this.snapshotError = `No frame from connector (${connectorHost}:${this.connectorAdminPort}). Is the connector running with this camera?`;
       this.redraw();
     };
   }
@@ -705,7 +757,28 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   deleteZone(id: string): void {
-    this.api.deleteZone(id).subscribe(() => this.selectCamera(this.cameraId));
+    if (!confirm('Delete this zone?')) return;
+    this.api.deleteZone(id).subscribe(() => {
+      if (this.selectedZoneId === id) this.clearDraft();
+      this.selectCamera(this.cameraId);
+    });
+  }
+
+  editZone(zone: Zone): void {
+    try {
+      const points = JSON.parse(zone.polygonJson);
+      if (!Array.isArray(points) || points.length < 3) return;
+      this.selectedZoneId = zone.id;
+      this.draftName = zone.name;
+      this.draftType = zone.zoneType;
+      this.draftPoints = points.map((point: [number, number]) => [
+        Math.max(0, Math.min(1, Number(point[0]))),
+        Math.max(0, Math.min(1, Number(point[1]))),
+      ]);
+      this.redraw();
+    } catch {
+      this.clearDraft();
+    }
   }
 
   testStream(): void {
@@ -733,88 +806,91 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
 
   clearDraft(): void {
     this.draftPoints = [];
-    this.rectStart = null;
-    this.rectCurrent = null;
+    this.selectedZoneId = null;
+    this.draggedPointIndex = null;
+    this.hoverPointIndex = null;
+    this.drawing = false;
+    this.draftName = '';
     this.redraw();
   }
 
-  onCanvasMouseDown(ev: MouseEvent): void {
+  private canvasPoint(ev: PointerEvent): [number, number] {
+    const canvas = this.canvasRef?.nativeElement;
+    if (!canvas) return [0, 0];
+    const rect = canvas.getBoundingClientRect();
+    return [
+      Math.max(0, Math.min(1, Math.round(((ev.clientX - rect.left) / rect.width) * 1000) / 1000)),
+      Math.max(0, Math.min(1, Math.round(((ev.clientY - rect.top) / rect.height) * 1000) / 1000)),
+    ];
+  }
+
+  onCanvasPointerDown(ev: PointerEvent): void {
+    if (ev.button !== 0) return;
     const canvas = this.canvasRef?.nativeElement;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.round(((ev.clientX - rect.left) / rect.width) * 1000) / 1000;
-    const y = Math.round(((ev.clientY - rect.top) / rect.height) * 1000) / 1000;
-
-    // Check if clicking near an existing draft point to start dragging
-    const clickRadius = 0.04; // 4% threshold for handle hit
-    const nearIdx = this.draftPoints.findIndex(p => Math.hypot(p[0] - x, p[1] - y) < clickRadius);
-
+    const [x, y] = this.canvasPoint(ev);
+    const nearIdx = this.draftPoints.findIndex(p => Math.hypot(p[0] - x, p[1] - y) < 0.025);
+    canvas.setPointerCapture(ev.pointerId);
     if (nearIdx !== -1) {
       this.draggedPointIndex = nearIdx;
+      canvas.style.cursor = 'grabbing';
       return;
     }
-
-    if (this.draftPoints.length === 0) {
-      // First click: start rectangle / point sequence
-      this.rectStart = [x, y];
-      this.rectCurrent = [x, y];
-      this.draftPoints.push([x, y]);
-    } else if (this.draftPoints.length === 1 && this.rectStart) {
-      // Second click: complete initial box
-      const x1 = Math.min(this.rectStart[0], x);
-      const y1 = Math.min(this.rectStart[1], y);
-      const x2 = Math.max(this.rectStart[0], x);
-      const y2 = Math.max(this.rectStart[1], y);
-      this.draftPoints = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
-      this.rectStart = null;
-      this.rectCurrent = null;
-    } else {
-      // Additional clicks: append polygon point
-      this.draftPoints.push([x, y]);
-    }
+    this.selectedZoneId = null;
+    this.draftPoints = [[x, y]];
+    this.drawing = true;
     this.redraw();
   }
 
-  onCanvasMouseMove(ev: MouseEvent): void {
-    const canvas = this.canvasRef!.nativeElement;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.round(((ev.clientX - rect.left) / rect.width) * 1000) / 1000;
-    const y = Math.round(((ev.clientY - rect.top) / rect.height) * 1000) / 1000;
-
-    // Handle point dragging
+  onCanvasPointerMove(ev: PointerEvent): void {
+    const canvas = this.canvasRef?.nativeElement;
+    if (!canvas) return;
+    const [x, y] = this.canvasPoint(ev);
     if (this.draggedPointIndex !== null) {
       this.draftPoints[this.draggedPointIndex] = [x, y];
       this.redraw();
       return;
     }
-
-    // Hover effect for points
-    const hoverRadius = 0.04;
-    const nearIdx = this.draftPoints.findIndex(p => Math.hypot(p[0] - x, p[1] - y) < hoverRadius);
-    if (nearIdx !== this.hoverPointIndex) {
-      this.hoverPointIndex = nearIdx !== -1 ? nearIdx : null;
-      canvas.style.cursor = nearIdx !== -1 ? 'grab' : 'crosshair';
+    if (this.drawing) {
+      const previous = this.draftPoints[this.draftPoints.length - 1];
+      if (Math.hypot(previous[0] - x, previous[1] - y) >= 0.008) {
+        this.draftPoints.push([x, y]);
+      }
       this.redraw();
+      return;
     }
-
-    // Live preview for initial box creation
-    if (this.rectStart && this.draftPoints.length === 1) {
-      this.rectCurrent = [x, y];
+    const nearIdx = this.draftPoints.findIndex(p => Math.hypot(p[0] - x, p[1] - y) < 0.025);
+    if (nearIdx !== this.hoverPointIndex) {
+      this.hoverPointIndex = nearIdx === -1 ? null : nearIdx;
+      canvas.style.cursor = nearIdx === -1 ? 'crosshair' : 'grab';
       this.redraw();
     }
   }
 
-  onCanvasMouseUp(ev: MouseEvent): void {
+  onCanvasPointerUp(ev: PointerEvent): void {
+    const canvas = this.canvasRef?.nativeElement;
+    if (canvas?.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId);
     if (this.draggedPointIndex !== null) {
       this.draggedPointIndex = null;
+      this.redraw();
+      return;
+    }
+    if (this.drawing) {
+      this.drawing = false;
+      if (this.draftPoints.length < 3) this.draftPoints = [];
       this.redraw();
     }
   }
 
   saveZone(): void {
-    if (this.draftPoints.length < 3 || !this.draftName) return;
-    this.api.createZone(this.cameraId, this.draftName, this.draftType, JSON.stringify(this.draftPoints))
-      .subscribe(() => { this.draftName = ''; this.draftPoints = []; this.selectCamera(this.cameraId); });
+    if (!this.frameReady || this.draftPoints.length < 3 || !this.draftName) return;
+    const polygonJson = JSON.stringify(this.draftPoints);
+    const request = this.selectedZoneId
+      ? this.api.updateZone(this.selectedZoneId, {
+          name: this.draftName, zoneType: this.draftType, polygonJson,
+        })
+      : this.api.createZone(this.cameraId, this.draftName, this.draftType, polygonJson);
+    request.subscribe(() => this.selectCamera(this.cameraId));
   }
 
   private redraw(): void {
@@ -837,18 +913,10 @@ export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
       this.drawPoly(ctx, pts, w, h, z.zoneType === 'HighValue' ? 'rgba(255,120,120,0.35)' : 'rgba(120,160,255,0.3)');
     }
 
-    // Current draft polygon / preview box
+    // Current freehand draft polygon and draggable control points.
     if (this.draftPoints.length > 1) {
       this.drawPoly(ctx, this.draftPoints, w, h, 'rgba(255,220,120,0.5)', true);
-    } else if (this.draftPoints.length === 1 && this.rectStart && this.rectCurrent) {
-      const x1 = Math.min(this.rectStart[0], this.rectCurrent[0]);
-      const y1 = Math.min(this.rectStart[1], this.rectCurrent[1]);
-      const x2 = Math.max(this.rectStart[0], this.rectCurrent[0]);
-      const y2 = Math.max(this.rectStart[1], this.rectCurrent[1]);
-      const rectPts: [number, number][] = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
-      this.drawPoly(ctx, rectPts, w, h, 'rgba(255,220,120,0.4)', true);
     }
-    this.drawPoly(ctx, this.draftPoints, w, h, 'rgba(255,220,120,0.5)', true);
   }
 
   private drawPoly(ctx: CanvasRenderingContext2D, pts: [number, number][], w: number, h: number, fill: string, interactive = false): void {

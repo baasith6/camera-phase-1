@@ -150,3 +150,42 @@ class BackendClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def get_zones(self, camera_id: str) -> list[dict]:
+        r = requests.get(
+            f"{self.base}/api/connectors/cameras/{camera_id}/zones",
+            headers=self._auth_headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def create_zone(self, camera_id: str, name: str, zone_type: str, polygon: list) -> dict:
+        import json
+        r = requests.post(
+            f"{self.base}/api/connectors/cameras/{camera_id}/zones",
+            headers=self._auth_headers(),
+            json={"cameraId": camera_id, "name": name, "zoneType": zone_type,
+                  "polygonJson": json.dumps(polygon)},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def update_zone(self, zone_id: str, name: str, zone_type: str, polygon: list) -> dict:
+        import json
+        r = requests.put(
+            f"{self.base}/api/connectors/zones/{zone_id}",
+            headers=self._auth_headers(),
+            json={"name": name, "zoneType": zone_type,
+                  "polygonJson": json.dumps(polygon)},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def delete_zone(self, zone_id: str) -> None:
+        r = requests.delete(
+            f"{self.base}/api/connectors/zones/{zone_id}",
+            headers=self._auth_headers(), timeout=15,
+        )
+        r.raise_for_status()

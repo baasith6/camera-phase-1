@@ -97,12 +97,17 @@ def build_app(
     async def admin_auth_middleware(request, call_next):
         path = request.url.path
         if path in ("/health",) or path.startswith("/setup"):
-            return await call_next(request)
-        if admin_token:
+            response = await call_next(request)
+        elif admin_token:
             provided = request.headers.get("X-Admin-Token") or request.query_params.get("admin_token")
             if provided != admin_token:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+            response = await call_next(request)
+        else:
+            response = await call_next(request)
+        if path == "/" or path == "/setup":
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
 
     @app.get("/status")
     def status():
@@ -151,6 +156,7 @@ def build_app(
         client.finalize_setup([
             source.source_key or source_key_for(source) for source in wizard.sources
         ])
+        wizard.use_backend_cameras = True
         wizard.setup_complete = True
         save_wizard_config(wizard)
         return True
@@ -311,6 +317,25 @@ def build_app(
         existing = list(wizard.sources)
         for source in existing:
             source.source_key = source.source_key or source_key_for(source)
+        existing_keys = {source.source_key for source in existing}
+        duplicate_names: list[str] = []
+        for source in new_sources:
+            source.source_key = source_key_for(source)
+            if source.source_key in existing_keys:
+                duplicate_names.append(source.name)
+            existing_keys.add(source.source_key)
+        if duplicate_names:
+            # Uploads are copied to ProgramData before their stable content key is
+            # calculated. Remove those temporary copies when the same physical
+            # video/camera was already configured.
+            for source in new_sources:
+                if source.source_file:
+                    Path(source.source_file).unlink(missing_ok=True)
+            raise HTTPException(
+                409,
+                "Already added: " + ", ".join(duplicate_names) +
+                ". Remove the existing source first if you need to replace it.",
+            )
 
         wizard.sources = existing + new_sources
         wizard.setup_complete = False
@@ -325,6 +350,7 @@ def build_app(
         try:
             created = provision_sources(client, new_sources, state, checkpoint=checkpoint)
             wizard.sources = existing + created
+            wizard.use_backend_cameras = True
             wizard.setup_complete = True
             save_wizard_config(wizard)
             client.finalize_setup([
@@ -385,31 +411,14 @@ def build_app(
         marker = pause_marker_path()
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.touch()
-
-        def stop_service_after_response() -> None:
-            time.sleep(3.0)
-            if os.name != "nt":
-                return
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            subprocess.run(
-                ["sc.exe", "config", "ONEVOConnector", "start=", "demand"],
-                creationflags=flags,
-                capture_output=True,
-                check=False,
-            )
-            subprocess.run(
-                ["sc.exe", "stop", "ONEVOConnector"],
-                creationflags=flags,
-                capture_output=True,
-                check=False,
-            )
-
-        threading.Thread(target=stop_service_after_response, daemon=True).start()
         return {
             "ok": True,
             "paused": True,
-            "serviceStopping": True,
-            "message": "Connector is stopping. Use the tray to start monitoring again.",
+            "serviceStopping": False,
+            "message": (
+                "Monitoring is stopped. Camera reads, motion detection, uploads, "
+                "and cloud heartbeat are paused; the local control page stays available."
+            ),
         }
 
     @app.post("/capture/resume")
@@ -417,10 +426,24 @@ def build_app(
         if store is not None:
             store.set_bool_setting("monitoring_paused", False)
         state.set_paused(False)
+        pause_marker_path().unlink(missing_ok=True)
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.run(
+                ["sc.exe", "config", "ONEVOConnector", "start=", "auto"],
+                creationflags=flags,
+                capture_output=True,
+                check=False,
+            )
         return {"ok": True, "paused": False}
 
     @app.post("/capture/trigger-now")
     def capture_trigger_now():
+        if state.capture_paused:
+            raise HTTPException(
+                status_code=409,
+                detail="Monitoring is stopped. Start monitoring before creating a clip.",
+            )
         if not state.request_trigger():
             raise HTTPException(status_code=503, detail="Capture pipeline not running")
         state.log("Manual clip trigger requested")
@@ -487,6 +510,11 @@ def build_app(
 
     @app.post("/clips/upload-full-source")
     def clips_upload_full_source():
+        if state.capture_paused:
+            raise HTTPException(
+                status_code=409,
+                detail="Monitoring is stopped. Start monitoring before uploading a source.",
+            )
         if store is None:
             raise HTTPException(status_code=503, detail="Store not available")
         source = resolve_file_source(cfg)
@@ -596,9 +624,50 @@ def build_app(
         """Return a live snapshot from the CapturePipeline's recent frames."""
         frame = state.last_frames.get(camera_id)
         if not frame and len(state.last_frames) == 1:
-            # Single-source connector: tolerate a camera-id mismatch between the
-            # dashboard GUID and the locally configured source.
-            frame = next(iter(state.last_frames.values()))
+            # Keep the legacy single-camera compatibility fallback, but never
+            # use one camera's preview as another camera's zone-edit frame.
+            wizard = load_wizard_config()
+            if wizard and len(wizard.sources) == 1:
+                frame = next(iter(state.last_frames.values()))
+        if not frame:
+            # First-run setup deliberately waits to start capture until every
+            # camera has a saved zone. The wizard still needs a real frame to
+            # draw that zone, so obtain one directly from its configured source.
+            wizard = load_wizard_config()
+            source = next(
+                (
+                    item for item in (wizard.sources if wizard else [])
+                    if item.camera_id == camera_id
+                ),
+                None,
+            )
+            if source is not None:
+                try:
+                    import cv2
+
+                    source_url = source.source_file or source.rtsp_url or ""
+                    if source.onvif_host:
+                        from .onvif_client import OnvifCamera
+
+                        camera = OnvifCamera().connect(
+                            source.onvif_host,
+                            source.onvif_port,
+                            source.onvif_user or "admin",
+                            source.onvif_pass,
+                        )
+                        frame = camera.fetch_snapshot_bytes()
+                    elif source_url:
+                        capture = cv2.VideoCapture(source_url, cv2.CAP_FFMPEG)
+                        try:
+                            ok, image = capture.read()
+                            if ok and image is not None:
+                                encoded, buffer = cv2.imencode(".jpg", image)
+                                if encoded:
+                                    frame = buffer.tobytes()
+                        finally:
+                            capture.release()
+                except Exception as exc:  # noqa: BLE001
+                    state.log(f"Setup snapshot unavailable for {camera_id}: {exc}")
         if not frame:
             raise HTTPException(status_code=404, detail="No snapshot available yet")
         return Response(content=frame, media_type="image/jpeg")
@@ -616,6 +685,24 @@ def build_app(
         if camera is None:
             raise HTTPException(404, "Camera runtime not found")
         return camera
+
+    @app.get("/live/cameras/{camera_id}/zones")
+    def live_camera_zones(camera_id: str):
+        """Return the saved polygons used to overlay this local live preview."""
+        if client is None or store is None:
+            raise HTTPException(503, "Connector backend client is unavailable")
+        try:
+            # The service can replace its operational client after installer
+            # provisioning. Reload durable credentials so overlays never use a
+            # stale/unauthenticated client instance.
+            connector_id = store.get_cred("connector_id")
+            api_key = store.get_cred("api_key")
+            if not (connector_id and api_key):
+                raise HTTPException(401, "Connector is not paired")
+            client.set_credentials(connector_id, api_key)
+            return client.get_zones(camera_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"Could not load camera zones: {exc}") from exc
 
     @app.get("/live/cameras/{camera_id}/stream.mjpg")
     def live_camera_stream(camera_id: str):
@@ -665,7 +752,7 @@ def build_app(
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
     body{{font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#0b0e13;color:#eef2f8;
-      padding:1.5rem;max-width:1500px;margin:auto}}
+      padding:1.5rem 1.5rem 1.5rem 13rem;max-width:1500px;margin:auto}}
     h1{{font-size:1.1rem;font-weight:600;color:#8ab4f8;margin-bottom:1rem}}
     h2{{font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
         color:#888;margin-bottom:.5rem}}
@@ -708,6 +795,15 @@ def build_app(
     .btn.danger{{border-color:#6a3030;color:#f07070}}
     .btn.primary{{border-color:#3a5080;color:#8ab4f8}}
     .hdr{{display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem}}
+    .local-nav{{position:fixed;z-index:20;inset:0 auto 0 0;width:11.5rem;padding:1.25rem .65rem;
+      display:flex;gap:.3rem;flex-direction:column;background:#10131c;border-right:1px solid #242b3a}}
+    .local-nav:before{{content:'◆ ONEVO\\A CONNECTOR';white-space:pre;line-height:1.5;color:#a98cff;
+      font-size:.75rem;font-weight:700;letter-spacing:.06em;padding:.35rem .6rem .9rem}}
+    .local-nav a{{color:#aeb8c9;text-decoration:none;font-size:.8rem;padding:.6rem .7rem;border-radius:6px}}
+    .local-nav a:hover,.local-nav a.active{{background:#35235e;color:#d5c4ff}}
+    .view-hidden{{display:none!important}}
+    @media(max-width:720px){{body{{padding:5rem 1rem 1rem}}.local-nav{{width:100%;height:4rem;flex-direction:row;
+      overflow:auto;align-items:center;padding:.5rem;white-space:nowrap}}.local-nav:before{{display:none}}}}
     .hidden{{display:none!important}}
     #tick{{font-size:.7rem;color:#555}}
     .row{{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem}}
@@ -718,15 +814,28 @@ def build_app(
     .camera-tile{{background:#0f1216;border:1px solid #2a3a50;border-radius:8px;overflow:hidden;
       cursor:pointer;transition:border-color .15s,transform .15s}}
     .camera-tile:hover{{border-color:#8ab4f8;transform:translateY(-1px)}}
+    .camera-visual{{position:relative;aspect-ratio:16/9;background:#090b0e}}
     .camera-tile img{{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#090b0e}}
+    .zone-overlay{{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}}
     .camera-tile .meta{{display:flex;justify-content:space-between;gap:.5rem;padding:.55rem .65rem;
       font-size:.78rem}}
     .camera-focus{{position:fixed;inset:0;background:rgba(4,6,9,.96);z-index:50;padding:2rem;
       display:flex;flex-direction:column;gap:.75rem}}
+    .camera-focus .camera-visual{{flex:1;aspect-ratio:auto}}
     .camera-focus img{{width:100%;height:calc(100vh - 7rem);object-fit:contain;background:#000}}
     .camera-focus .focus-head{{display:flex;justify-content:space-between;align-items:center}}
     #action-msg{{font-size:.78rem;color:#5cdb7f;margin-top:.35rem}}
     #action-err{{font-size:.78rem;color:#f07070;margin-top:.35rem}}
+    .zone-workbench{{display:grid;grid-template-columns:minmax(0,1fr) 17rem;gap:1rem;margin-top:.75rem}}
+    .zone-canvas-wrap{{position:relative;border:1px solid #2a3a4d;border-radius:10px;overflow:hidden;
+      background:#090b0e;min-height:360px}}
+    #zoneCanvas{{display:block;width:100%;height:auto;max-height:640px;touch-action:none;cursor:crosshair}}
+    .zone-tools{{border:1px solid #2a3a4d;border-radius:10px;background:#10151c;padding:.85rem}}
+    .zone-tools input,.zone-tools select{{width:100%;box-sizing:border-box;margin:.3rem 0 .65rem;
+      background:#0f1216;color:#e6e6e6;border:1px solid #2a3a50;border-radius:5px;padding:.45rem}}
+    .zone-list{{display:flex;flex-direction:column;gap:.35rem;max-height:180px;overflow:auto;margin:.6rem 0}}
+    .zone-list button{{text-align:left}}
+    @media(max-width:820px){{.zone-workbench{{grid-template-columns:1fr}}}}
   </style>
 </head>
 <body>
@@ -734,32 +843,68 @@ def build_app(
     <h1>🎥 ONEVO Local Connector</h1>
     <span id="tick">—</span>
   </div>
+  <nav class="local-nav" aria-label="Connector navigation">
+    <a href="#dashboard" data-view="dashboard">Dashboard</a>
+    <a href="#sources" data-view="sources">Sources</a>
+    <a href="#live" data-view="live">Live view</a>
+    <a href="#zones" data-view="zones">Zones</a>
+    <a href="#logs" data-view="logs">Logs</a>
+    <a href="#settings" data-view="settings">Settings</a>
+    <a href="#about" data-view="about">About</a>
+  </nav>
 
   <div class="section hidden" id="alert-banner">
     <h2 id="alert-title" style="color:#f07070"></h2>
     <p id="alert-text" style="font-size:.85rem;line-height:1.45;margin-bottom:.75rem"></p>
-    <a class="btn hidden" id="alert-setup-link" href="/setup">Retry setup</a>
   </div>
 
-  <div class="section">
+  <div class="section" id="dashboard" data-view="dashboard">
     <h2>Runtime</h2>
     <div class="grid" id="runtime-grid"></div>
   </div>
 
-  <div class="section">
+  <div class="section" data-view="dashboard">
     <h2>Actions</h2>
-    <p class="hint">Pause fully stops camera processing and the ONEVO Windows service. Use the tray icon to start monitoring again.</p>
+    <p class="hint">Stop monitoring pauses camera processing but keeps this local page available. Start monitoring resumes the same configured cameras.</p>
     <div class="row">
-      <button class="btn" id="btn-pause" onclick="pauseCapture()">Pause monitoring</button>
-      <button class="btn" id="btn-resume" onclick="resumeCapture()">Resume monitoring</button>
-      <button class="btn" onclick="triggerNow()">Cut clip now</button>
-      <button class="btn primary" onclick="uploadFullSource()">Upload full source file</button>
+      <button class="btn" id="btn-pause" onclick="pauseCapture()">Stop monitoring</button>
+      <button class="btn" id="btn-resume" onclick="resumeCapture()">Start monitoring</button>
+      <button class="btn" id="btn-trigger" onclick="triggerNow()">Cut clip now</button>
+      <button class="btn primary" id="btn-upload-source" onclick="uploadFullSource()">Upload full source file</button>
+      <button class="btn" type="button" onclick="openZoneEditor()">Edit camera zones</button>
     </div>
     <div id="action-msg"></div>
     <div id="action-err"></div>
   </div>
 
-  <div class="section">
+  <div class="section hidden" id="zone-editor-section" data-view="zones">
+    <div class="hdr">
+      <div>
+        <h2>Camera Zones</h2>
+        <p class="hint">Drag to draw a rectangular monitoring area. Drag a yellow corner to resize it, or drag inside the zone to move it. Live previews remain available while you edit.</p>
+      </div>
+      <div class="row" style="margin:0">
+        <button class="btn" type="button" onclick="refreshZoneEditor()">Refresh frame</button>
+        <button class="btn" type="button" onclick="closeZoneEditor()">Close editor</button>
+      </div>
+    </div>
+    <div class="zone-workbench">
+      <div class="zone-canvas-wrap"><canvas id="zoneCanvas" width="960" height="540"></canvas></div>
+      <div class="zone-tools">
+        <label class="hint">Camera</label><select id="zoneCamera"></select>
+        <label class="hint">Zone name</label><input id="zoneName" placeholder="e.g. Checkout area" />
+        <label class="hint">Zone type</label>
+        <select id="zoneType"><option value="Shelf">Shelf</option><option value="HighValue">High-value shelf</option><option value="Checkout">Checkout</option><option value="Exit">Exit</option><option value="BlindSpot">Blind spot</option><option value="Staff">Staff area</option></select>
+        <div class="row"><button class="btn" id="zoneNew" type="button">New</button><button class="btn" id="zoneUndo" type="button">Undo</button></div>
+        <div class="row"><button class="btn primary" id="zoneSave" type="button">Save zone</button><button class="btn danger" id="zoneDelete" type="button">Delete</button></div>
+        <div class="zone-list" id="zoneList"></div>
+        <button class="btn primary" id="zoneFinish" type="button">Finish setup</button>
+        <div class="source-msg" id="zoneMsg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" id="settings" data-view="settings">
     <h2>Clip window (motion cuts)</h2>
     <p class="hint">Each motion clip ≈ pre + post seconds. Use 30/30 for theft MP4 demos.</p>
     <div class="row">
@@ -774,7 +919,7 @@ def build_app(
     <p class="hint" id="clip-window-hint"></p>
   </div>
 
-  <div class="section">
+  <div class="section" data-view="settings">
     <h2>Local clips</h2>
     <p class="hint" id="local-clips-summary">—</p>
     <div class="row">
@@ -784,7 +929,7 @@ def build_app(
 
   {onvif_section}
 
-  <div class="section">
+  <div class="section" id="live-cameras-section" data-view="live">
     <div class="hdr">
       <h2>Live Cameras</h2>
       <span class="hint">Click a camera to open the single view</span>
@@ -797,10 +942,13 @@ def build_app(
       <h2 id="focus-title">Camera</h2>
       <button class="btn" type="button" onclick="closeCameraFocus()">Back to all cameras</button>
     </div>
-    <img id="focus-stream" alt="Selected live camera">
+    <div class="camera-visual">
+      <img id="focus-stream" alt="Selected live camera">
+      <canvas id="focus-zone-overlay" class="zone-overlay"></canvas>
+    </div>
   </div>
 
-  <div class="section">
+  <div class="section" id="sources" data-view="sources">
     <div class="hdr">
       <div>
         <h2>Camera / Video Sources</h2>
@@ -808,8 +956,8 @@ def build_app(
       </div>
     </div>
     <div id="source-setup-notice" class="source-notice hidden">
-      Connector setup is not complete. Enter a valid setup code before adding camera sources.
-      <a class="btn" href="/setup">Complete setup</a>
+      Connector installation is incomplete. Uninstall and run the installer again;
+      setup codes are accepted only once during the native installation.
     </div>
     <div class="source-toolbar hidden" id="source-toolbar">
       <label class="check-all"><input id="select-all-sources" type="checkbox"> Select all sources</label>
@@ -830,9 +978,13 @@ def build_app(
     </form>
   </div>
 
-  <div class="section">
+  <div class="section" id="logs" data-view="logs">
     <h2>Logs</h2>
     <pre id="logs"></pre>
+  </div>
+  <div class="section" id="about" data-view="about">
+    <h2>About ONEVO Connector</h2>
+    <div class="grid" id="about-grid"></div>
   </div>
 
   <script>
@@ -848,6 +1000,84 @@ def build_app(
       ['cameraManufacturer','Manufacturer'],['cameraModel','Model'],
       ['cameraSerial','Serial'],['cameraFirmware','Firmware'],
     ];
+    const localPageId = `${{Date.now()}}-${{Math.random()}}`;
+    const localPageChannel = typeof BroadcastChannel === 'undefined'
+      ? null : new BroadcastChannel('onevo-local-page');
+    let ownsLivePreview = document.hasFocus();
+    function showView(view) {{
+      const selected = view || 'dashboard';
+      document.querySelectorAll('.section[data-view]').forEach(section =>
+        section.classList.toggle('view-hidden', section.dataset.view !== selected)
+      );
+      document.querySelectorAll('.local-nav a[data-view]').forEach(link =>
+        link.classList.toggle('active', link.dataset.view === selected)
+      );
+      if (selected === 'zones') openZoneEditor();
+      if (selected === 'live') loadSources();
+      if (selected === 'about') loadAbout();
+    }}
+    function loadAbout() {{
+      fetch('/setup/wizard/status').then(response => response.json()).then(data => {{
+        const entries = [
+          ['Version', data.version || '—'], ['Connector ID', data.connectorId || '—'],
+          ['Backend', data.backendUrl || '—'], ['Paired', data.claimed ? 'Yes' : 'No'],
+        ];
+        document.getElementById('about-grid').innerHTML = entries.map(([key, value]) =>
+          `<div class="k">${{key}}</div><div class="v">${{value}}</div>`
+        ).join('');
+      }}).catch(() => {{}});
+    }}
+    document.querySelectorAll('.local-nav a[data-view]').forEach(link => {{
+      link.addEventListener('click', event => {{
+        event.preventDefault();
+        const view = link.dataset.view;
+        history.replaceState(null, '', `#${{view}}`);
+        showView(view);
+      }});
+    }});
+
+    function stopLivePreviews() {{
+      document.querySelectorAll('#camera-grid img').forEach(image => image.removeAttribute('src'));
+      document.getElementById('camera-focus').classList.add('hidden');
+      document.getElementById('focus-stream').removeAttribute('src');
+    }}
+    function setLivePreviewOwner(active) {{
+      if (ownsLivePreview === active) return;
+      ownsLivePreview = active;
+      if (!active) {{
+        stopLivePreviews();
+        const grid = document.getElementById('camera-grid');
+        if (grid) grid.textContent = 'Live preview is active in another ONEVO Connector tab.';
+        return;
+      }}
+      loadSources().catch(() => {{}});
+    }}
+    if (localPageChannel) {{
+      localPageChannel.onmessage = event => {{
+        if (event.data && event.data.type === 'active' && event.data.id !== localPageId)
+          setLivePreviewOwner(false);
+      }};
+    }}
+    function activateLocalPage() {{
+      setLivePreviewOwner(true);
+      if (localPageChannel) localPageChannel.postMessage({{type:'active', id:localPageId}});
+    }}
+    window.addEventListener('focus', activateLocalPage);
+    window.addEventListener('blur', () => setLivePreviewOwner(false));
+    document.addEventListener('visibilitychange', () => {{
+      if (document.visibilityState === 'visible') activateLocalPage();
+      else setLivePreviewOwner(false);
+    }});
+    window.addEventListener('message', event => {{
+      if (event.origin !== window.location.origin || !event.data) return;
+      if (event.data.type === 'onevo-zones-changed' && event.data.cameraId) {{
+        zoneOverlayCache.delete(event.data.cameraId);
+        document.querySelectorAll(`.zone-overlay[data-camera-id="${{event.data.cameraId}}"]`)
+          .forEach(overlay => loadZoneOverlay(event.data.cameraId, overlay));
+        return;
+      }}
+      if (event.data.type === 'onevo-zones-complete') closeZoneEditor();
+    }});
 
     function badge(v) {{
       if (v === true || v === 'true') return '<span class="badge ok">YES</span>';
@@ -895,54 +1125,96 @@ def build_app(
       }}
     }};
     async function loadSources() {{
-      const data = await (await fetch('/sources')).json();
       const el = document.getElementById('saved-sources');
       const toolbar = document.getElementById('source-toolbar');
       const sourceTypes = document.getElementById('source-types');
       const notice = document.getElementById('source-setup-notice');
-      sourceTypes.classList.toggle('hidden', !data.managementReady);
-      notice.classList.toggle('hidden', data.managementReady);
-      document.getElementById('source-form').classList.toggle(
-        'hidden', !data.managementReady);
-      renderCameraGrid(data.sources);
-      if (!data.sources.length) {{
+      try {{
+        const response = await fetch('/sources');
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) throw new Error(data.detail || data.error || 'Could not load configured sources');
+        sourceTypes.classList.toggle('hidden', !data.managementReady);
+        notice.classList.toggle('hidden', data.managementReady);
+        document.getElementById('source-form').classList.toggle(
+          'hidden', !data.managementReady);
+        renderCameraGrid(data.sources);
+        if (!data.sources.length) {{
+          toolbar.classList.add('hidden');
+          el.innerHTML = data.managementReady
+            ? '<div class="hint">No sources yet. Choose RTSP, ONVIF, or MP4 below.</div>'
+            : '<div class="hint">Sources can be added after connector setup is complete.</div>';
+          return;
+        }}
+        toolbar.classList.remove('hidden');
+        el.innerHTML = '';
+        data.sources.forEach((source, index) => {{
+          const row = document.createElement('div');
+          row.className = 'source-card';
+          const select = document.createElement('input');
+          select.type = 'checkbox';
+          select.className = 'saved-source-select';
+          select.value = source.sourceKey;
+          const text = document.createElement('div');
+          const title = document.createElement('div');
+          title.className = 'source-title';
+          title.textContent = source.name;
+          const detail = document.createElement('div');
+          detail.className = 'source-detail';
+          detail.textContent = `${{source.type.toUpperCase()}} · ${{source.value}}`;
+          text.append(title, detail);
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'btn';
+          remove.textContent = 'Remove';
+          remove.onclick = () => removeSavedSource(source.sourceKey);
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'btn';
+          edit.textContent = 'Edit name';
+          edit.onclick = () => editSavedSource(source);
+          const actions = document.createElement('div');
+          actions.className = 'row';
+          actions.style.margin = '0';
+          actions.append(edit, remove);
+          row.append(select, text, actions);
+          el.appendChild(row);
+        }});
+        document.getElementById('select-all-sources').checked = false;
+      }} catch (error) {{
         toolbar.classList.add('hidden');
-        el.innerHTML = data.managementReady
-          ? '<div class="hint">No sources yet. Choose RTSP, ONVIF, or MP4 below.</div>'
-          : '<div class="hint">Sources can be added after connector setup is complete.</div>';
-        return;
+        el.textContent = 'Could not load sources: ' + error.message;
+        document.getElementById('camera-grid').textContent =
+          'Local dashboard is reconnecting. Use the tray icon to start monitoring if this persists.';
       }}
-      toolbar.classList.remove('hidden');
-      el.innerHTML = '';
-      data.sources.forEach((source, index) => {{
-        const row = document.createElement('div');
-        row.className = 'source-card';
-        const select = document.createElement('input');
-        select.type = 'checkbox';
-        select.className = 'saved-source-select';
-        select.value = source.sourceKey;
-        const text = document.createElement('div');
-        const title = document.createElement('div');
-        title.className = 'source-title';
-        title.textContent = source.name;
-        const detail = document.createElement('div');
-        detail.className = 'source-detail';
-        detail.textContent = `${{source.type.toUpperCase()}} · ${{source.value}}`;
-        text.append(title, detail);
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'btn';
-        remove.textContent = 'Remove';
-        remove.onclick = () => removeSavedSource(source.sourceKey);
-        row.append(select, text, remove);
-        el.appendChild(row);
-      }});
-      document.getElementById('select-all-sources').checked = false;
+    }}
+    async function editSavedSource(source) {{
+      const name = prompt('Source name', source.name || '');
+      if (name === null || !name.trim() || name.trim() === source.name) return;
+      try {{
+        const response = await fetch(`/sources/${{encodeURIComponent(source.sourceKey)}}`, {{
+          method:'PUT', headers:{{'Content-Type':'application/json'}},
+          body:JSON.stringify({{name:name.trim()}})
+        }});
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) throw new Error(data.detail || 'Could not update source');
+        showActionMsg('Source updated. Reconnecting the camera…');
+        loadSources();
+      }} catch (error) {{ showActionMsg(error.message, true); }}
     }}
     function renderCameraGrid(sources) {{
       const grid = document.getElementById('camera-grid');
       grid.innerHTML = '';
-      const active = sources.filter(source => source.cameraId);
+      if (!ownsLivePreview) {{
+        grid.textContent = 'Live preview is active in another ONEVO Connector tab.';
+        return;
+      }}
+      if (!document.getElementById('camera-focus').classList.contains('hidden')) {{
+        grid.textContent = 'Single camera view is open.';
+        return;
+      }}
+      const seenCameraIds = new Set();
+      const active = sources.filter(source => source.cameraId && !seenCameraIds.has(source.cameraId) &&
+        (seenCameraIds.add(source.cameraId) || true));
       if (!active.length) {{
         grid.textContent = 'No active camera feeds yet.';
         return;
@@ -951,9 +1223,18 @@ def build_app(
         const tile = document.createElement('div');
         tile.className = 'camera-tile';
         tile.onclick = () => openCameraFocus(source);
+        const visual = document.createElement('div');
+        visual.className = 'camera-visual';
         const img = document.createElement('img');
         img.src = `/live/cameras/${{encodeURIComponent(source.cameraId)}}/stream.mjpg`;
         img.alt = source.name;
+        const overlay = document.createElement('canvas');
+        overlay.className = 'zone-overlay';
+        overlay.dataset.cameraId = source.cameraId;
+        img.addEventListener('load', () => redrawZoneOverlay(source.cameraId, overlay));
+        new ResizeObserver(() => redrawZoneOverlay(source.cameraId, overlay)).observe(visual);
+        visual.append(img, overlay);
+        loadZoneOverlay(source.cameraId, overlay);
         const meta = document.createElement('div');
         meta.className = 'meta';
         const name = document.createElement('strong');
@@ -961,19 +1242,85 @@ def build_app(
         const kind = document.createElement('span');
         kind.textContent = source.type.toUpperCase();
         meta.append(name, kind);
-        tile.append(img, meta);
+        tile.append(visual, meta);
         grid.appendChild(tile);
       }});
     }}
+    const zoneOverlayCache = new Map();
+    function zoneColor(zone) {{
+      const type = zone.zoneType || zone.ZoneType || '';
+      if (type === 'HighValue') return ['rgba(255,120,120,.30)', '#ff7878'];
+      if (type === 'Exit') return ['rgba(255,190,80,.28)', '#ffbe50'];
+      if (type === 'BlindSpot') return ['rgba(180,120,255,.28)', '#b478ff'];
+      if (type === 'Checkout') return ['rgba(92,219,127,.27)', '#5cdb7f'];
+      return ['rgba(120,160,255,.28)', '#78a0ff'];
+    }}
+    function zonePoints(zone) {{
+      try {{
+        const raw = zone.polygonJson || zone.PolygonJson || zone.polygon || [];
+        const points = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(points)) return [];
+        return points.map(point => Array.isArray(point)
+          ? [Number(point[0]), Number(point[1])]
+          : [Number(point.x ?? point.X), Number(point.y ?? point.Y)]
+        ).filter(point => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+      }} catch (_) {{ return []; }}
+    }}
+    function drawZoneOverlay(canvas, zones) {{
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      if (canvas.width !== width || canvas.height !== height) {{
+        canvas.width = width; canvas.height = height;
+      }}
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+      zones.forEach(zone => {{
+        const points = zonePoints(zone);
+        if (!Array.isArray(points) || points.length < 3) return;
+        const [fill, stroke] = zoneColor(zone);
+        ctx.beginPath();
+        ctx.moveTo(points[0][0] * width, points[0][1] * height);
+        points.slice(1).forEach(point => ctx.lineTo(point[0] * width, point[1] * height));
+        ctx.closePath();
+        ctx.fillStyle = fill; ctx.strokeStyle = stroke; ctx.lineWidth = 2;
+        ctx.fill(); ctx.stroke();
+      }});
+    }}
+    function redrawZoneOverlay(cameraId, canvas) {{
+      drawZoneOverlay(canvas, zoneOverlayCache.get(cameraId) || []);
+    }}
+    async function loadZoneOverlay(cameraId, canvas) {{
+      try {{
+        const response = await fetch(`/live/cameras/${{encodeURIComponent(cameraId)}}/zones`);
+        if (!response.ok) return;
+        const zones = await response.json();
+        zoneOverlayCache.set(cameraId, Array.isArray(zones) ? zones : []);
+        redrawZoneOverlay(cameraId, canvas);
+      }} catch (_) {{}}
+    }}
     function openCameraFocus(source) {{
+      if (!ownsLivePreview) return;
+      stopLivePreviews();
+      document.getElementById('camera-grid').textContent = 'Single camera view is open.';
       document.getElementById('focus-title').textContent = source.name;
-      document.getElementById('focus-stream').src =
-        `/live/cameras/${{encodeURIComponent(source.cameraId)}}/stream.mjpg`;
+      const stream = document.getElementById('focus-stream');
+      stream.src =
+        `/live/cameras/${{encodeURIComponent(source.cameraId)}}/stream.mjpg?t=${{Date.now()}}`;
+      const overlay = document.getElementById('focus-zone-overlay');
+      overlay.dataset.cameraId = source.cameraId;
+      stream.onload = () => redrawZoneOverlay(source.cameraId, overlay);
+      loadZoneOverlay(source.cameraId, overlay);
       document.getElementById('camera-focus').classList.remove('hidden');
+      new ResizeObserver(() => redrawZoneOverlay(source.cameraId, overlay))
+        .observe(document.getElementById('camera-focus').querySelector('.camera-visual'));
     }}
     function closeCameraFocus() {{
       document.getElementById('camera-focus').classList.add('hidden');
       document.getElementById('focus-stream').removeAttribute('src');
+      const overlay = document.getElementById('focus-zone-overlay');
+      overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+      loadSources();
     }}
     async function removeSavedSource(sourceKey) {{
       if (!confirm('Remove this camera/video source?')) return;
@@ -1043,6 +1390,7 @@ def build_app(
           ? `Saved ${{data.added}} source(s). Backend activation is pending.`
           : `Added ${{data.added}} source(s). Monitoring will start shortly.`;
         await loadSources();
+        openZoneEditor();
         event.target.reset();
         document.getElementById('source-rows').innerHTML = '';
         document.getElementById('source-form').classList.remove('on');
@@ -1051,6 +1399,157 @@ def build_app(
         msg.textContent = error.message;
       }}
     }};
+    function openZoneEditor() {{
+      const section = document.getElementById('zone-editor-section');
+      section.classList.remove('hidden');
+      // Zone editing uses a single snapshot for the selected camera. Keep all
+      // normal live tiles running so operators can monitor other cameras.
+      loadNativeZoneEditor();
+      if (window.location.hash !== '#zones') history.replaceState(null, '', '#zones');
+      section.scrollIntoView({{behavior:'smooth', block:'start'}});
+    }}
+    function refreshZoneEditor() {{
+      loadNativeZoneFrame();
+    }}
+    function closeZoneEditor() {{
+      const section = document.getElementById('zone-editor-section');
+      section.classList.add('hidden');
+      loadSources();
+      document.getElementById('live-cameras-section').scrollIntoView({{behavior:'smooth', block:'start'}});
+    }}
+    let nativeZoneCameras=[], nativeZones=[], nativePoints=[], nativeSelected=null, nativeFrame=null;
+    let nativeDrawing=false, nativeDragPoint=null, nativeDrawStart=null, nativeResizeAnchor=null, nativeMoveStart=null, nativeMovePoints=[];
+    const nativeCanvas=document.getElementById('zoneCanvas'), nativeCtx=nativeCanvas.getContext('2d');
+    function nativeZonePoints(zone) {{
+      try {{ return JSON.parse(zone.polygonJson || zone.PolygonJson || '[]'); }} catch {{ return []; }}
+    }}
+    function drawNativeZones() {{
+      nativeCtx.clearRect(0,0,nativeCanvas.width,nativeCanvas.height);
+      if (nativeFrame) nativeCtx.drawImage(nativeFrame,0,0,nativeCanvas.width,nativeCanvas.height);
+      const draw=(points,color,editable=false)=>{{
+        if(!points.length)return;
+        nativeCtx.beginPath(); nativeCtx.moveTo(points[0][0]*nativeCanvas.width,points[0][1]*nativeCanvas.height);
+        points.slice(1).forEach(p=>nativeCtx.lineTo(p[0]*nativeCanvas.width,p[1]*nativeCanvas.height));
+        if(points.length>2) nativeCtx.closePath();
+        nativeCtx.fillStyle=color+'44'; nativeCtx.strokeStyle=color; nativeCtx.lineWidth=2; nativeCtx.fill(); nativeCtx.stroke();
+        if(editable) points.forEach(p=>{{nativeCtx.beginPath();nativeCtx.arc(p[0]*nativeCanvas.width,p[1]*nativeCanvas.height,5,0,Math.PI*2);nativeCtx.fillStyle=color;nativeCtx.fill();nativeCtx.strokeStyle='#fff';nativeCtx.stroke();}});
+      }};
+      nativeZones.forEach(zone=>draw(nativeZonePoints(zone),zone===nativeSelected?'#ffd36a':'#6ea8ff'));
+      draw(nativePoints,'#ffd36a',true);
+    }}
+    function nativePoint(event) {{
+      const rect=nativeCanvas.getBoundingClientRect();
+      return [Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))];
+    }}
+    function nativePointInPolygon(point, polygon) {{
+      let inside=false;
+      for(let i=0,j=polygon.length-1;i<polygon.length;j=i++) {{
+        const [xi,yi]=polygon[i], [xj,yj]=polygon[j];
+        if(((yi>point[1]) !== (yj>point[1])) &&
+           (point[0] < (xj-xi)*(point[1]-yi)/(yj-yi)+xi)) inside=!inside;
+      }}
+      return inside;
+    }}
+    function setNativeRectangle(start, end) {{
+      const left=Math.min(start[0],end[0]), right=Math.max(start[0],end[0]);
+      const top=Math.min(start[1],end[1]), bottom=Math.max(start[1],end[1]);
+      nativePoints=[[left,top],[right,top],[right,bottom],[left,bottom]];
+    }}
+    function simplifyNativeFreehand(raw, tolerance=.012) {{
+      if(raw.length<=4) return raw;
+      const simplify=(points)=>{{
+        if(points.length<=2) return points;
+        const first=points[0], last=points[points.length-1];
+        const dx=last[0]-first[0], dy=last[1]-first[1], denominator=dx*dx+dy*dy || 1;
+        let maxDistance=0, pivot=0;
+        for(let i=1;i<points.length-1;i++) {{
+          const t=Math.max(0,Math.min(1,((points[i][0]-first[0])*dx+(points[i][1]-first[1])*dy)/denominator));
+          const px=first[0]+t*dx, py=first[1]+t*dy;
+          const distance=Math.hypot(points[i][0]-px,points[i][1]-py);
+          if(distance>maxDistance) {{ maxDistance=distance;pivot=i; }}
+        }}
+        return maxDistance>tolerance
+          ? simplify(points.slice(0,pivot+1)).slice(0,-1).concat(simplify(points.slice(pivot)))
+          : [first,last];
+      }};
+      const result=simplify(raw);
+      return result.length>=3 ? result : raw.slice(0,3);
+    }}
+    function nativeResetZone() {{
+      nativeSelected=null;nativePoints=[];nativeDragPoint=null;nativeDrawStart=null;nativeResizeAnchor=null;nativeDrawing=false;nativeMoveStart=null;nativeMovePoints=[];
+      document.getElementById('zoneName').value='';document.getElementById('zoneDelete').disabled=true;drawNativeZones();
+    }}
+    function renderNativeZoneList() {{
+      document.getElementById('zoneList').innerHTML=nativeZones.map(z=>`<button class="btn" data-id="${{z.id||z.Id}}">${{z.name||z.Name}}</button>`).join('')||'<span class="hint">No saved zones for this camera.</span>';
+      document.querySelectorAll('#zoneList button').forEach(button=>button.onclick=()=>{{
+        nativeSelected=nativeZones.find(z=>(z.id||z.Id)===button.dataset.id);nativePoints=nativeZonePoints(nativeSelected);
+        document.getElementById('zoneName').value=nativeSelected.name||nativeSelected.Name||'';
+        document.getElementById('zoneType').value=nativeSelected.zoneType||nativeSelected.ZoneType||'Entrance';
+        document.getElementById('zoneDelete').disabled=false;drawNativeZones();
+      }});
+    }}
+    async function loadNativeZoneCamera() {{
+      const id=document.getElementById('zoneCamera').value;if(!id)return;
+      nativeResetZone();
+      try {{ nativeZones=await (await fetch(`/setup/wizard/cameras/${{encodeURIComponent(id)}}/zones`)).json();renderNativeZoneList();loadNativeZoneFrame(); }}
+      catch(error) {{ document.getElementById('zoneMsg').textContent=error.message; }}
+    }}
+    function loadNativeZoneFrame() {{
+      const id=document.getElementById('zoneCamera').value;if(!id)return;
+      const image=new Image();
+      image.onload=()=>{{nativeFrame=image;drawNativeZones();document.getElementById('zoneMsg').textContent='Frame ready. Drag on the frame to draw; drag a point to refine.';}};
+      image.onerror=()=>document.getElementById('zoneMsg').textContent='Could not load a camera frame.';
+      image.src=`/snapshot?camera_id=${{encodeURIComponent(id)}}&t=${{Date.now()}}`;
+    }}
+    async function loadNativeZoneEditor() {{
+      const sourceData=await (await fetch('/sources')).json();
+      nativeZoneCameras=(sourceData.sources||[]).filter(source=>source.cameraId);
+      const select=document.getElementById('zoneCamera');
+      const prior=select.value;select.innerHTML=nativeZoneCameras.map((source,index)=>`<option value="${{source.cameraId}}">${{source.name||`Camera ${{index+1}}`}}</option>`).join('');
+      if(prior && nativeZoneCameras.some(source=>source.cameraId===prior))select.value=prior;
+      await loadNativeZoneCamera();
+    }}
+    nativeCanvas.onpointerdown=event=>{{
+      if(event.button!==0)return;const point=nativePoint(event);
+      const index=nativePoints.findIndex(p=>Math.hypot(p[0]-point[0],p[1]-point[1])<.025);
+      nativeCanvas.setPointerCapture(event.pointerId);
+      if(index>=0){{nativeDragPoint=index;nativeResizeAnchor=nativePoints[(index+2)%4];nativeCanvas.style.cursor='nwse-resize';return;}}
+      if(nativePoints.length>=3 && nativePointInPolygon(point,nativePoints)) {{
+        nativeMoveStart=point;nativeMovePoints=nativePoints.map(p=>[...p]);nativeCanvas.style.cursor='move';return;
+      }}
+      nativeSelected=null;nativeDrawStart=point;setNativeRectangle(point,point);nativeDrawing=true;document.getElementById('zoneDelete').disabled=true;drawNativeZones();
+    }};
+    nativeCanvas.onpointermove=event=>{{
+      const point=nativePoint(event);
+      if(nativeDragPoint!==null){{setNativeRectangle(nativeResizeAnchor,point);drawNativeZones();}}
+      else if(nativeMoveStart){{const dx=point[0]-nativeMoveStart[0],dy=point[1]-nativeMoveStart[1];nativePoints=nativeMovePoints.map(p=>[Math.max(0,Math.min(1,p[0]+dx)),Math.max(0,Math.min(1,p[1]+dy))]);drawNativeZones();}}
+      else if(nativeDrawing){{setNativeRectangle(nativeDrawStart,point);drawNativeZones();}}
+    }};
+    nativeCanvas.onpointerup=event=>{{if(nativeCanvas.hasPointerCapture(event.pointerId))nativeCanvas.releasePointerCapture(event.pointerId);nativeDragPoint=null;nativeDrawStart=null;nativeResizeAnchor=null;nativeDrawing=false;nativeMoveStart=null;nativeMovePoints=[];nativeCanvas.style.cursor='crosshair';drawNativeZones();}};
+    nativeCanvas.onpointercancel=()=>{{nativeDragPoint=null;nativeDrawStart=null;nativeResizeAnchor=null;nativeDrawing=false;nativeMoveStart=null;nativeMovePoints=[];nativeCanvas.style.cursor='crosshair';drawNativeZones();}};
+    document.getElementById('zoneCamera').onchange=loadNativeZoneCamera;
+    document.getElementById('zoneNew').onclick=nativeResetZone;
+    document.getElementById('zoneUndo').onclick=()=>{{nativePoints.pop();drawNativeZones();}};
+    document.getElementById('zoneSave').onclick=async()=>{{
+      const id=document.getElementById('zoneCamera').value,name=document.getElementById('zoneName').value.trim();
+      if(!id||!name||nativePoints.length<3){{document.getElementById('zoneMsg').textContent='Enter a name and draw an area with at least three points.';return;}}
+      const response=await fetch(`/setup/wizard/cameras/${{encodeURIComponent(id)}}/zones`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{zoneId:nativeSelected&&(nativeSelected.id||nativeSelected.Id),name,zoneType:document.getElementById('zoneType').value,polygon:nativePoints}})}});
+      if(!response.ok){{document.getElementById('zoneMsg').textContent=await response.text();return;}}
+      zoneOverlayCache.delete(id);nativeResetZone();await loadNativeZoneCamera();document.getElementById('zoneMsg').textContent='Zone saved and applied to live detection.';
+    }};
+    document.getElementById('zoneDelete').onclick=async()=>{{
+      if(!nativeSelected)return;const id=document.getElementById('zoneCamera').value;
+      await fetch(`/setup/wizard/zones/${{nativeSelected.id||nativeSelected.Id}}`,{{method:'DELETE'}});
+      zoneOverlayCache.delete(id);nativeResetZone();await loadNativeZoneCamera();
+    }};
+    document.getElementById('zoneFinish').onclick=async()=>{{
+      const response=await fetch('/setup/wizard/zones/finish',{{method:'POST'}}),data=await response.json().catch(()=>({{}}));
+      if(!response.ok){{document.getElementById('zoneMsg').textContent=data.detail||'Save a zone for every camera first.';return;}}
+      document.getElementById('zoneMsg').textContent='Setup complete. Monitoring is ready.';closeZoneEditor();
+    }};
+    window.addEventListener('hashchange', () => {{
+      showView(window.location.hash.slice(1) || 'dashboard');
+    }});
     function classifyAlert(s) {{
       const reason = s.degradedReason || '';
       const logs = (s.logs || []).join('\\n');
@@ -1074,11 +1573,11 @@ def build_app(
           style: 'border-color:#5a3030;background:#2a1818',
         }};
       }}
-      if (reason && (/setup code|activation|configured yet/i.test(reason))) {{
+      if (!s.paired && reason && (/setup code|activation|configured yet|pairing/i.test(reason))) {{
         return {{
-          title: 'Setup required',
-          text: reason,
-          setup: true,
+          title: 'Installation incomplete',
+          text: 'This connector was not paired during installation. Uninstall it and run the installer again.',
+          setup: false,
           style: 'border-color:#5a3030;background:#2a1818',
         }};
       }}
@@ -1104,14 +1603,25 @@ def build_app(
     async function pauseCapture() {{
       try {{
         const result = await postJson('/capture/pause');
-        showActionMsg(result.message || 'Connector is stopping...');
-        document.getElementById('btn-pause').disabled = true;
+        showActionMsg(result.message || 'Monitoring stopped');
+        setCaptureButtons(true);
       }}
       catch(e) {{ showActionMsg(e.message, true); }}
     }}
     async function resumeCapture() {{
-      try {{ await postJson('/capture/resume'); showActionMsg('Monitoring resumed'); tick(); }}
+      try {{
+        await postJson('/capture/resume');
+        showActionMsg('Monitoring started');
+        setCaptureButtons(false);
+        tick();
+      }}
       catch(e) {{ showActionMsg(e.message, true); }}
+    }}
+    function setCaptureButtons(paused) {{
+      document.getElementById('btn-pause').disabled = paused;
+      document.getElementById('btn-resume').disabled = !paused;
+      document.getElementById('btn-trigger').disabled = paused;
+      document.getElementById('btn-upload-source').disabled = paused;
     }}
     async function triggerNow() {{
       try {{ await postJson('/capture/trigger-now'); showActionMsg('Manual clip trigger sent'); }}
@@ -1173,6 +1683,7 @@ def build_app(
     async function tick() {{
       try {{
         const s = await (await fetch('/status')).json();
+        setCaptureButtons(Boolean(s.capturePaused));
         const rg = document.getElementById('runtime-grid');
         if (rg) rg.innerHTML = RUNTIME_FIELDS.map(([k,l]) =>
           `<div class="k">${{l}}</div><div class="v">${{badge(s[k])}}</div>`).join('');
@@ -1186,7 +1697,6 @@ def build_app(
         const banner = document.getElementById('alert-banner');
         const alertTitle = document.getElementById('alert-title');
         const alertText = document.getElementById('alert-text');
-        const setupLink = document.getElementById('alert-setup-link');
         if (banner && alertText) {{
           const alert = classifyAlert(s);
           if (alert) {{
@@ -1194,20 +1704,39 @@ def build_app(
             banner.style.cssText = alert.style;
             if (alertTitle) alertTitle.textContent = alert.title;
             alertText.textContent = alert.text;
-            if (setupLink) setupLink.classList.toggle('hidden', !alert.setup);
           }} else {{
             banner.classList.add('hidden');
           }}
+        }}
+        if (
+          /^Camera setup is ready\\./.test(s.degradedReason || '') &&
+          window.location.hash !== '#zones' &&
+          !window.onevoAutoOpenedZones
+        ) {{
+          window.onevoAutoOpenedZones = true;
+          history.replaceState(null, '', '#zones');
+          showView('zones');
         }}
         document.getElementById('tick').textContent = 'updated ' + new Date().toLocaleTimeString();
         refreshLocalClips();
       }} catch(e) {{ document.getElementById('tick').textContent = 'fetch error'; }}
     }}
     loadClipSettings();
+    window.addEventListener('resize', () => {{
+      document.querySelectorAll('.zone-overlay').forEach(overlay => {{
+        if (overlay.dataset.cameraId) redrawZoneOverlay(overlay.dataset.cameraId, overlay);
+      }});
+    }});
     setInterval(tick, 1500);
     setInterval(loadSources, 5000);
+    setInterval(() => {{
+      document.querySelectorAll('.zone-overlay[data-camera-id]').forEach(overlay =>
+        loadZoneOverlay(overlay.dataset.cameraId, overlay)
+      );
+    }}, 5000);
     tick();
     loadSources();
+    showView(window.location.hash.slice(1) || 'dashboard');
   </script>
 </body>
 </html>"""
