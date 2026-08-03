@@ -9,8 +9,7 @@ namespace Onevo.Api.Services;
 
 /// <summary>
 /// Creates connector cameras and applies source-specific defaults in one place.
-/// Demo zones are only suitable for installer test videos; real camera zones must
-/// be drawn against the actual camera view in the dashboard.
+/// Zones are always explicitly drawn from the actual camera frame.
 /// </summary>
 public class CameraProvisioningService
 {
@@ -25,7 +24,6 @@ public class CameraProvisioningService
         string rtspUrl,
         string? onvifHost,
         int? onvifPort,
-        bool useDemoZones,
         CancellationToken ct = default)
     {
         var normalizedSourceKey = sourceKey?.Trim() ?? "";
@@ -91,44 +89,7 @@ public class CameraProvisioningService
             .Include(c => c.Zones)
             .SingleAsync(c => c.Id == cameraId, ct);
 
-        if (useDemoZones)
-            AddMissingDemoZones(camera);
-
         await _db.SaveChangesAsync(ct);
         return camera;
-    }
-
-    /// <summary>
-    /// Repairs test-video cameras created by an older installer. Safe to call more
-    /// than once because templates are matched by name and type.
-    /// </summary>
-    public async Task EnsureDemoZonesAsync(
-        IEnumerable<Camera> cameras,
-        CancellationToken ct = default)
-    {
-        var changed = false;
-        foreach (var camera in cameras)
-            changed |= AddMissingDemoZones(camera);
-
-        if (changed)
-            await _db.SaveChangesAsync(ct);
-    }
-
-    private bool AddMissingDemoZones(Camera camera)
-    {
-        var changed = false;
-        foreach (var zone in DemoZoneTemplates.Create(camera.Id))
-        {
-            if (camera.Zones.Any(z => z.Name == zone.Name && z.ZoneType == zone.ZoneType))
-                continue;
-
-            camera.Zones.Add(zone);
-            // CameraZone IDs are assigned in the entity constructor. Explicitly mark
-            // the entity Added so EF does not treat a non-empty GUID as an existing row.
-            _db.CameraZones.Add(zone);
-            changed = true;
-        }
-
-        return changed;
     }
 }

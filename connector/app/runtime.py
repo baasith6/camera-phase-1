@@ -13,6 +13,7 @@ class RuntimeState:
         self._lock = threading.Lock()
         self.logs: deque[str] = deque(maxlen=max_logs)
         self.connector_id: str | None = None
+        self.paired = False
         self.camera_id: str | None = None
         self.source: str | None = None
         self.capturing = False
@@ -39,10 +40,15 @@ class RuntimeState:
         # Last captured frame (JPEG bytes) per camera ID for the dashboard
         self.last_frames: dict[str, bytes] = {}
         self.camera_states: dict[str, dict[str, Any]] = {}
+        self.zone_revisions: dict[str, int] = {}
 
         # Active capture pipeline(s) — set from main.py / orchestrator for admin control
         self.pipeline: CapturePipeline | None = None
         self.pipelines: dict[str, Any] = {}
+        # Remains set while connector work is allowed. The local HTTP control
+        # host intentionally stays alive when this event is cleared.
+        self._monitoring_active = threading.Event()
+        self._monitoring_active.set()
 
     def publish_frame(
         self, camera_id: str, jpeg: bytes, width: int, height: int, source_fps: float
@@ -75,6 +81,16 @@ class RuntimeState:
             self.last_frames.pop(camera_id, None)
             self.camera_states.pop(camera_id, None)
             self.pipelines.pop(camera_id, None)
+            self.zone_revisions.pop(camera_id, None)
+
+    def invalidate_zones(self, camera_id: str) -> None:
+        """Tell the capture worker to reload this camera's saved polygons."""
+        with self._lock:
+            self.zone_revisions[camera_id] = self.zone_revisions.get(camera_id, 0) + 1
+
+    def zone_revision(self, camera_id: str) -> int:
+        with self._lock:
+            return self.zone_revisions.get(camera_id, 0)
 
     def get_frame(self, camera_id: str) -> bytes | None:
         with self._lock:
@@ -95,6 +111,11 @@ class RuntimeState:
             was = self.capture_paused
             self.capture_paused = paused
             if paused:
+                self._monitoring_active.clear()
+                self.capturing = False
+            else:
+                self._monitoring_active.set()
+            if paused:
                 self.last_frames.clear()
                 for current in self.camera_states.values():
                     current["status"] = "Paused"
@@ -103,6 +124,13 @@ class RuntimeState:
             self.log("Capture paused — no new motion clips")
         elif not paused and was:
             self.log("Capture resumed")
+
+    def wait_until_running(self, stop: threading.Event, timeout: float = 0.5) -> bool:
+        """Wait for a managed-stop to be released without stopping the UI host."""
+        while not stop.is_set():
+            if self._monitoring_active.wait(timeout=timeout):
+                return True
+        return False
 
     def request_trigger(self) -> bool:
         """Ask the primary pipeline to cut a clip on the next frame."""
@@ -119,10 +147,12 @@ class RuntimeState:
         with self._lock:
             return {
                 "connectorId": self.connector_id,
+                "paired": self.paired,
                 "cameraId": self.camera_id,
                 "source": self.source,
                 "capturing": self.capturing,
                 "capturePaused": self.capture_paused,
+                "monitoringState": "stopped" if self.capture_paused else "running",
                 "clipsCreated": self.clips_created,
                 "uploadsOk": self.uploads_ok,
                 "uploadsFailed": self.uploads_failed,

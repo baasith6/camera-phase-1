@@ -59,13 +59,12 @@ try {
       --exclude="dashboard/dist" `
       --exclude="backend/bin" `
       --exclude="backend/obj" `
-      --exclude="installer-site/*.exe" `
       --exclude=".git" `
       --exclude=".cursor" `
       -czf $tarball `
       backend dashboard connector cloud-ai `
       docker-compose.yml docker-compose.prod.yml docker-compose.gpu.yml docker-compose.acr.yml `
-      installer-site infra/mvp scripts
+      infra/mvp scripts
 
   tar -tzf $tarball | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Tarball verification failed" }
@@ -110,10 +109,9 @@ echo '==> Extracting deploy archive...'
 tar -xzf /tmp/onevo-deploy.tar.gz
 chmod +x infra/mvp/deploy.sh
 if [ -n "$installerRemoteName" ] && [ -f "/tmp/$installerRemoteName" ]; then
-  mkdir -p installer-site connector/dist
-  cp "/tmp/$installerRemoteName" "installer-site/$installerRemoteName"
+  mkdir -p connector/dist
   cp "/tmp/$installerRemoteName" "connector/dist/$installerRemoteName"
-  ls -lh "installer-site/$installerRemoteName"
+  ls -lh "connector/dist/$installerRemoteName"
 fi
 echo '==> Deploying containers...'
 export ONEVO_DIR=$VmAppDir

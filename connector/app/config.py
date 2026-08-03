@@ -104,8 +104,10 @@ def load_config(argv: list[str] | None = None) -> Config:
             store_id = wizard.store_id
         if wizard.connector_name:
             connector_name = wizard.connector_name
-        # Prefer multi-camera orchestrator when wizard saved backend cameras.
-        if wizard.use_backend_cameras and wizard.sources:
+        # Every multi-source connector must use one capture pipeline per
+        # camera. Otherwise the first MP4 is incorrectly reused as the only
+        # live frame while the UI still lists all configured cameras.
+        if wizard.sources and (wizard.use_backend_cameras or len(wizard.sources) > 1):
             camera_id = ""  # orchestrator mode
         elif wizard.sources:
             first = wizard.sources[0]
@@ -122,7 +124,7 @@ def load_config(argv: list[str] | None = None) -> Config:
         bootstrap_key=args.bootstrap_key,
         store_id=store_id,
         connector_name=connector_name,
-        version="1.1.12",
+        version="1.1.18",
         source=source,
         loop=loop,
         admin_port=args.admin_port,

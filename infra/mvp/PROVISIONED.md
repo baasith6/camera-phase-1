@@ -73,4 +73,4 @@ Azure portal: [Quota increase](https://aka.ms/ProdportalCRP/#blade/Microsoft_Azu
 
 ## Installer download
 
-Unchanged: shops download the Windows EXE from the **dashboard** after login. The deploy pipeline copies the built EXE to `/opt/onevo/app/installer-site/` on this VM (mounted as `/app/connector-dist` in the backend container).
+Shops download the Windows EXE from the **dashboard** after login. The deploy pipeline copies the built EXE to `/opt/onevo/app/connector/dist/` on this VM, which is mounted read-only as `/app/connector-dist` in the backend container.

@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File scripts/deploy-vm.ps1 -SkipInstaller
 |------|---------|
 | `/opt/onevo/app/` | Git repo + docker-compose project |
 | `/opt/onevo/app/.env` | Production secrets |
-| `/opt/onevo/app/installer-site/` | Connector EXE served by backend |
+| `/opt/onevo/app/connector/dist/` | Connector EXE served by backend |
 
 ## Troubleshooting
 

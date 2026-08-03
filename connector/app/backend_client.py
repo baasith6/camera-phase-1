@@ -87,6 +87,17 @@ class BackendClient:
             r = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
         r.raise_for_status()
 
+    def upload_reference_frame(self, camera_id: str, jpeg: bytes) -> None:
+        # Send through the backend so a remote connector never has to resolve
+        # an internal/localhost MinIO presigned URL.
+        uploaded = requests.post(
+            f"{self.base}/api/connectors/cameras/{camera_id}/reference-frame",
+            headers={**self._auth_headers(), "Content-Type": "image/jpeg"},
+            data=jpeg,
+            timeout=60,
+        )
+        uploaded.raise_for_status()
+
     def complete_clip(self, clip_id: str) -> None:
         r = requests.post(
             f"{self.base}/api/clips/{clip_id}/complete",
@@ -150,3 +161,42 @@ class BackendClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def get_zones(self, camera_id: str) -> list[dict]:
+        r = requests.get(
+            f"{self.base}/api/connectors/cameras/{camera_id}/zones",
+            headers=self._auth_headers(), timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def create_zone(self, camera_id: str, name: str, zone_type: str, polygon: list) -> dict:
+        import json
+        r = requests.post(
+            f"{self.base}/api/connectors/cameras/{camera_id}/zones",
+            headers=self._auth_headers(),
+            json={"cameraId": camera_id, "name": name, "zoneType": zone_type,
+                  "polygonJson": json.dumps(polygon)},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def update_zone(self, zone_id: str, name: str, zone_type: str, polygon: list) -> dict:
+        import json
+        r = requests.put(
+            f"{self.base}/api/connectors/zones/{zone_id}",
+            headers=self._auth_headers(),
+            json={"name": name, "zoneType": zone_type,
+                  "polygonJson": json.dumps(polygon)},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def delete_zone(self, zone_id: str) -> None:
+        r = requests.delete(
+            f"{self.base}/api/connectors/zones/{zone_id}",
+            headers=self._auth_headers(), timeout=15,
+        )
+        r.raise_for_status()

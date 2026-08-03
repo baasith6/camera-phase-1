@@ -84,7 +84,8 @@ AI events; the backend Risk Engine scores them and (for score >= 40) creates an 
 
 ### Windows installer (shop PC)
 
-Package the connector as `ONEVO-Connector-Setup-1.1.5.exe` (PyInstaller + Inno Setup + WinSW).
+Current Windows connector release: `ONEVO-Connector-Setup-1.1.18.exe`
+(PyInstaller + Inno Setup + WinSW).
 Full steps: [`connector/installer/INSTALL.md`](connector/installer/INSTALL.md).
 
 ```powershell
@@ -97,10 +98,12 @@ pip install -r requirements-build.txt
 .\installer\build.ps1 -BackendUrl https://api.your-production-domain.example
 ```
 
-Output lands in `connector/dist/`. Publish the versioned EXE plus `latest.json` to
-`installer-site/` / Vercel. The dashboard **Download Windows connector** action uses
-the configured Vercel URL; **Generate setup code**
-pairs the wizard to a store. After the connector heartbeats, status shows **Installed · Online**.
+Output lands in `connector/dist/`. This directory is the single installer source:
+the backend mounts it read-only and serves the matching versioned EXE through
+`GET /api/connectors/installer/download`. The dashboard **Download Windows
+connector** action uses that backend endpoint; **Generate setup code** pairs the
+native installer or local tray setup to a store. After the connector heartbeats,
+status shows **Installed · Online**.
 
 > Note: the synthetic clip has no real people, so YOLO produces no retail cues and no
 > alert fires — it validates the full pipeline plumbing. Use real retail footage as the
