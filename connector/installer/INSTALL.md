@@ -1,7 +1,7 @@
 # ONEVO Connector — Installer Build Guide
 
 Connector runtime already works. This packages it into
-`ONEVO-Connector-Setup-1.1.0.exe`.
+`ONEVO-Connector-Setup-1.1.18.exe`.
 
 ## 1. Prerequisites (one-time)
 
@@ -48,7 +48,7 @@ sees or enters it.
 Output:
 
 ```
-connector/dist/ONEVO-Connector-Setup-1.1.0.exe
+connector/dist/ONEVO-Connector-Setup-1.1.18.exe
 ```
 
 ## 3. What the installer does on a shop PC
@@ -79,8 +79,8 @@ If activation fails, the service **still** keeps the admin UI running at `http:/
 
 | File | Field |
 |---|---|
-| `connector/installer/onevo-connector.iss` | `#define AppVersion "1.1.0"` |
-| `connector/app/config.py` | `version="1.1.0"` |
+| `connector/installer/onevo-connector.iss` | `#define AppVersion "1.1.18"` |
+| `connector/app/config.py` | `version="1.1.18"` |
 | Backend env (`docker-compose.yml` / `.env`) | `ConnectorInstaller__Version` / `CONNECTOR_INSTALLER_VERSION` |
 
 Mismatch = backend looks for a filename that doesn't exist =

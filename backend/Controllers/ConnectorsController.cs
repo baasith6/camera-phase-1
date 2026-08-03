@@ -453,9 +453,6 @@ public class ConnectorsController : ControllerBase
     [HttpGet("installer/download")]
     public IActionResult DownloadInstaller()
     {
-        if (_installer.ExternalDownloadUrl is { } externalUrl)
-            return Redirect(externalUrl);
-
         if (!_installer.TryGetInfo(out var path, out _, out _))
             return NotFound(new { error = "Installer not found" });
 
