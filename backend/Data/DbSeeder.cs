@@ -23,6 +23,8 @@ public static class DbSeeder
             """
             ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ConnectorId" uuid NULL;
             ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "SourceKey" text NULL;
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ReferenceFrameObjectKey" text NULL;
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ReferenceFrameCapturedAt" timestamp with time zone NULL;
             CREATE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId" ON "Cameras" ("ConnectorId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId_SourceKey"
                 ON "Cameras" ("ConnectorId", "SourceKey")

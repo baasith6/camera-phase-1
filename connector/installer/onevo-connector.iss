@@ -94,6 +94,8 @@ var
   ZoneCameraCombo, ZoneTypeCombo: TNewComboBox;
   ZoneNameEdit: TNewEdit;
   ZoneImage: TBitmapImage;
+  ZoneBaseBitmap, ZoneRenderBitmap: TBitmap;
+  ZoneLoadedFramePath: String;
   ZoneMouseTimerId: LongWord;
   ZoneList: TNewListBox;
   ZoneCameraLabel, ZoneNameLabel, ZoneTypeLabel, SavedZonesLabel: TNewStaticText;
@@ -695,19 +697,26 @@ var
   I, X, Y: Integer;
 begin
   if not ZoneFrameReady then Exit;
-  ZoneImage.Bitmap.LoadFromFile(ZoneBaseFramePath);
-  ZoneImage.Bitmap.Canvas.Pen.Color := $00D2FF;
-  ZoneImage.Bitmap.Canvas.Pen.Width := 3;
-  ZoneImage.Bitmap.Canvas.Brush.Color := $00D2FF;
+  if CompareText(ZoneLoadedFramePath, ZoneBaseFramePath) <> 0 then begin
+    ZoneBaseBitmap.LoadFromFile(ZoneBaseFramePath);
+    ZoneLoadedFramePath := ZoneBaseFramePath;
+  end;
+  // Draw into an off-screen bitmap and replace the visible image once. Loading
+  // the BMP into ZoneImage on every mouse event caused a visible frame shake.
+  ZoneRenderBitmap.Assign(ZoneBaseBitmap);
+  ZoneRenderBitmap.Canvas.Pen.Color := $00D2FF;
+  ZoneRenderBitmap.Canvas.Pen.Width := 3;
+  ZoneRenderBitmap.Canvas.Brush.Color := $00D2FF;
   for I := 0 to ZonePointCount - 1 do begin
     X := ZonePointX[I];
     Y := ZonePointY[I];
-    if I = 0 then ZoneImage.Bitmap.Canvas.MoveTo(X, Y)
-    else ZoneImage.Bitmap.Canvas.LineTo(X, Y);
-    ZoneImage.Bitmap.Canvas.Ellipse(X - 5, Y - 5, X + 5, Y + 5);
+    if I = 0 then ZoneRenderBitmap.Canvas.MoveTo(X, Y)
+    else ZoneRenderBitmap.Canvas.LineTo(X, Y);
+    ZoneRenderBitmap.Canvas.Ellipse(X - 5, Y - 5, X + 5, Y + 5);
   end;
   if ZonePointCount >= 3 then
-    ZoneImage.Bitmap.Canvas.LineTo(ZonePointX[0], ZonePointY[0]);
+    ZoneRenderBitmap.Canvas.LineTo(ZonePointX[0], ZonePointY[0]);
+  ZoneImage.Bitmap.Assign(ZoneRenderBitmap);
   PointCountLabel.Caption := IntToStr(ZonePointCount) +
     ' point(s) - click and drag to draw a monitoring box';
 end;
@@ -759,6 +768,7 @@ begin
   end;
   DeleteFile(RequestPath);
   ZoneFrameReady := True;
+  ZoneLoadedFramePath := '';
   ZoneImage.Visible := True;
   // Refreshing an existing saved zone must retain its rectangle so the new
   // frame remains an accurate preview of the saved monitoring area.
@@ -771,6 +781,7 @@ end;
 procedure ZoneCameraChanged(Sender: TObject);
 begin
   ZoneFrameReady := FileExists(ZoneBaseFramePath);
+  ZoneLoadedFramePath := '';
   ZonePointCount := 0;
   if ZoneFrameReady then begin
     ZoneImage.Visible := True;
@@ -823,7 +834,7 @@ var
   MouseDown: Boolean;
   DisplayX, DisplayY: Integer;
 begin
-  if not ZoneFrameReady then Exit;
+  if (WizardForm.CurPageID <> ZonePage.ID) or (not ZoneFrameReady) then Exit;
   MouseDown := (GetAsyncKeyState(1) and $8000) <> 0;
   if MouseDown and (not ZoneDragging) then begin
     if GetZonePointer(DisplayX, DisplayY, False) then begin
@@ -914,9 +925,14 @@ var
   I: Integer;
 begin
   ZoneList.Items.Clear;
-  for I := 0 to SavedZoneCount - 1 do
-    ZoneList.Items.Add(ZoneCameraCombo.Items[SavedZoneSource[I]] +
-      ' - ' + SavedZoneName[I]);
+  for I := 0 to SavedZoneCount - 1 do begin
+    if (SavedZoneSource[I] >= 0) and
+       (SavedZoneSource[I] < ZoneCameraCombo.Items.Count) then
+      ZoneList.Items.Add(ZoneCameraCombo.Items[SavedZoneSource[I]] +
+        ' - ' + SavedZoneName[I])
+    else
+      ZoneList.Items.Add('Unavailable camera - ' + SavedZoneName[I]);
+  end;
 end;
 
 procedure SaveZoneClicked(Sender: TObject);
@@ -962,6 +978,13 @@ var
 begin
   if ZoneList.ItemIndex < 0 then Exit;
   EditingZoneIndex := ZoneList.ItemIndex;
+  if (SavedZoneSource[EditingZoneIndex] < 0) or
+     (SavedZoneSource[EditingZoneIndex] >= ZoneCameraCombo.Items.Count) then begin
+    MsgBox('This zone belongs to a camera that was removed. Delete the zone or add the camera again.',
+      mbError, MB_OK);
+    EditingZoneIndex := -1;
+    Exit;
+  end;
   ZoneCameraCombo.ItemIndex := SavedZoneSource[EditingZoneIndex];
   ZoneNameEdit.Text := SavedZoneName[EditingZoneIndex];
   SelectZoneType(SavedZoneType[EditingZoneIndex]);
@@ -1009,6 +1032,9 @@ begin
   SavedZoneCount := 0;
   EditingZoneIndex := -1;
   NavigatingFromSourceChoice := False;
+  ZoneBaseBitmap := TBitmap.Create;
+  ZoneRenderBitmap := TBitmap.Create;
+  ZoneLoadedFramePath := '';
   WizardForm.CancelButton.Visible := False;
 
   IdentityPage := CreateInputQueryPage(wpSelectDir,
@@ -1137,7 +1163,7 @@ begin
   ZoneImage.Stretch := True;
   ZoneImage.Cursor := crCross;
   ZoneImage.Visible := False;
-  ZoneMouseTimerId := SetTimer(0, 0, 20, CreateCallback(@ZoneMouseTimerTick));
+  ZoneMouseTimerId := SetTimer(0, 0, 33, CreateCallback(@ZoneMouseTimerTick));
   ZoneList := TNewListBox.Create(ZonePage);
   SavedZonesLabel := TNewStaticText.Create(ZonePage);
   SavedZonesLabel.Parent := ZonePage.Surface;
@@ -1377,7 +1403,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ConfigPath, UpdatePath, MediaPath, Json, SourcesJson, ItemJson,
-    PendingZonesJson: String;
+    PendingZonesJson, ReferencePath: String;
   I, Base: Integer;
 begin
   if CurStep <> ssInstall then Exit;
@@ -1438,10 +1464,18 @@ begin
   end;
 
   for I := 0 to SavedZoneCount - 1 do begin
+    ReferencePath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\zone-reference-' +
+      IntToStr(SavedZoneSource[I]) + '.bmp');
+    if not CopyFile(
+      ExpandConstant('{tmp}\onevo-zone-frame-' + IntToStr(SavedZoneSource[I]) + '.bmp'),
+      ReferencePath, False) then
+      RaiseException('Could not preserve the zone reference frame for camera ' +
+        IntToStr(SavedZoneSource[I] + 1) + '.');
     ItemJson := '{"source_index":' + IntToStr(SavedZoneSource[I]) +
       ',"name":"' + JsonEscape(SavedZoneName[I]) +
       '","zone_type":"' + JsonEscape(SavedZoneType[I]) +
-      '","polygon":' + SavedZonePolygon[I] + '}';
+      '","polygon":' + SavedZonePolygon[I] +
+      ',"reference_frame":"' + JsonEscape(ReferencePath) + '"}';
     if PendingZonesJson <> '' then PendingZonesJson := PendingZonesJson + ',';
     PendingZonesJson := PendingZonesJson + ItemJson;
   end;

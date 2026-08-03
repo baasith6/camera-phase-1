@@ -202,10 +202,12 @@ class ZoneEditor:
         self._draw()
 
     def _canvas_click(self, event) -> None:
-        width = max(self.canvas.winfo_width(), 1)
-        height = max(self.canvas.winfo_height(), 1)
+        width, height = self._canvas_size()
         self.points.append((event.x / width, event.y / height))
         self._draw()
+
+    def _canvas_size(self) -> tuple[int, int]:
+        return max(self.canvas.winfo_width(), 1), max(self.canvas.winfo_height(), 1)
 
     def _polygon(self, zone: dict) -> list:
         raw = zone.get("polygonJson") or zone.get("PolygonJson") or zone.get("polygon") or []
@@ -221,8 +223,7 @@ class ZoneEditor:
 
     def _draw(self) -> None:
         self.canvas.delete("all")
-        width = max(self.canvas.winfo_width(), CANVAS_WIDTH)
-        height = max(self.canvas.winfo_height(), CANVAS_HEIGHT)
+        width, height = self._canvas_size()
         if getattr(self, "base_image", None):
             fitted = self.base_image.resize((width, height), Image.Resampling.LANCZOS)
             self.photo = ImageTk.PhotoImage(fitted)

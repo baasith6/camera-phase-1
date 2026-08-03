@@ -1,5 +1,5 @@
 import { DecimalPipe } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
@@ -15,7 +15,7 @@ interface ChecklistStep {
   actionLabel?: string;
   actionLink?: string | any[];
   queryParams?: Record<string, string>;
-  inlineAction?: 'download' | 'setupCode' | 'markUninstalled';
+  inlineAction?: 'download' | 'setupCode';
 }
 
 @Component({
@@ -81,10 +81,6 @@ interface ChecklistStep {
                     <button class="ghost small" (click)="copyCode()">Copy</button>
                   </div>
                 }
-              } @else if (step.inlineAction === 'markUninstalled') {
-                <button class="danger-action" (click)="markRemovedConnector()" [disabled]="markingRemovedConnector">
-                  {{ markingRemovedConnector ? 'Resetting…' : 'This connector was removed' }}
-                </button>
               } @else if (step.actionLink) {
                 <a class="btn-link" [routerLink]="step.actionLink" [queryParams]="step.queryParams || null">
                   {{ step.actionLabel }}
@@ -151,7 +147,6 @@ interface ChecklistStep {
       color: var(--accent-2); cursor: pointer; font-weight: 600; font-size: .85rem;
     }
     button.ghost { background: transparent; border-color: var(--border-strong); color: var(--text-muted); }
-    button.danger-action { border-color: rgba(240,112,112,.65); color: #ffabab; background: rgba(240,112,112,.09); }
     button.small { font-size: .78rem; padding: .25rem .5rem; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .btn-link {
@@ -170,15 +165,13 @@ interface ChecklistStep {
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
   `],
 })
-export class GetStartedComponent implements OnInit, OnDestroy {
+export class GetStartedComponent implements OnInit {
   stores: StoreOverview[] = [];
   simpleStores: Store[] = [];
   storeUsers: UserAccount[] = [];
   cameraCount = 0;
   onlineConnectorCount = 0;
   installedConnectorCount = 0;
-  offlineConnectorIds: string[] = [];
-  markingRemovedConnector = false;
   hasAlerts = false;
 
   selectedStoreId = '';
@@ -193,7 +186,6 @@ export class GetStartedComponent implements OnInit, OnDestroy {
   generatingCode = false;
 
   steps: ChecklistStep[] = [];
-  private statusPollTimer?: ReturnType<typeof setInterval>;
 
   constructor(public auth: AuthService, private api: ApiService) {}
 
@@ -221,20 +213,6 @@ export class GetStartedComponent implements OnInit, OnDestroy {
         this.loadStoreMetrics();
       });
     }
-    this.statusPollTimer = setInterval(() => {
-      if (this.auth.isAdmin()) {
-        this.api.listStoreOverview().subscribe((stores) => {
-          this.stores = stores;
-          this.rebuildSteps();
-        });
-      } else {
-        this.loadStoreMetrics();
-      }
-    }, 5_000);
-  }
-
-  ngOnDestroy(): void {
-    if (this.statusPollTimer) clearInterval(this.statusPollTimer);
   }
 
   loadStoreMetrics(): void {
@@ -245,17 +223,9 @@ export class GetStartedComponent implements OnInit, OnDestroy {
     this.api.listCameras(this.selectedStoreId).subscribe((cams) => {
       this.cameraCount = cams.length;
       this.api.listConnectors(this.selectedStoreId).subscribe((conns) => {
-        this.installedConnectorCount = conns.filter(
-          (c) => (c.degradedReason || '').toLowerCase() !== 'uninstalled').length;
-        const cutoff = Date.now() - 120_000;
-        this.offlineConnectorIds = conns
-          .filter((c) =>
-            (c.degradedReason || '').toLowerCase() !== 'uninstalled' &&
-            (!c.lastHeartbeat || new Date(c.lastHeartbeat).getTime() < cutoff))
-          .map((c) => c.id);
+        this.installedConnectorCount = conns.length;
         this.onlineConnectorCount = conns.filter((c) =>
-          (c.status === 'Healthy' || c.status === 'Degraded') &&
-          !!c.lastHeartbeat && new Date(c.lastHeartbeat).getTime() >= cutoff).length;
+          (c.status === 'Healthy' || c.status === 'Degraded') && c.lastHeartbeat).length;
         this.api.listAlerts(this.selectedStoreId).subscribe((alerts) => {
           this.hasAlerts = alerts.length > 0;
           this.rebuildSteps();
@@ -280,34 +250,11 @@ export class GetStartedComponent implements OnInit, OnDestroy {
     if (this.auth.isAdmin()) {
       this.api.listUsers(this.selectedStoreId).subscribe((u) => {
         this.storeUsers = u;
-        this.loadOfflineConnectorIds(() => this.rebuildSteps());
+        this.rebuildSteps();
       });
     } else {
       this.rebuildSteps();
     }
-  }
-
-  private loadOfflineConnectorIds(done: () => void): void {
-    if (!this.selectedStoreId) {
-      this.offlineConnectorIds = [];
-      done();
-      return;
-    }
-    this.api.listConnectors(this.selectedStoreId).subscribe({
-      next: (connectors) => {
-        const cutoff = Date.now() - 120_000;
-        this.offlineConnectorIds = connectors
-          .filter((c) =>
-            (c.degradedReason || '').toLowerCase() !== 'uninstalled' &&
-            (!c.lastHeartbeat || new Date(c.lastHeartbeat).getTime() < cutoff))
-          .map((c) => c.id);
-        done();
-      },
-      error: () => {
-        this.offlineConnectorIds = [];
-        done();
-      },
-    });
   }
 
   rebuildSteps(): void {
@@ -365,25 +312,21 @@ export class GetStartedComponent implements OnInit, OnDestroy {
         id: 'installer',
         title: onlineConnectors > 0
           ? 'Windows connector installed'
-          : (registeredConnectors > 0 ? 'Windows connector installed · Offline' : 'Download Windows connector'),
+          : (registeredConnectors > 0 ? 'Connector offline or uninstalled' : 'Download Windows connector'),
         detail: onlineConnectors > 0
           ? 'The shop PC is online. Future code updates appear automatically in its tray.'
           : (registeredConnectors > 0
-              ? 'The connector remains paired. Start it from the shop PC or tray; setup is not required again.'
+              ? 'No recent heartbeat was received. Download to reinstall, or start the connector on the shop PC.'
               : 'Download once on the shop PC that can reach your cameras and run as Administrator.'),
-        done: registeredConnectors > 0,
-        inlineAction: registeredConnectors > 0
-          ? (onlineConnectors === 0 && this.offlineConnectorIds.length ? 'markUninstalled' : undefined)
-          : 'download',
+        done: onlineConnectors > 0,
+        inlineAction: onlineConnectors > 0 ? undefined : 'download',
       },
       {
         id: 'code',
-        title: registeredConnectors > 0 ? 'Connector paired' : 'Generate setup code',
-        detail: registeredConnectors > 0
-          ? 'This store remains paired until the connector is uninstalled.'
-          : 'Use this one-time code only for the first installation.',
-        done: registeredConnectors > 0 || !!this.setupCode,
-        inlineAction: registeredConnectors > 0 ? undefined : 'setupCode',
+        title: 'Generate setup code',
+        detail: 'Send this one-time code to the shop technician — it expires in 24 hours.',
+        done: !!this.setupCode,
+        inlineAction: 'setupCode',
       },
       {
         id: 'cameras',
@@ -449,9 +392,22 @@ export class GetStartedComponent implements OnInit, OnDestroy {
       window.location.assign(path);
       return;
     }
-    // Browser navigation streams the large EXE directly.  Fetching it through
-    // Angular as a Blob can cause Chrome to abort the download mid-stream.
-    window.location.assign('/api/connectors/updates/download');
+    this.downloadingInstaller = true;
+    this.api.downloadInstaller(path).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = this.installerInfo!.fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.downloadingInstaller = false;
+      },
+      error: () => {
+        this.downloadingInstaller = false;
+        this.installerError = 'Download failed';
+      },
+    });
   }
 
   generateSetupCode(): void {
@@ -470,43 +426,5 @@ export class GetStartedComponent implements OnInit, OnDestroy {
 
   copyCode(): void {
     if (this.setupCode) navigator.clipboard?.writeText(this.setupCode);
-  }
-
-  markRemovedConnector(): void {
-    const ids = this.offlineConnectorIds;
-    if (!ids.length || !confirm(
-      'Mark this offline connector as uninstalled? You can then download and pair a fresh installer.'
-    )) return;
-
-    this.markingRemovedConnector = true;
-    let remaining = ids.length;
-    let failed = false;
-    for (const id of ids) {
-      this.api.markConnectorUninstalled(id).subscribe({
-        next: () => this.completeConnectorReset(--remaining, failed),
-        error: () => {
-          failed = true;
-          this.completeConnectorReset(--remaining, failed);
-        },
-      });
-    }
-  }
-
-  private completeConnectorReset(remaining: number, failed: boolean): void {
-    if (remaining > 0) return;
-    this.markingRemovedConnector = false;
-    if (failed) {
-      this.installerError = 'Could not reset one or more connectors. Refresh and try again.';
-      return;
-    }
-    this.setupCode = '';
-    if (this.auth.isAdmin()) {
-      this.api.listStoreOverview().subscribe((stores) => {
-        this.stores = stores;
-        this.loadUsersAndRebuild();
-      });
-    } else {
-      this.loadStoreMetrics();
-    }
   }
 }

@@ -82,6 +82,7 @@ class PendingZone:
     zone_type: str
     # Canonical backend/AI contract: normalized [[x, y], ...] coordinates.
     polygon: list[list[float]] = field(default_factory=list)
+    reference_frame: str = ""
 
 
 def normalize_polygon(value: object) -> list[list[float]]:

@@ -16,10 +16,15 @@ public class CamerasController : ControllerBase
 {
     private readonly OnevoDbContext _db;
     private readonly ConnectorAuthenticationService _connectorAuth;
-    public CamerasController(OnevoDbContext db, ConnectorAuthenticationService connectorAuth)
+    private readonly S3Service _s3;
+    public CamerasController(
+        OnevoDbContext db,
+        ConnectorAuthenticationService connectorAuth,
+        S3Service s3)
     {
         _db = db;
         _connectorAuth = connectorAuth;
+        _s3 = s3;
     }
 
     [HttpGet]
@@ -41,6 +46,28 @@ public class CamerasController : ControllerBase
         if (cam is null) return NotFound();
         if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
         return Ok(cam);
+    }
+
+    [HttpGet("{id:guid}/reference-frame")]
+    public async Task<IActionResult> ReferenceFrame(Guid id)
+    {
+        var cam = await _db.Cameras.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+        if (cam is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(cam.ReferenceFrameObjectKey))
+            return NotFound(new { error = "No saved reference frame" });
+        try
+        {
+            var bytes = await _s3.GetBytesAsync(cam.ReferenceFrameObjectKey);
+            if (cam.ReferenceFrameCapturedAt is { } capturedAt)
+                Response.Headers["X-ONEVO-Frame-Captured-At"] = capturedAt.ToString("O");
+            Response.Headers.CacheControl = "private, max-age=60";
+            return File(bytes, "image/jpeg");
+        }
+        catch
+        {
+            return NotFound(new { error = "Saved reference frame is unavailable" });
+        }
     }
 
     [HttpPost]

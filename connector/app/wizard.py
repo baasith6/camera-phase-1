@@ -705,7 +705,9 @@ def attach_wizard_routes(
         marker = default_state_dir() / "zone_setup.complete"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("complete\n", encoding="utf-8")
-        complete_setup(wizard, cameras)
+        # Keep sources that are still waiting for provisioning. Passing only
+        # camera-id-bearing entries silently deleted transiently failed sources.
+        complete_setup(wizard, list(wizard.sources))
         if on_configured:
             try:
                 on_configured(wizard)

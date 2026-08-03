@@ -93,11 +93,21 @@ class StoreOrchestrator:
                         cam_cfg.onvif_port = cam.get("onvifPort") or 80
 
                     # Note: We reuse the global state for metrics
+                    def publish_reference(camera_id: str, jpeg: bytes) -> bool:
+                        try:
+                            self.client.upload_reference_frame(camera_id, jpeg)
+                            self.state.log(f"Saved zone reference frame for camera {camera_id}")
+                            return True
+                        except Exception as exc:  # noqa: BLE001
+                            self.state.log(f"Reference frame upload failed for camera {camera_id}: {exc}")
+                            return False
+
                     pipeline = CapturePipeline(
                         cam_cfg,
                         self.state,
                         zone_provider=lambda _cid=cid: self.client.get_zones(_cid),
                         zone_revision=lambda _cid=cid: self.state.zone_revision(_cid),
+                        reference_frame_publisher=publish_reference,
                     )
                     
                     def on_clip(path: str, duration: float, trigger: str, _cid=cid):

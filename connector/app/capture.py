@@ -82,6 +82,7 @@ class CapturePipeline:
         state: RuntimeState,
         zone_provider: Callable[[], list[dict]] | None = None,
         zone_revision: Callable[[], int] | None = None,
+        reference_frame_publisher: Callable[[str, bytes], bool] | None = None,
     ):
         self.cfg = cfg
         self.state = state
@@ -98,6 +99,10 @@ class CapturePipeline:
         self._zone_mask_shape: tuple[int, int] | None = None
         self._zone_loaded_at = 0.0
         self._zone_loaded_revision = -1
+        self._zone_signature = ""
+        self._reference_frame_publisher = reference_frame_publisher
+        self._reference_frame_pending = False
+        self._reference_frame_inflight = False
         if cfg.use_person_filter:
             self._person_hog = cv2.HOGDescriptor()
             self._person_hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
@@ -208,6 +213,24 @@ class CapturePipeline:
             self.state.publish_frame(
                 self.cfg.camera_id, jpeg.tobytes(), pw, ph, fps
             )
+            if (
+                self._reference_frame_pending
+                and not self._reference_frame_inflight
+                and self._reference_frame_publisher is not None
+            ):
+                self._reference_frame_pending = False
+                self._reference_frame_inflight = True
+                payload = jpeg.tobytes()
+
+                def publish() -> None:
+                    try:
+                        ok = self._reference_frame_publisher(self.cfg.camera_id, payload)
+                        if not ok:
+                            self._reference_frame_pending = True
+                    finally:
+                        self._reference_frame_inflight = False
+
+                threading.Thread(target=publish, daemon=True).start()
 
     def _processing_frame(self, frame):
         """Bound per-camera RAM while retaining enough detail for cloud analysis."""
@@ -272,6 +295,7 @@ class CapturePipeline:
             return
         try:
             zones = self._zone_provider() or []
+            signature = json.dumps(zones, sort_keys=True, default=str)
             self._zone_points = [
                 polygon for zone in zones
                 if isinstance(zone, dict)
@@ -280,8 +304,13 @@ class CapturePipeline:
             ]
             self._zone_loaded_revision = revision
             self._zone_loaded_at = now
+            if self._zone_points and signature != self._zone_signature:
+                self._reference_frame_pending = True
+            self._zone_signature = signature
         except Exception as exc:  # noqa: BLE001
             self._zone_points = []
+            self._zone_loaded_revision = revision
+            self._zone_loaded_at = now
             self.state.log(f"WARNING: could not refresh camera zones: {exc}")
         height, width = frame_shape
         mask = np.zeros((height, width), dtype=np.uint8)

@@ -302,6 +302,21 @@ export class AdminStoresComponent implements OnInit {
       window.location.assign(path);
       return;
     }
-    window.location.assign('/api/connectors/updates/download');
+    this.downloadingInstaller = true;
+    this.api.downloadInstaller(path).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = this.installerInfo!.fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.downloadingInstaller = false;
+      },
+      error: () => {
+        this.downloadingInstaller = false;
+        this.installerError = 'Download failed';
+      },
+    });
   }
 }

@@ -657,7 +657,14 @@ def build_app(
                         )
                         frame = camera.fetch_snapshot_bytes()
                     elif source_url:
-                        capture = cv2.VideoCapture(source_url, cv2.CAP_FFMPEG)
+                        capture = cv2.VideoCapture(
+                            source_url,
+                            cv2.CAP_FFMPEG,
+                            [
+                                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                                cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000,
+                            ],
+                        )
                         try:
                             ok, image = capture.read()
                             if ok and image is not None:
@@ -691,16 +698,18 @@ def build_app(
         """Return the saved polygons used to overlay this local live preview."""
         if client is None or store is None:
             raise HTTPException(503, "Connector backend client is unavailable")
+        # The service can replace its operational client after installer
+        # provisioning. Reload durable credentials so overlays never use a
+        # stale/unauthenticated client instance.
+        connector_id = store.get_cred("connector_id")
+        api_key = store.get_cred("api_key")
+        if not (connector_id and api_key):
+            raise HTTPException(401, "Connector is not paired")
         try:
-            # The service can replace its operational client after installer
-            # provisioning. Reload durable credentials so overlays never use a
-            # stale/unauthenticated client instance.
-            connector_id = store.get_cred("connector_id")
-            api_key = store.get_cred("api_key")
-            if not (connector_id and api_key):
-                raise HTTPException(401, "Connector is not paired")
             client.set_credentials(connector_id, api_key)
             return client.get_zones(camera_id)
+        except HTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not load camera zones: {exc}") from exc
 

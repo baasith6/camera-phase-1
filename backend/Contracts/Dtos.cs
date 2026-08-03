@@ -68,6 +68,8 @@ public record ConnectorCreateCameraRequest(
     int? OnvifPort);
 public record FinalizeConnectorSetupRequest(List<string> SourceKeys);
 public record InstallerInfoResponse(string Version, string FileName, long SizeBytes, string Sha256, string DownloadPath);
+public record ReferenceFrameUploadResponse(string ObjectKey, string UploadUrl, int ExpirySeconds);
+public record CompleteReferenceFrameRequest(string ObjectKey, DateTimeOffset? CapturedAt);
 
 // ---- Clips ----
 public record UploadUrlRequest(Guid CameraId, double DurationSec, string? TriggerReason);

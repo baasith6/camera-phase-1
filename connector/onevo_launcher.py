@@ -38,7 +38,14 @@ def installer_capture(request_path: str, output_path: str) -> int:
         frame = None
 
     if frame is None:
-        capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        capture = cv2.VideoCapture(
+            source,
+            cv2.CAP_FFMPEG,
+            [
+                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000,
+            ],
+        )
         try:
             if request.get("source_file"):
                 # Each installer "Refresh Frame" runs in a short-lived helper

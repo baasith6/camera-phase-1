@@ -86,4 +86,28 @@ public class S3Service
             // Best-effort — object may already be gone.
         }
     }
+
+    public async Task<byte[]> GetBytesAsync(string objectKey)
+    {
+        await using var output = new MemoryStream();
+        await _internal.GetObjectAsync(new GetObjectArgs()
+            .WithBucket(_opts.Bucket)
+            .WithObject(objectKey)
+            .WithCallbackStream(stream => stream.CopyTo(output)));
+        return output.ToArray();
+    }
+
+    public async Task PutBytesAsync(
+        string objectKey,
+        Stream content,
+        long length,
+        string contentType)
+    {
+        await _internal.PutObjectAsync(new PutObjectArgs()
+            .WithBucket(_opts.Bucket)
+            .WithObject(objectKey)
+            .WithStreamData(content)
+            .WithObjectSize(length)
+            .WithContentType(contentType));
+    }
 }

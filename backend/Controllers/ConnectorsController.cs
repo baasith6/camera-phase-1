@@ -21,6 +21,7 @@ public class ConnectorsController : ControllerBase
     private readonly CameraProvisioningService _cameraProvisioning;
     private readonly ConnectorAuthenticationService _connectorAuth;
     private readonly ConnectorPairingService _pairing;
+    private readonly S3Service _s3;
 
     public ConnectorsController(
         OnevoDbContext db,
@@ -28,7 +29,8 @@ public class ConnectorsController : ControllerBase
         ConnectorInstallerService installer,
         CameraProvisioningService cameraProvisioning,
         ConnectorAuthenticationService connectorAuth,
-        ConnectorPairingService pairing)
+        ConnectorPairingService pairing,
+        S3Service s3)
     {
         _db = db;
         _cfg = cfg;
@@ -36,6 +38,7 @@ public class ConnectorsController : ControllerBase
         _cameraProvisioning = cameraProvisioning;
         _connectorAuth = connectorAuth;
         _pairing = pairing;
+        _s3 = s3;
     }
 
     // Connector self-registration using the shared bootstrap key. Returns a per-connector API key
@@ -332,6 +335,82 @@ public class ConnectorsController : ControllerBase
             .Where(z => z.CameraId == cameraId)
             .OrderBy(z => z.Name)
             .ToListAsync(HttpContext.RequestAborted));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("cameras/{cameraId:guid}/reference-frame/upload-url")]
+    public async Task<ActionResult<ReferenceFrameUploadResponse>> ReferenceFrameUploadUrl(Guid cameraId)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        if (!await OwnsCameraAsync(connector.Id, cameraId)) return Forbid();
+
+        const int expiry = 900;
+        var objectKey = $"zone-reference/{connector.StoreId}/{cameraId}/{Guid.NewGuid():N}.jpg";
+        var uploadUrl = await _s3.PresignedPutAsync(objectKey, expiry);
+        return new ReferenceFrameUploadResponse(objectKey, uploadUrl, expiry);
+    }
+
+    [AllowAnonymous]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    [HttpPost("cameras/{cameraId:guid}/reference-frame")]
+    public async Task<IActionResult> UploadReferenceFrame(Guid cameraId)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        var camera = await _db.Cameras.FirstOrDefaultAsync(
+            c => c.Id == cameraId && c.ConnectorId == connector.Id,
+            HttpContext.RequestAborted);
+        if (camera is null) return Forbid();
+        if (Request.ContentLength is null or <= 0)
+            return BadRequest(new { error = "Reference frame is empty" });
+        if (Request.ContentLength > 10 * 1024 * 1024)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+        var objectKey =
+            $"zone-reference/{connector.StoreId}/{cameraId}/{Guid.NewGuid():N}.jpg";
+        await _s3.PutBytesAsync(
+            objectKey,
+            Request.Body,
+            Request.ContentLength.Value,
+            "image/jpeg");
+
+        var previousKey = camera.ReferenceFrameObjectKey;
+        camera.ReferenceFrameObjectKey = objectKey;
+        camera.ReferenceFrameCapturedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        if (!string.IsNullOrWhiteSpace(previousKey) && previousKey != objectKey)
+            await _s3.DeleteAsync(previousKey);
+        return Ok(new { ok = true, camera.ReferenceFrameCapturedAt });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("cameras/{cameraId:guid}/reference-frame/complete")]
+    public async Task<IActionResult> CompleteReferenceFrame(
+        Guid cameraId,
+        CompleteReferenceFrameRequest req)
+    {
+        var connector = await _connectorAuth.AuthenticateAsync(Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
+        var camera = await _db.Cameras.FirstOrDefaultAsync(
+            c => c.Id == cameraId && c.ConnectorId == connector.Id,
+            HttpContext.RequestAborted);
+        if (camera is null) return Forbid();
+
+        var expectedPrefix = $"zone-reference/{connector.StoreId}/{cameraId}/";
+        if (string.IsNullOrWhiteSpace(req.ObjectKey) ||
+            !req.ObjectKey.StartsWith(expectedPrefix, StringComparison.Ordinal))
+            return BadRequest(new { error = "Invalid reference-frame object key" });
+        if (!await _s3.ExistsAsync(req.ObjectKey))
+            return BadRequest(new { error = "Reference frame upload is incomplete" });
+
+        var previousKey = camera.ReferenceFrameObjectKey;
+        camera.ReferenceFrameObjectKey = req.ObjectKey;
+        camera.ReferenceFrameCapturedAt = req.CapturedAt ?? DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(HttpContext.RequestAborted);
+        if (!string.IsNullOrWhiteSpace(previousKey) && previousKey != req.ObjectKey)
+            await _s3.DeleteAsync(previousKey);
+        return Ok(new { ok = true, camera.ReferenceFrameCapturedAt });
     }
 
     [AllowAnonymous]

@@ -140,11 +140,21 @@ def _run_capture(cfg, client: BackendClient, store: LocalStore, state: RuntimeSt
             except Exception as exc:  # noqa: BLE001
                 state.log(f"WARNING: could not push device info: {exc}")
 
+        def publish_reference(camera_id: str, jpeg: bytes) -> bool:
+            try:
+                client.upload_reference_frame(camera_id, jpeg)
+                state.log(f"Saved zone reference frame for camera {camera_id}")
+                return True
+            except Exception as exc:  # noqa: BLE001
+                state.log(f"Reference frame upload failed for camera {camera_id}: {exc}")
+                return False
+
         pipeline = CapturePipeline(
             cfg,
             state,
             zone_provider=lambda: client.get_zones(cfg.camera_id),
             zone_revision=lambda: state.zone_revision(cfg.camera_id),
+            reference_frame_publisher=publish_reference,
         )
         state.pipeline = pipeline
 
@@ -307,6 +317,21 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
                         pending_zone.zone_type,
                         pending_zone.polygon,
                     )
+                    if pending_zone.reference_frame:
+                        try:
+                            import cv2
+
+                            reference = cv2.imread(pending_zone.reference_frame)
+                            if reference is None:
+                                raise RuntimeError("saved reference frame is unreadable")
+                            encoded, buffer = cv2.imencode(".jpg", reference)
+                            if encoded:
+                                client.upload_reference_frame(camera_id, buffer.tobytes())
+                        except Exception as exc:  # noqa: BLE001
+                            state.log(
+                                f"WARNING: could not upload installer reference frame "
+                                f"for {camera_id}: {exc}"
+                            )
                 wizard.pending_zones.pop(0)
                 save_wizard_config(wizard)
             client.finalize_setup([source.source_key for source in created])

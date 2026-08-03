@@ -51,6 +51,11 @@ export class ApiService {
   getCamera(id: string): Observable<Camera> {
     return this.http.get<Camera>(`${API_BASE}/api/cameras/${id}`);
   }
+  getCameraReferenceFrame(id: string): Observable<Blob> {
+    return this.http.get(`${API_BASE}/api/cameras/${id}/reference-frame`, {
+      responseType: 'blob',
+    });
+  }
   createCamera(storeId: string, name: string, rtspUrl: string,
                onvifHost?: string, onvifPort?: number): Observable<Camera> {
     return this.http.post<Camera>(`${API_BASE}/api/cameras`,

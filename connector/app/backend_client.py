@@ -87,6 +87,17 @@ class BackendClient:
             r = requests.put(upload_url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
         r.raise_for_status()
 
+    def upload_reference_frame(self, camera_id: str, jpeg: bytes) -> None:
+        # Send through the backend so a remote connector never has to resolve
+        # an internal/localhost MinIO presigned URL.
+        uploaded = requests.post(
+            f"{self.base}/api/connectors/cameras/{camera_id}/reference-frame",
+            headers={**self._auth_headers(), "Content-Type": "image/jpeg"},
+            data=jpeg,
+            timeout=60,
+        )
+        uploaded.raise_for_status()
+
     def complete_clip(self, clip_id: str) -> None:
         r = requests.post(
             f"{self.base}/api/clips/{clip_id}/complete",
