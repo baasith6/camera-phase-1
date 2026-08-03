@@ -16,6 +16,7 @@ import requests
 from .baked_config import BAKED_BACKEND_URL
 from .instance_lock import InstanceLock
 from .paths import default_state_dir, install_dir, pause_marker_path
+from .store import LocalStore
 
 
 SERVICE_NAME = "ONEVOConnector"
@@ -254,6 +255,16 @@ class TrayApplication:
         self.update_busy = False
         self._last_update_check = 0.0
 
+    def _connector_headers(self) -> dict[str, str]:
+        store = LocalStore(str(self.state_dir))
+        try:
+            return {
+                "X-Connector-Id": store.get_cred("connector_id") or "",
+                "X-Connector-Key": store.get_cred("api_key") or "",
+            }
+        finally:
+            store.close()
+
     def _prompted_update_version(self) -> str:
         try:
             return (self.state_dir / UPDATE_PROMPT_FILE).read_text(
@@ -287,7 +298,11 @@ class TrayApplication:
 
     def _check_updates(self, notify: bool = True) -> None:
         try:
-            response = requests.get(UPDATE_MANIFEST_URL, timeout=15)
+            response = requests.get(
+                UPDATE_MANIFEST_URL,
+                headers=self._connector_headers(),
+                timeout=15,
+            )
             response.raise_for_status()
             metadata = response.json()
             latest = str(metadata.get("version") or "").strip()
@@ -325,8 +340,11 @@ class TrayApplication:
                     manifest_origin.scheme == download_origin.scheme
                     and manifest_origin.netloc == download_origin.netloc
                 )
+                local_host = (download_origin.hostname or "") in (
+                    "localhost", "127.0.0.1", "::1"
+                )
                 if download_origin.scheme != "https" and not (
-                    download_origin.scheme == "http" and same_backend
+                    download_origin.scheme == "http" and same_backend and local_host
                 ):
                     raise RuntimeError("The update URL is not from the ONEVO backend.")
                 update_dir = self.state_dir.parent / "updates"
@@ -336,7 +354,12 @@ class TrayApplication:
                 digest = hashlib.sha256()
                 received = 0
                 self._notify(f"Downloading ONEVO Connector {self.latest_version}...")
-                with requests.get(download_url, stream=True, timeout=(15, 120)) as response:
+                with requests.get(
+                    download_url,
+                    headers=self._connector_headers(),
+                    stream=True,
+                    timeout=(15, 120),
+                ) as response:
                     response.raise_for_status()
                     with partial.open("wb") as output:
                         for chunk in response.iter_content(1024 * 1024):

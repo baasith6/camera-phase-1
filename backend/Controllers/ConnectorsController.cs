@@ -367,12 +367,24 @@ public class ConnectorsController : ControllerBase
         if (Request.ContentLength > 10 * 1024 * 1024)
             return StatusCode(StatusCodes.Status413PayloadTooLarge);
 
+        await using var buffered = new MemoryStream();
+        await Request.Body.CopyToAsync(buffered, HttpContext.RequestAborted);
+        if (buffered.Length < 3)
+            return BadRequest(new { error = "Reference frame must be a JPEG image" });
+        buffered.Position = 0;
+        var first = buffered.ReadByte();
+        var second = buffered.ReadByte();
+        var third = buffered.ReadByte();
+        if (first != 0xFF || second != 0xD8 || third != 0xFF)
+            return BadRequest(new { error = "Reference frame must be a JPEG image" });
+        buffered.Position = 0;
+
         var objectKey =
             $"zone-reference/{connector.StoreId}/{cameraId}/{Guid.NewGuid():N}.jpg";
         await _s3.PutBytesAsync(
             objectKey,
-            Request.Body,
-            Request.ContentLength.Value,
+            buffered,
+            buffered.Length,
             "image/jpeg");
 
         var previousKey = camera.ReferenceFrameObjectKey;
@@ -487,8 +499,11 @@ public class ConnectorsController : ControllerBase
     /// <summary>Public tray-update manifest. The installer hash is calculated from disk.</summary>
     [AllowAnonymous]
     [HttpGet("updates/latest")]
-    public IActionResult LatestUpdate()
+    public async Task<IActionResult> LatestUpdate()
     {
+        var connector = await _connectorAuth.AuthenticateAsync(
+            Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
         if (!_installer.TryGetInfo(out _, out var size, out var sha))
             return NotFound(new { error = "Installer not found" });
         var downloadUrl =
@@ -504,8 +519,11 @@ public class ConnectorsController : ControllerBase
 
     [AllowAnonymous]
     [HttpGet("updates/download")]
-    public IActionResult DownloadUpdate()
+    public async Task<IActionResult> DownloadUpdate()
     {
+        var connector = await _connectorAuth.AuthenticateAsync(
+            Request, HttpContext.RequestAborted);
+        if (connector is null) return Unauthorized();
         if (!_installer.TryGetInfo(out var path, out _, out _))
             return NotFound(new { error = "Installer not found" });
         return PhysicalFile(path, "application/octet-stream", _installer.FileName);

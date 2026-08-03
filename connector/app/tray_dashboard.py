@@ -116,7 +116,7 @@ class TrayDashboard:
 
     def refresh(self) -> None:
         try:
-            status = _json("/status")
+            status = _json("/setup/wizard/status")
             source_data = _json("/sources")
             wizard = _json("/setup/wizard/status")
             cameras = wizard.get("cameras") or []

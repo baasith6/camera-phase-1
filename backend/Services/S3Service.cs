@@ -87,14 +87,19 @@ public class S3Service
         }
     }
 
-    public async Task<byte[]> GetBytesAsync(string objectKey)
+    public async Task CopyToAsync(
+        string objectKey,
+        Stream destination,
+        CancellationToken cancellationToken)
     {
-        await using var output = new MemoryStream();
         await _internal.GetObjectAsync(new GetObjectArgs()
             .WithBucket(_opts.Bucket)
             .WithObject(objectKey)
-            .WithCallbackStream(stream => stream.CopyTo(output)));
-        return output.ToArray();
+            .WithCallbackStream(stream =>
+                stream.CopyToAsync(destination, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult()),
+            cancellationToken);
     }
 
     public async Task PutBytesAsync(

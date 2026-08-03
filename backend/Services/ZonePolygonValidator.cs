@@ -45,11 +45,48 @@ public static class ZonePolygonValidator
                 twiceArea += (current.X * next.Y) - (next.X * current.Y);
             }
 
+            for (var first = 0; first < points.Count; first++)
+            {
+                var firstNext = (first + 1) % points.Count;
+                for (var second = first + 1; second < points.Count; second++)
+                {
+                    var secondNext = (second + 1) % points.Count;
+                    if (first == second || firstNext == second ||
+                        secondNext == first)
+                        continue;
+                    if (SegmentsIntersect(
+                        points[first], points[firstNext],
+                        points[second], points[secondNext]))
+                        return false;
+                }
+            }
+
             return Math.Abs(twiceArea) >= 0.00002;
         }
         catch (JsonException)
         {
             return false;
         }
+    }
+
+    private static bool SegmentsIntersect(
+        (double X, double Y) a,
+        (double X, double Y) b,
+        (double X, double Y) c,
+        (double X, double Y) d)
+    {
+        static double Cross(
+            (double X, double Y) p,
+            (double X, double Y) q,
+            (double X, double Y) r) =>
+            (q.X - p.X) * (r.Y - p.Y) -
+            (q.Y - p.Y) * (r.X - p.X);
+
+        const double epsilon = 1e-12;
+        var abC = Cross(a, b, c);
+        var abD = Cross(a, b, d);
+        var cdA = Cross(c, d, a);
+        var cdB = Cross(c, d, b);
+        return abC * abD < -epsilon && cdA * cdB < -epsilon;
     }
 }

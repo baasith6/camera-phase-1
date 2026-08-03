@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -17,7 +18,10 @@ from urllib.request import Request, urlopen
 from PIL import Image, ImageTk
 
 
-BASE_URL = "http://127.0.0.1:8099"
+BASE_URL = (
+    f"http://127.0.0.1:"
+    f"{int(os.getenv('CONNECTOR_ADMIN_PORT', '8099'))}"
+)
 CANVAS_WIDTH = 760
 CANVAS_HEIGHT = 428
 
@@ -131,7 +135,13 @@ class ZoneEditor:
             try:
                 operation()
             except Exception as exc:
-                self.root.after(0, lambda: messagebox.showerror("ONEVO", str(exc), parent=self.root))
+                message = str(exc)
+                self.root.after(
+                    0,
+                    lambda message=message: messagebox.showerror(
+                        "ONEVO", message, parent=self.root
+                    ),
+                )
             finally:
                 self.root.after(0, lambda: self.status.configure(text="Synchronized with dashboard"))
 
@@ -175,7 +185,7 @@ class ZoneEditor:
 
     def _load_camera(self, camera_id: str) -> None:
         zones = _json(f"/setup/wizard/cameras/{camera_id}/zones")
-        frame = _request(f"/snapshot?camera_id={camera_id}")
+        frame = _request(f"/setup/snapshot?camera_id={camera_id}")
         image = Image.open(io.BytesIO(frame)).convert("RGB")
         self.zones = zones
         self.root.after(0, lambda: self._apply_camera(image))
@@ -193,7 +203,7 @@ class ZoneEditor:
         self._async(lambda: self._refresh_frame(camera_id))
 
     def _refresh_frame(self, camera_id: str) -> None:
-        frame = _request(f"/snapshot?camera_id={camera_id}&refresh=1")
+        frame = _request(f"/setup/snapshot?camera_id={camera_id}&refresh=1")
         image = Image.open(io.BytesIO(frame)).convert("RGB")
         self.root.after(0, lambda: self._set_frame(image))
 

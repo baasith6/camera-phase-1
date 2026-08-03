@@ -310,28 +310,34 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
                     save_wizard_config(wizard)
                     continue
                 camera_id = created[pending_zone.source_index].camera_id
-                if camera_id:
-                    client.create_zone(
-                        camera_id,
-                        pending_zone.name,
-                        pending_zone.zone_type,
-                        pending_zone.polygon,
+                if not camera_id:
+                    native_zones_configured = False
+                    state.log(
+                        f"WARNING: retained installer zone '{pending_zone.name}'; "
+                        f"source {pending_zone.source_index} has no backend camera ID"
                     )
-                    if pending_zone.reference_frame:
-                        try:
-                            import cv2
+                    break
+                client.create_zone(
+                    camera_id,
+                    pending_zone.name,
+                    pending_zone.zone_type,
+                    pending_zone.polygon,
+                )
+                if pending_zone.reference_frame:
+                    try:
+                        import cv2
 
-                            reference = cv2.imread(pending_zone.reference_frame)
-                            if reference is None:
-                                raise RuntimeError("saved reference frame is unreadable")
-                            encoded, buffer = cv2.imencode(".jpg", reference)
-                            if encoded:
-                                client.upload_reference_frame(camera_id, buffer.tobytes())
-                        except Exception as exc:  # noqa: BLE001
-                            state.log(
-                                f"WARNING: could not upload installer reference frame "
-                                f"for {camera_id}: {exc}"
-                            )
+                        reference = cv2.imread(pending_zone.reference_frame)
+                        if reference is None:
+                            raise RuntimeError("saved reference frame is unreadable")
+                        encoded, buffer = cv2.imencode(".jpg", reference)
+                        if encoded:
+                            client.upload_reference_frame(camera_id, buffer.tobytes())
+                    except Exception as exc:  # noqa: BLE001
+                        state.log(
+                            f"WARNING: could not upload installer reference frame "
+                            f"for {camera_id}: {exc}"
+                        )
                 wizard.pending_zones.pop(0)
                 save_wizard_config(wizard)
             client.finalize_setup([source.source_key for source in created])

@@ -191,6 +191,12 @@ namespace Onevo.Api.Migrations
                     b.Property<DateTimeOffset?>("LastSeen")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("ReferenceFrameCapturedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReferenceFrameObjectKey")
+                        .HasColumnType("text");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");

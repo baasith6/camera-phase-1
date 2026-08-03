@@ -17,14 +17,17 @@ public class CamerasController : ControllerBase
     private readonly OnevoDbContext _db;
     private readonly ConnectorAuthenticationService _connectorAuth;
     private readonly S3Service _s3;
+    private readonly ILogger<CamerasController> _logger;
     public CamerasController(
         OnevoDbContext db,
         ConnectorAuthenticationService connectorAuth,
-        S3Service s3)
+        S3Service s3,
+        ILogger<CamerasController> logger)
     {
         _db = db;
         _connectorAuth = connectorAuth;
         _s3 = s3;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -58,15 +61,31 @@ public class CamerasController : ControllerBase
             return NotFound(new { error = "No saved reference frame" });
         try
         {
-            var bytes = await _s3.GetBytesAsync(cam.ReferenceFrameObjectKey);
             if (cam.ReferenceFrameCapturedAt is { } capturedAt)
                 Response.Headers["X-ONEVO-Frame-Captured-At"] = capturedAt.ToString("O");
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
             Response.Headers.CacheControl = "private, max-age=60";
-            return File(bytes, "image/jpeg");
+            Response.ContentType = "image/jpeg";
+            await _s3.CopyToAsync(
+                cam.ReferenceFrameObjectKey,
+                Response.Body,
+                HttpContext.RequestAborted);
+            return new EmptyResult();
         }
-        catch
+        catch (OperationCanceledException)
         {
-            return NotFound(new { error = "Saved reference frame is unavailable" });
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Reference frame {ObjectKey} for camera {CameraId} could not be read",
+                cam.ReferenceFrameObjectKey,
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "Saved reference frame is temporarily unavailable" });
         }
     }
 

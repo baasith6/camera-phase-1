@@ -96,7 +96,16 @@ def build_app(
     @app.middleware("http")
     async def admin_auth_middleware(request, call_next):
         path = request.url.path
-        if path in ("/health",) or path.startswith("/setup"):
+        paired = bool(
+            store is not None
+            and store.get_cred("connector_id")
+            and store.get_cred("api_key")
+        )
+        setup_path = path == "/setup" or path.startswith("/setup/")
+        client_host = request.client.host if request.client else ""
+        loopback_setup = setup_path and client_host in ("127.0.0.1", "::1")
+        first_run_setup = setup_path and not paired
+        if path == "/health" or first_run_setup or loopback_setup:
             response = await call_next(request)
         elif admin_token:
             provided = request.headers.get("X-Admin-Token") or request.query_params.get("admin_token")
@@ -620,6 +629,7 @@ def build_app(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/snapshot")
+    @app.get("/setup/snapshot")
     def snapshot(camera_id: str):
         """Return a live snapshot from the CapturePipeline's recent frames."""
         frame = state.last_frames.get(camera_id)
@@ -1508,7 +1518,7 @@ def build_app(
       const image=new Image();
       image.onload=()=>{{nativeFrame=image;drawNativeZones();document.getElementById('zoneMsg').textContent='Frame ready. Drag on the frame to draw; drag a point to refine.';}};
       image.onerror=()=>document.getElementById('zoneMsg').textContent='Could not load a camera frame.';
-      image.src=`/snapshot?camera_id=${{encodeURIComponent(id)}}&t=${{Date.now()}}`;
+      image.src=`/setup/snapshot?camera_id=${{encodeURIComponent(id)}}&t=${{Date.now()}}`;
     }}
     async function loadNativeZoneEditor() {{
       const sourceData=await (await fetch('/sources')).json();
@@ -1522,7 +1532,7 @@ def build_app(
       if(event.button!==0)return;const point=nativePoint(event);
       const index=nativePoints.findIndex(p=>Math.hypot(p[0]-point[0],p[1]-point[1])<.025);
       nativeCanvas.setPointerCapture(event.pointerId);
-      if(index>=0){{nativeDragPoint=index;nativeResizeAnchor=nativePoints[(index+2)%4];nativeCanvas.style.cursor='nwse-resize';return;}}
+      if(index>=0 && nativePoints.length===4){{nativeDragPoint=index;nativeResizeAnchor=nativePoints[(index+2)%nativePoints.length];nativeCanvas.style.cursor='nwse-resize';return;}}
       if(nativePoints.length>=3 && nativePointInPolygon(point,nativePoints)) {{
         nativeMoveStart=point;nativeMovePoints=nativePoints.map(p=>[...p]);nativeCanvas.style.cursor='move';return;
       }}
@@ -1691,7 +1701,7 @@ def build_app(
 
     async function tick() {{
       try {{
-        const s = await (await fetch('/status')).json();
+        const s = await (await fetch('/setup/wizard/status')).json();
         setCaptureButtons(Boolean(s.capturePaused));
         const rg = document.getElementById('runtime-grid');
         if (rg) rg.innerHTML = RUNTIME_FIELDS.map(([k,l]) =>

@@ -99,6 +99,7 @@ class CapturePipeline:
         self._zone_mask_shape: tuple[int, int] | None = None
         self._zone_loaded_at = 0.0
         self._zone_loaded_revision = -1
+        self._zone_fetch_failures = 0
         self._zone_signature = ""
         self._reference_frame_publisher = reference_frame_publisher
         self._reference_frame_pending = False
@@ -307,11 +308,15 @@ class CapturePipeline:
             if self._zone_points and signature != self._zone_signature:
                 self._reference_frame_pending = True
             self._zone_signature = signature
+            self._zone_fetch_failures = 0
         except Exception as exc:  # noqa: BLE001
-            self._zone_points = []
             self._zone_loaded_revision = revision
             self._zone_loaded_at = now
+            self._zone_fetch_failures += 1
             self.state.log(f"WARNING: could not refresh camera zones: {exc}")
+            if self._zone_points and self._zone_fetch_failures < 3:
+                return
+            self._zone_points = []
         height, width = frame_shape
         mask = np.zeros((height, width), dtype=np.uint8)
         for polygon in self._zone_points:

@@ -324,7 +324,7 @@ WIZARD_HTML = """<!DOCTYPE html>
         if(document.getElementById('zoneCamera').value!==id)return;
         show(document.getElementById('zoneMsg'),false,'Could not capture a frame. Check the source, then click Refresh frame.');
       };
-      img.src=`/snapshot?camera_id=${id}&t=${Date.now()}`;
+      img.src=`/setup/snapshot?camera_id=${id}&t=${Date.now()}`;
     }
     function renderZoneList() {
       document.getElementById('zoneList').innerHTML=zones.map(z =>
