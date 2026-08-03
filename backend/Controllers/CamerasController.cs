@@ -16,10 +16,18 @@ public class CamerasController : ControllerBase
 {
     private readonly OnevoDbContext _db;
     private readonly ConnectorAuthenticationService _connectorAuth;
-    public CamerasController(OnevoDbContext db, ConnectorAuthenticationService connectorAuth)
+    private readonly S3Service _s3;
+    private readonly ILogger<CamerasController> _logger;
+    public CamerasController(
+        OnevoDbContext db,
+        ConnectorAuthenticationService connectorAuth,
+        S3Service s3,
+        ILogger<CamerasController> logger)
     {
         _db = db;
         _connectorAuth = connectorAuth;
+        _s3 = s3;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -41,6 +49,44 @@ public class CamerasController : ControllerBase
         if (cam is null) return NotFound();
         if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
         return Ok(cam);
+    }
+
+    [HttpGet("{id:guid}/reference-frame")]
+    public async Task<IActionResult> ReferenceFrame(Guid id)
+    {
+        var cam = await _db.Cameras.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+        if (cam is null) return NotFound();
+        if (!TenantAccess.CanAccessStore(User, cam.StoreId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(cam.ReferenceFrameObjectKey))
+            return NotFound(new { error = "No saved reference frame" });
+        try
+        {
+            if (cam.ReferenceFrameCapturedAt is { } capturedAt)
+                Response.Headers["X-ONEVO-Frame-Captured-At"] = capturedAt.ToString("O");
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
+            Response.Headers.CacheControl = "private, max-age=60";
+            Response.ContentType = "image/jpeg";
+            await _s3.CopyToAsync(
+                cam.ReferenceFrameObjectKey,
+                Response.Body,
+                HttpContext.RequestAborted);
+            return new EmptyResult();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Reference frame {ObjectKey} for camera {CameraId} could not be read",
+                cam.ReferenceFrameObjectKey,
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "Saved reference frame is temporarily unavailable" });
+        }
     }
 
     [HttpPost]

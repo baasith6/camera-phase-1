@@ -51,6 +51,11 @@ export class ApiService {
   getCamera(id: string): Observable<Camera> {
     return this.http.get<Camera>(`${API_BASE}/api/cameras/${id}`);
   }
+  getCameraReferenceFrame(id: string): Observable<Blob> {
+    return this.http.get(`${API_BASE}/api/cameras/${id}/reference-frame`, {
+      responseType: 'blob',
+    });
+  }
   createCamera(storeId: string, name: string, rtspUrl: string,
                onvifHost?: string, onvifPort?: number): Observable<Camera> {
     return this.http.post<Camera>(`${API_BASE}/api/cameras`,
@@ -79,6 +84,11 @@ export class ApiService {
   }
   createZone(cameraId: string, name: string, zoneType: string, polygonJson: string): Observable<Zone> {
     return this.http.post<Zone>(`${API_BASE}/api/zones`, { cameraId, name, zoneType, polygonJson });
+  }
+  updateZone(id: string, body: {
+    name?: string; zoneType?: string; polygonJson?: string;
+  }): Observable<Zone> {
+    return this.http.put<Zone>(`${API_BASE}/api/zones/${id}`, body);
   }
   deleteZone(id: string): Observable<void> {
     return this.http.delete<void>(`${API_BASE}/api/zones/${id}`);
@@ -146,6 +156,10 @@ export class ApiService {
   listConnectors(storeId?: string): Observable<Connector[]> {
     const q = storeId ? `?storeId=${storeId}` : '';
     return this.http.get<Connector[]>(`${API_BASE}/api/connectors${q}`);
+  }
+  markConnectorUninstalled(id: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(
+      `${API_BASE}/api/connectors/${id}/mark-uninstalled`, {});
   }
 
   getPipelineHealth(): Observable<PipelineHealth> {

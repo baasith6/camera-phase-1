@@ -13,6 +13,7 @@ import tempfile
 import time
 
 import redis
+import torch
 
 from .backend_client import BackendClient
 from .config import Config
@@ -51,6 +52,12 @@ def process_job(job: dict, cfg: Config, store: ClipStore, detector: DetectorBack
 
 
 def main() -> None:
+    # CPU inference libraries otherwise use every host core. One worker is
+    # intentionally bounded so the shop/backend Docker stack stays responsive.
+    inference_threads = max(1, int(os.getenv("CLOUD_AI_CPU_THREADS", "2")))
+    torch.set_num_threads(inference_threads)
+    torch.set_num_interop_threads(1)
+
     cfg = Config.load()
     host, _, port = cfg.redis_connection.partition(":")
     r = redis.Redis(
@@ -70,7 +77,12 @@ def main() -> None:
         f"[cloud-ai] YOLOE prompts ({len(active_prompts)}): {', '.join(active_prompts.keys())}",
         flush=True,
     )
-    reid_extractor = ReIDExtractor(device=cfg.device)
+    enable_reid = os.getenv("CLOUD_AI_ENABLE_REID", "false").lower() == "true"
+    reid_extractor = ReIDExtractor(device=cfg.device) if enable_reid else None
+    print(
+        f"[cloud-ai] CPU threads={inference_threads}, ReID={'enabled' if enable_reid else 'disabled'}",
+        flush=True,
+    )
     print("[cloud-ai] ready, waiting for clip jobs", flush=True)
 
     while True:

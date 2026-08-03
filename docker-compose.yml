@@ -84,9 +84,8 @@ services:
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
       CloudAi__ServiceKey: ${CLOUD_AI_SERVICE_KEY:-${CONNECTOR_BOOTSTRAP_KEY}}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
-      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.12}
+      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.18}
       ConnectorInstaller__Path: /app/connector-dist
-      ConnectorInstaller__DownloadUrl: ${CONNECTOR_INSTALLER_URL:-}
       Smtp__Enabled: ${SMTP_ENABLE:-false}
       Smtp__Host: ${SMTP_HOST:-smtp.gmail.com}
       Smtp__Port: ${SMTP_PORT:-587}
@@ -100,8 +99,10 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      # Windows installer EXE (built by connector/installer/build.ps1, moved to installer-site for Vercel deploy) served via GET /api/connectors/installer
-      - ./installer-site:/app/connector-dist:ro
+      # Serve the exact artifact created by connector/installer/build.ps1.
+      # Keeping this mapped to connector/dist prevents dashboard downloads from
+      # serving a stale or missing EXE after a connector rebuild.
+      - ./connector/dist:/app/connector-dist:ro
 
   cloud-ai:
     build: ./cloud-ai
@@ -125,6 +126,12 @@ services:
       CLOUD_AI_DEVICE: ${CLOUD_AI_DEVICE}
       CLOUD_AI_YOLOE_PROMPTS: ${CLOUD_AI_YOLOE_PROMPTS}
       CLOUD_AI_SERVICE_KEY: ${CLOUD_AI_SERVICE_KEY:-${CONNECTOR_BOOTSTRAP_KEY}}
+      CLOUD_AI_CPU_THREADS: ${CLOUD_AI_CPU_THREADS:-2}
+      CLOUD_AI_ENABLE_REID: ${CLOUD_AI_ENABLE_REID:-false}
+      OMP_NUM_THREADS: ${CLOUD_AI_CPU_THREADS:-2}
+      MKL_NUM_THREADS: ${CLOUD_AI_CPU_THREADS:-2}
+      OPENBLAS_NUM_THREADS: ${CLOUD_AI_CPU_THREADS:-2}
+    cpus: 2.0
 
   # Angular dashboard â€” served by nginx, proxies /api â†’ backend
   dashboard:

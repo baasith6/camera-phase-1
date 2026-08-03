@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+
 from app.capture import CapturePipeline, validate_rtsp_stream
 from app.config import Config
 from app.onvif_client import OnvifCamera, _inject_credentials
@@ -225,6 +227,31 @@ class OrchestratorRestartTests(unittest.TestCase):
             "C:\\ProgramData\\ONEVO\\Connector\\media\\demo.mp4",
         )
         self.assertTrue(pipeline_cfg.loop)
+
+
+class ZoneGatedMotionTests(unittest.TestCase):
+    def test_motion_outside_saved_zone_does_not_trigger(self):
+        cfg = _minimal_cfg(motion_area_frac=0.02)
+        state = RuntimeState()
+        zones = [{
+            "polygonJson": "[[0.0,0.0],[0.5,0.0],[0.5,0.5],[0.0,0.5]]",
+        }]
+        pipeline = CapturePipeline(cfg, state, zone_provider=lambda: zones)
+        pipeline._refresh_zones((100, 100))
+
+        inside = np.zeros((100, 100), dtype=np.uint8)
+        inside[10:30, 10:30] = 255
+        outside = np.zeros((100, 100), dtype=np.uint8)
+        outside[70:90, 70:90] = 255
+
+        self.assertTrue(pipeline._has_motion(inside))
+        self.assertFalse(pipeline._has_motion(outside))
+
+    def test_camera_without_saved_zone_fails_closed(self):
+        cfg = _minimal_cfg()
+        pipeline = CapturePipeline(cfg, RuntimeState(), zone_provider=lambda: [])
+        pipeline._refresh_zones((40, 40))
+        self.assertFalse(pipeline._has_motion(np.full((40, 40), 255, dtype=np.uint8)))
 
 
 if __name__ == "__main__":

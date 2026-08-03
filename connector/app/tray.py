@@ -9,11 +9,14 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
+from .baked_config import BAKED_BACKEND_URL
 from .instance_lock import InstanceLock
 from .paths import default_state_dir, install_dir, pause_marker_path
+from .store import LocalStore
 
 
 SERVICE_NAME = "ONEVOConnector"
@@ -22,10 +25,10 @@ HEALTH_URL = "http://127.0.0.1:8099/health"
 TRAY_LOCK = "tray.lock"
 TRAY_EXIT_SIGNAL = "tray.exit"
 STARTUP_VALUE = "ONEVO Connector Tray"
-CURRENT_VERSION = "1.1.12"
+CURRENT_VERSION = "1.1.18"
 UPDATE_MANIFEST_URL = os.getenv(
     "CONNECTOR_UPDATE_MANIFEST_URL",
-    "https://installer-site-one.vercel.app/latest.json",
+    f"{BAKED_BACKEND_URL.rstrip('/')}/api/connectors/updates/latest",
 )
 UPDATE_CHECK_SECONDS = 6 * 60 * 60
 UPDATE_PROMPT_FILE = "update-prompted-version.txt"
@@ -117,7 +120,7 @@ def health_ready(timeout: float = 1.5) -> bool:
         return False
 
 
-def wait_for_health(max_wait: float = 30.0, interval: float = 1.0) -> bool:
+def wait_for_health(max_wait: float = 60.0, interval: float = 1.0) -> bool:
     deadline = time.monotonic() + max_wait
     while time.monotonic() < deadline:
         if health_ready():
@@ -126,20 +129,24 @@ def wait_for_health(max_wait: float = 30.0, interval: float = 1.0) -> bool:
     return health_ready()
 
 
-def open_admin(max_wait: float = 30.0) -> bool:
+def open_admin(max_wait: float = 60.0, url: str = DEFAULT_ADMIN_URL) -> bool:
     """Ensure the service is available, then open the local dashboard."""
     if not health_ready():
-        if service_status() == "stopped":
-            if pause_marker_path().exists():
+        status = service_status()
+        if pause_marker_path().exists() or status == "missing":
+            if not request_resume_monitoring():
                 return False
-            service_action("start")
+        elif status == "stopped":
+            if not service_action("start"):
+                return False
         if not wait_for_health(max_wait=max_wait):
             return False
-    return bool(webbrowser.open(DEFAULT_ADMIN_URL))
+    # The local page elects one active tab before subscribing to live video.
+    return bool(webbrowser.open(url))
 
 
 def resume_monitoring(max_wait: float = 30.0) -> bool:
-    """Clear persistent pause, restore automatic startup, and start the service."""
+    """Clear persistent pause, repair the service if needed, then start it."""
     try:
         pause_marker_path().unlink(missing_ok=True)
         from .store import LocalStore
@@ -152,6 +159,8 @@ def resume_monitoring(max_wait: float = 30.0) -> bool:
     status = service_status()
     if status == "running":
         return health_ready()
+    if status == "missing" and not service_action("install"):
+        return False
     return service_action("start") and wait_for_health(max_wait=max_wait)
 
 
@@ -246,6 +255,16 @@ class TrayApplication:
         self.update_busy = False
         self._last_update_check = 0.0
 
+    def _connector_headers(self) -> dict[str, str]:
+        store = LocalStore(str(self.state_dir))
+        try:
+            return {
+                "X-Connector-Id": store.get_cred("connector_id") or "",
+                "X-Connector-Key": store.get_cred("api_key") or "",
+            }
+        finally:
+            store.close()
+
     def _prompted_update_version(self) -> str:
         try:
             return (self.state_dir / UPDATE_PROMPT_FILE).read_text(
@@ -261,28 +280,13 @@ class TrayApplication:
         )
 
     def _prompt_for_update(self, version: str) -> None:
-        """Prompt once per version. Cancel keeps only the tray menu item."""
-        if os.name != "nt" or self._prompted_update_version() == version:
+        """Show one non-blocking toast; the tray menu keeps the deferred action."""
+        if self._prompted_update_version() == version:
             return
         self._mark_update_prompted(version)
-        import ctypes
-        MB_YESNO = 0x00000004
-        MB_ICONINFORMATION = 0x00000040
-        MB_SETFOREGROUND = 0x00010000
-        IDYES = 6
-        choice = ctypes.windll.user32.MessageBoxW(
-            None,
-            (
-                f"ONEVO Connector {version} is available.\n\n"
-                "Install this update now?\n\n"
-                "Choose No to keep it available in the tray without "
-                "showing this popup again."
-            ),
-            "ONEVO Connector Update",
-            MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND,
+        self._notify(
+            f"Version {version} is available. Select “Update available” in the tray when ready."
         )
-        if choice == IDYES:
-            self._install_update()
 
     @staticmethod
     def _version_tuple(value: str) -> tuple[int, ...]:
@@ -294,7 +298,11 @@ class TrayApplication:
 
     def _check_updates(self, notify: bool = True) -> None:
         try:
-            response = requests.get(UPDATE_MANIFEST_URL, timeout=15)
+            response = requests.get(
+                UPDATE_MANIFEST_URL,
+                headers=self._connector_headers(),
+                timeout=15,
+            )
             response.raise_for_status()
             metadata = response.json()
             latest = str(metadata.get("version") or "").strip()
@@ -326,8 +334,19 @@ class TrayApplication:
                 download_url = str(metadata.get("downloadUrl") or "").strip()
                 expected_hash = str(metadata.get("sha256") or "").strip().lower()
                 expected_size = int(metadata.get("sizeBytes") or 0)
-                if not download_url.lower().startswith("https://"):
-                    raise RuntimeError("The update download URL is not secure.")
+                manifest_origin = urlsplit(UPDATE_MANIFEST_URL)
+                download_origin = urlsplit(download_url)
+                same_backend = (
+                    manifest_origin.scheme == download_origin.scheme
+                    and manifest_origin.netloc == download_origin.netloc
+                )
+                local_host = (download_origin.hostname or "") in (
+                    "localhost", "127.0.0.1", "::1"
+                )
+                if download_origin.scheme != "https" and not (
+                    download_origin.scheme == "http" and same_backend and local_host
+                ):
+                    raise RuntimeError("The update URL is not from the ONEVO backend.")
                 update_dir = self.state_dir.parent / "updates"
                 update_dir.mkdir(parents=True, exist_ok=True)
                 target = update_dir / f"ONEVO-Connector-Update-{self.latest_version}.exe"
@@ -335,7 +354,12 @@ class TrayApplication:
                 digest = hashlib.sha256()
                 received = 0
                 self._notify(f"Downloading ONEVO Connector {self.latest_version}...")
-                with requests.get(download_url, stream=True, timeout=(15, 120)) as response:
+                with requests.get(
+                    download_url,
+                    headers=self._connector_headers(),
+                    stream=True,
+                    timeout=(15, 120),
+                ) as response:
                     response.raise_for_status()
                     with partial.open("wb") as output:
                         for chunk in response.iter_content(1024 * 1024):
@@ -375,7 +399,18 @@ class TrayApplication:
     def _refresh_status(self) -> None:
         service = service_status()
         if service == "running":
-            self.status = "Running" if health_ready() else "Starting"
+            if not health_ready():
+                self.status = "Starting"
+            else:
+                try:
+                    local_status = requests.get(
+                        f"{DEFAULT_ADMIN_URL}status", timeout=1.5
+                    ).json()
+                    self.status = (
+                        "Stopped" if local_status.get("capturePaused") else "Running"
+                    )
+                except (requests.RequestException, ValueError):
+                    self.status = "Starting"
         elif service == "starting":
             self.status = "Starting"
         elif service == "stopped":
@@ -410,6 +445,15 @@ class TrayApplication:
             self._refresh_status()
         threading.Thread(target=worker, daemon=True).start()
 
+    def _open_zones(self, _icon=None, _item=None) -> None:
+        def worker():
+            if not open_admin(url=f"{DEFAULT_ADMIN_URL}#zones"):
+                self._notify(
+                    "Local zone editor is not ready. Check the ONEVO Connector service."
+                )
+            self._refresh_status()
+        threading.Thread(target=worker, daemon=True).start()
+
     def _start_monitoring(self, _icon=None, _item=None) -> None:
         def worker():
             self.status = "Starting"
@@ -421,6 +465,20 @@ class TrayApplication:
                     webbrowser.open(DEFAULT_ADMIN_URL)
             else:
                 self._notify("Administrator approval is required to start monitoring.")
+            self._refresh_status()
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _pause_monitoring(self, _icon=None, _item=None) -> None:
+        """Pause through the same local API used by the connector page."""
+        def worker():
+            try:
+                response = requests.post(
+                    f"{DEFAULT_ADMIN_URL}capture/pause", timeout=10
+                )
+                response.raise_for_status()
+                self._notify("Monitoring is stopping. Use Start monitoring when ready.")
+            except requests.RequestException:
+                self._notify("Could not pause monitoring. Open the local connector page for details.")
             self._refresh_status()
         threading.Thread(target=worker, daemon=True).start()
 
@@ -489,9 +547,18 @@ class TrayApplication:
                     visible=lambda _item: self.update_available,
                 ),
                 pystray.MenuItem(
-                    "Open Local Dashboard",
+                    "Open Connector",
                     self._open_dashboard,
                     default=True,
+                ),
+                pystray.MenuItem("Edit Zones", self._open_zones),
+                pystray.MenuItem(
+                    "Pause monitoring",
+                    self._pause_monitoring,
+                    visible=lambda _item: (
+                        not pause_marker_path().exists() and
+                        service_status() == "running"
+                    ),
                 ),
                 pystray.MenuItem(
                     "Start monitoring",

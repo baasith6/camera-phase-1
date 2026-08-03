@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
@@ -6,7 +6,7 @@ import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models
 import { ConfirmDialogService } from '../../shared/confirm-dialog.service';
 
 @Injectable()
-export class SetupContextService {
+export class SetupContextService implements OnDestroy {
   step = 1;
   readonly steps = [
     { id: 1, label: 'Connect shop PC' },
@@ -52,6 +52,7 @@ export class SetupContextService {
   loadingSnapshot = false;
   snapshotError = '';
   snapshotImg: HTMLImageElement | null = null;
+  private referenceFrameUrl: string | null = null;
 
   generatingCode = false;
   setupCodeError = '';
@@ -67,6 +68,10 @@ export class SetupContextService {
     private router: Router,
     private confirm: ConfirmDialogService,
   ) {}
+
+  ngOnDestroy(): void {
+    this.clearReferenceFrameUrl();
+  }
 
   get liveSnapshotUrl(): string {
     return this.cameraId
@@ -206,10 +211,10 @@ export class SetupContextService {
     this.rectStart = null;
     this.rectCurrent = null;
     this.snapshotImg = null;
+    this.clearReferenceFrameUrl();
     this.snapshotError = '';
     this.api.getCamera(id).subscribe((cam) => {
       this.selectedCamera = cam;
-      if (cam.onvifHost) this.connectorAdminHost = cam.onvifHost;
       this.loadSnapshot(onLoaded);
     });
     this.api.listZones(id).subscribe((z) => {
@@ -223,18 +228,48 @@ export class SetupContextService {
     this.loadingSnapshot = true;
     this.snapshotError = '';
     const img = new Image();
-    img.src = `http://${this.connectorAdminHost}:8099/snapshot?camera_id=${this.cameraId}&t=${Date.now()}`;
+    img.src = `http://${this.connectorAdminHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId}&t=${Date.now()}`;
     img.onload = () => {
       this.snapshotImg = img;
       this.loadingSnapshot = false;
       onLoaded?.();
     };
     img.onerror = () => {
-      this.snapshotImg = null;
-      this.loadingSnapshot = false;
-      this.snapshotError = `No frame from connector (${this.connectorAdminHost}:8099). Is the connector running with this camera?`;
-      onLoaded?.();
+      this.loadReferenceFrame(onLoaded);
     };
+  }
+
+  private loadReferenceFrame(onLoaded?: () => void): void {
+    this.api.getCameraReferenceFrame(this.cameraId).subscribe({
+      next: (blob) => {
+        this.clearReferenceFrameUrl();
+        this.referenceFrameUrl = URL.createObjectURL(blob);
+        const saved = new Image();
+        saved.onload = () => {
+          this.snapshotImg = saved;
+          this.loadingSnapshot = false;
+          this.snapshotError = '';
+          onLoaded?.();
+        };
+        saved.onerror = () => this.finishSnapshotError(onLoaded);
+        saved.src = this.referenceFrameUrl;
+      },
+      error: () => this.finishSnapshotError(onLoaded),
+    });
+  }
+
+  private finishSnapshotError(onLoaded?: () => void): void {
+    this.snapshotImg = null;
+    this.loadingSnapshot = false;
+    this.snapshotError =
+      `No live or saved frame for this camera. Connector ${this.connectorAdminHost}:${this.connectorAdminPort} is unavailable.`;
+    onLoaded?.();
+  }
+
+  private clearReferenceFrameUrl(): void {
+    if (!this.referenceFrameUrl) return;
+    URL.revokeObjectURL(this.referenceFrameUrl);
+    this.referenceFrameUrl = null;
   }
 
   addStore(): void {

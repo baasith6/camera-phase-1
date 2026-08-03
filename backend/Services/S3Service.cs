@@ -86,4 +86,33 @@ public class S3Service
             // Best-effort — object may already be gone.
         }
     }
+
+    public async Task CopyToAsync(
+        string objectKey,
+        Stream destination,
+        CancellationToken cancellationToken)
+    {
+        await _internal.GetObjectAsync(new GetObjectArgs()
+            .WithBucket(_opts.Bucket)
+            .WithObject(objectKey)
+            .WithCallbackStream(stream =>
+                stream.CopyToAsync(destination, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult()),
+            cancellationToken);
+    }
+
+    public async Task PutBytesAsync(
+        string objectKey,
+        Stream content,
+        long length,
+        string contentType)
+    {
+        await _internal.PutObjectAsync(new PutObjectArgs()
+            .WithBucket(_opts.Bucket)
+            .WithObject(objectKey)
+            .WithStreamData(content)
+            .WithObjectSize(length)
+            .WithContentType(contentType));
+    }
 }

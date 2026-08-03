@@ -4,12 +4,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.main import _provision_native_installer
+from app.main import _provision_native_installer, _reconcile_paired_wizard
 from app.paths import (
     CameraSource,
+    PendingZone,
     WizardConfig,
     apply_pending_source_update,
     load_wizard_config,
+    normalize_polygon,
     save_wizard_config,
 )
 from app.provisioning import provision_sources, source_key_for
@@ -75,8 +77,82 @@ class InstallerConfigParsingTests(unittest.TestCase):
         self.assertEqual(cfg.sources[1].source_file, r"C:\videos\two.mp4")
         self.assertTrue(all(source.loop for source in cfg.sources))
 
+    def test_normalizes_legacy_pending_zone_points(self):
+        cfg = WizardConfig(
+            sources=[CameraSource(name="Camera 1", rtsp_url="rtsp://camera/live")],
+            pending_zones=[
+                PendingZone(
+                    source_index=0,
+                    name="High-value shelf",
+                    zone_type="HighValue",
+                    polygon=normalize_polygon([
+                        {"x": 0.1, "y": 0.2},
+                        {"x": 0.7, "y": 0.2},
+                        {"x": 0.7, "y": 0.8},
+                    ]),
+                )
+            ],
+        )
+
+        restored = WizardConfig.from_dict(cfg.to_dict())
+
+        self.assertEqual(restored.pending_zones[0].source_index, 0)
+        self.assertEqual(restored.pending_zones[0].zone_type, "HighValue")
+        self.assertEqual(restored.pending_zones[0].polygon, [[0.1, 0.2], [0.7, 0.2], [0.7, 0.8]])
+
 
 class NativeProvisioningTests(unittest.TestCase):
+    def test_paired_connector_clears_stale_setup_code_and_error(self):
+        wizard = WizardConfig.from_dict({
+            "setup_code": "USED-CODE",
+            "activation_error": "Invalid, used, or expired setup code",
+            "setup_complete": True,
+        })
+        credentials = {"connector_id": "existing-id", "api_key": "existing-key"}
+        store = SimpleNamespace(get_cred=lambda key: credentials.get(key))
+
+        with patch("app.main.save_wizard_config") as save:
+            result = _reconcile_paired_wizard(wizard, store)
+
+        self.assertIs(result, wizard)
+        self.assertEqual(wizard.setup_code, "")
+        self.assertEqual(wizard.activation_error, "")
+        save.assert_called_once_with(wizard)
+
+    def test_paired_connector_never_claims_a_new_setup_code(self):
+        wizard = WizardConfig.from_dict({
+            "setup_code": "DIFFERENT-STORE-CODE",
+            "connector_name": "Store Connector",
+            "sources": [],
+        })
+        credentials = {"connector_id": "existing-id", "api_key": "existing-key"}
+        claims = []
+        used = []
+        client = SimpleNamespace(
+            claim_setup_code=lambda *_: claims.append(True),
+            set_credentials=lambda cid, key: used.append((cid, key)),
+        )
+        store = SimpleNamespace(
+            get_cred=lambda key: credentials.get(key),
+            set_cred=lambda key, value: credentials.__setitem__(key, value),
+        )
+        state = SimpleNamespace(
+            connector_id=None, paired=False, degraded_reason=None, log=lambda *_: None
+        )
+        runtime_cfg = SimpleNamespace(version="1.1.16")
+
+        with patch("app.main.save_wizard_config"), patch(
+            "app.provisioning.paths.save_wizard_config"
+        ):
+            ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
+
+        self.assertTrue(ok)
+        self.assertEqual(claims, [])
+        self.assertEqual(used, [("existing-id", "existing-key")])
+        self.assertEqual(state.connector_id, "existing-id")
+        self.assertTrue(state.paired)
+        self.assertEqual(wizard.setup_code, "")
+
     def test_native_installer_can_skip_camera_sources(self):
         wizard = WizardConfig.from_dict({
             "setup_code": "ABCD-EFGH",
@@ -106,7 +182,7 @@ class NativeProvisioningTests(unittest.TestCase):
         self.assertEqual(wizard.sources, [])
         self.assertEqual(stored["connector_id"], "connector-id")
 
-    def test_selected_mp4_is_created_and_setup_is_completed(self):
+    def test_selected_mp4_waits_for_browser_zone_setup(self):
         with tempfile.TemporaryDirectory() as temp:
             video = Path(temp) / "selected.mp4"
             video.write_bytes(b"video")
@@ -139,11 +215,52 @@ class NativeProvisioningTests(unittest.TestCase):
                 ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
             self.assertTrue(ok)
-            self.assertTrue(wizard.setup_complete)
+            self.assertFalse(wizard.setup_complete)
             self.assertEqual(created[0]["rtspUrl"], f"file://{video}")
-            self.assertTrue(created[0]["useDemoZones"])
             self.assertEqual(finalized, [[wizard.sources[0].source_key]])
             self.assertEqual(stored["connector_id"], "connector-id")
+
+    def test_native_installer_zones_sync_after_camera_creation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            video = Path(temp) / "selected.mp4"
+            video.write_bytes(b"video")
+            polygon = [[0.1, 0.1], [0.8, 0.1], [0.8, 0.8]]
+            wizard = WizardConfig(
+                setup_code="ABCD-EFGH",
+                sources=[CameraSource(name="Video", source_file=str(video), loop=True)],
+                pending_zones=[
+                    PendingZone(0, "Checkout counter", "Checkout", polygon)
+                ],
+            )
+            zones = []
+            stored = {}
+            client = SimpleNamespace(
+                claim_setup_code=lambda *_: ("connector-id", "api-key", "store-id"),
+                set_credentials=lambda *_: None,
+                create_camera=lambda *_: {"id": "camera-id"},
+                create_zone=lambda *args: zones.append(args) or {"id": "zone-id"},
+                finalize_setup=lambda *_: {"ok": True},
+            )
+            store = SimpleNamespace(
+                set_cred=lambda key, value: stored.__setitem__(key, value),
+                get_cred=lambda key: stored.get(key),
+            )
+            state = SimpleNamespace(
+                connector_id=None, paired=False, degraded_reason=None, log=lambda *_: None
+            )
+
+            with patch("app.main.save_wizard_config"), patch(
+                "app.provisioning.paths.save_wizard_config"
+            ):
+                ok = _provision_native_installer(
+                    SimpleNamespace(version="1.1.18"), wizard, client, store, state
+                )
+
+            self.assertTrue(ok)
+            self.assertEqual(
+                zones, [("camera-id", "Checkout counter", "Checkout", polygon)]
+            )
+            self.assertEqual(wizard.pending_zones, [])
 
     def test_rtsp_camera_does_not_request_demo_zones(self):
         wizard = WizardConfig.from_dict({
@@ -176,7 +293,6 @@ class NativeProvisioningTests(unittest.TestCase):
             ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
         self.assertTrue(ok)
-        self.assertFalse(created[0]["useDemoZones"])
         self.assertEqual(len(finalized), 1)
 
     def test_pending_native_setup_retries_with_saved_credentials(self):
@@ -206,7 +322,7 @@ class NativeProvisioningTests(unittest.TestCase):
             ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
         self.assertTrue(ok)
-        self.assertTrue(wizard.setup_complete)
+        self.assertFalse(wizard.setup_complete)
         self.assertEqual(credentials["used_connector_id"], "connector-id")
 
     def test_retry_reuses_backend_camera_after_partial_failure(self):
