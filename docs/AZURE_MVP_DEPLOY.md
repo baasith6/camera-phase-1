@@ -121,6 +121,35 @@ Manual deploy: Actions → **Deploy MVP (Azure)** → Run workflow.
 - [ ] Shop PC: `Test-NetConnection <VM_IP> -Port 9000` succeeds (MinIO clip uploads)
 - [ ] Connector online on Setup page
 - [ ] Test alert + email (`SMTP_ENABLE=true`)
+- [ ] Cloud-ai YOLOE prompts loaded (see section 4b below)
+
+## 4b. Verify cloud-ai / YOLOE prompts
+
+The `cloud-ai` worker uses **YOLOE** open-vocabulary prompts baked into [`cloud-ai/app/detector.py`](../cloud-ai/app/detector.py) unless `CLOUD_AI_YOLOE_PROMPTS` is set in `.env`.
+
+**Default (recommended):** leave `CLOUD_AI_YOLOE_PROMPTS` empty — 12 prompt phrases including jacket concealment (`concealment` cue).
+
+| Prompt phrase | Production cue | Old eval JSON cue |
+|---------------|------------------|-------------------|
+| person hiding item inside jacket | `concealment` | `open_bag` |
+| person putting object under clothing | `concealment` | `open_bag` |
+| hand inside jacket | `concealment` | `open_bag` |
+| All other 9 prompts | same | same |
+
+[`cloud-ai/eval/results_jacket_prompts.json`](../cloud-ai/eval/results_jacket_prompts.json) is a **local eval artifact**, not read at runtime. Re-run `python -m eval.run_jacket_test` after prompt changes to refresh it.
+
+**On the VM after deploy:**
+
+```bash
+cd /opt/onevo/app
+docker logs app-cloud-ai-1 --tail 30
+# Expect: "YOLOE prompts (12): person, backpack, ..." and no repeated Redis socket timeouts
+
+docker exec app-cloud-ai-1 python -c "from app.detector import DEFAULT_YOLOE_PROMPTS; print(len(DEFAULT_YOLOE_PROMPTS))"
+# Expect: 12
+```
+
+**End-to-end:** upload a clip from the connector → `docker logs app-cloud-ai-1` shows `processing clip ...` → alert in dashboard if score ≥ 70.
 
 ## 5. Troubleshooting
 
@@ -133,6 +162,8 @@ Manual deploy: Actions → **Deploy MVP (Azure)** → Run workflow.
 | Deploy SSH fails | Verify `VM_SSH_KEY`, NSG allows SSH from GitHub Actions IPs (or use self-hosted runner in same VNet) |
 | Clip upload timeout (`:9000`) | NSG must allow **9000**; set `S3_PUBLIC_ENDPOINT=http://<VM_IP>:9000` in `.env`; test `curl http://<VM_IP>:9000/minio/health/live` from shop PC |
 | Connector `disk_critical` on shop PC | Free C: drive space; clear `%ProgramData%\ONEVO\Connector\data\clips` |
+| Cloud-ai `Timeout reading from socket` | Fixed in cloud-ai worker (Redis `socket_timeout=None`); redeploy cloud-ai image |
+| YOLOE prompts not as expected | Check startup log for prompt list; override via `CLOUD_AI_YOLOE_PROMPTS` only if needed |
 
 ## 6. Files reference
 

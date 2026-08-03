@@ -1,303 +1,353 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink, ActivatedRoute } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
-import { API_BASE } from '../../core/api.config';
+import { LiveAlertsService } from '../../core/live-alerts.service';
+import { StoreContextService } from '../../core/store-context.service';
 import { Alert, Store } from '../../core/models';
+import { alertTypeLabel, pillLabel, relativeTime } from '../../shared/alert-labels';
+import { AlertReviewPaneComponent } from '../../shared/alert-review-pane.component';
+import { ConfirmDialogService } from '../../shared/confirm-dialog.service';
+import {
+  BulkActionBarComponent,
+  DataTableComponent,
+  EmptyStateComponent,
+  ErrorBannerComponent,
+  FilterBarComponent,
+  PageContainerComponent,
+  PageHeaderComponent,
+  SkeletonListComponent,
+} from '../../shared/ui-components';
+import { StatusBadgeComponent } from '../../shared/status-badge.component';
+import { StatusPillComponent } from '../../shared/status-pill.component';
+
+type QuickFilter = '' | 'pending' | 'high' | 'today';
 
 @Component({
   selector: 'app-alerts',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe],
+  imports: [
+    FormsModule,
+    DatePipe,
+    PageHeaderComponent,
+    PageContainerComponent,
+    StatusBadgeComponent,
+    StatusPillComponent,
+    BulkActionBarComponent,
+    DataTableComponent,
+    EmptyStateComponent,
+    FilterBarComponent,
+    SkeletonListComponent,
+    ErrorBannerComponent,
+    AlertReviewPaneComponent,
+  ],
   template: `
-    <div class="header-row">
-      <div style="display:flex;align-items:center;gap:.75rem">
-        <h2>Alerts</h2>
-        <span class="live-badge" [class.connected]="sseConnected">
-          <span class="dot"></span>{{ sseConnected ? 'Live' : 'Offline' }}
-        </span>
-      </div>
-      <div class="filters">
-        <select [(ngModel)]="storeId" (change)="load()">
-          <option value="">All stores</option>
-          @for (s of stores; track s.id) { <option [value]="s.id">{{ s.name }}</option> }
-        </select>
-        <select [(ngModel)]="status" (change)="load()">
-          <option value="">All statuses</option>
-          <option value="PendingReview">Pending review</option>
-          <option value="Confirmed">Confirmed</option>
-          <option value="Dismissed">Dismissed</option>
-          <option value="FalsePositive">False positive</option>
-          <option value="NeedsFollowUp">Needs follow-up</option>
-        </select>
-        <button class="ghost" (click)="load()">Refresh</button>
-      </div>
-    </div>
+    <app-page-container>
+      <app-page-header title="Review" subtitle="Review flagged activity from your cameras">
+        <div actions>
+          <app-filter-bar>
+            <select [(ngModel)]="status" (change)="load()" aria-label="Status filter">
+              <option value="PendingReview">Needs review</option>
+              <option value="">All statuses</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="Dismissed">Not suspicious</option>
+              <option value="FalsePositive">False alarm</option>
+              <option value="NeedsFollowUp">Follow-up</option>
+            </select>
+          </app-filter-bar>
+          <button class="ghost" type="button" (click)="load()">Refresh</button>
+        </div>
+        <div below class="filter-chips">
+          <button type="button" class="chip" [class.active]="quickFilter === ''" (click)="setQuick('')">All</button>
+          <button type="button" class="chip" [class.active]="quickFilter === 'pending'" (click)="setQuick('pending')">Needs review</button>
+          <button type="button" class="chip" [class.active]="quickFilter === 'high'" (click)="setQuick('high')">High risk</button>
+          <button type="button" class="chip" [class.active]="quickFilter === 'today'" (click)="setQuick('today')">Today</button>
+        </div>
+      </app-page-header>
 
-    @if (auth.isManagerOrAdmin() && alerts.length > 0) {
-      <div class="bulk-bar">
-        <label class="select-all">
-          <input type="checkbox" [checked]="allSelected" (change)="toggleSelectAll($event)" />
-          Select all ({{ alerts.length }})
-        </label>
-        <span class="muted">{{ selectedIds.size }} selected</span>
-        <button class="ghost danger" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">
-          Delete selected
-        </button>
-        @if (storeId) {
-          <button class="ghost danger" (click)="deleteAllInStore()" [disabled]="bulkDeleting">
-            Delete all in store
+      @if (auth.isManagerOrAdmin() && filteredAlerts.length > 0) {
+        <app-bulk-action-bar
+          [allSelected]="allSelected"
+          [total]="filteredAlerts.length"
+          [selectedCount]="selectedIds.size"
+          (toggleAll)="toggleSelectAll($event)">
+          <button class="ghost danger" type="button" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">
+            Delete selected
           </button>
-        }
-      </div>
-    }
-
-    @if (error) {
-      <div class="err-banner">⚠ {{ error }} <button class="ghost small" (click)="load()">Retry</button></div>
-    }
-
-    @if (loading) {
-      <div class="card">
-        @for (i of [1,2,3,4,5]; track i) { <div class="skeleton-row"></div> }
-      </div>
-    } @else if (alerts.length === 0) {
-      <div class="card empty-state">
-        <div class="empty-icon">✓</div>
-        <p>No alerts — all clear</p>
-        <p class="muted small">(Store may be in silent/manager-only pilot mode.)</p>
-      </div>
-    } @else {
-      @if (newCount > 0) {
-        <div class="new-banner" (click)="dismissNewBanner()">
-          🔔 {{ newCount }} new alert{{ newCount > 1 ? 's' : '' }} received — click to dismiss
-        </div>
+          @if (storeId) {
+            <button class="ghost danger" type="button" (click)="deleteAllInStore()" [disabled]="bulkDeleting">
+              Delete all in store
+            </button>
+          }
+        </app-bulk-action-bar>
       }
-      <div class="alert-list" [class.with-bulk]="auth.isManagerOrAdmin()">
-        <div class="list-header">
-          @if (auth.isManagerOrAdmin()) { <div class="col-chk-h"></div> }
-          <div></div>
-          <div class="col-type-h">Alert</div>
-          <div class="col-h">Risk</div>
-          <div class="col-h">Score</div>
-          <div class="col-h">Status</div>
-          <div class="col-h"></div>
-        </div>
-        @for (a of pagedAlerts(); track a.id) {
-          <div class="alert-card" [class.new-row]="newIds.has(a.id)" [class.selected-row]="selectedIds.has(a.id)">
-            @if (auth.isManagerOrAdmin()) {
-              <div class="col-chk">
-                <input type="checkbox" [checked]="selectedIds.has(a.id)" (change)="toggleSelect(a.id, $event)" />
+
+      @if (error) {
+        <app-error-banner [message]="error">
+          <button class="ghost small" type="button" (click)="load()">Retry</button>
+        </app-error-banner>
+      }
+
+      @if (loading) {
+        <app-skeleton-list />
+      } @else if (filteredAlerts.length === 0) {
+        <app-empty-state title="No alerts — all clear" detail="When the system flags activity, it will appear here for your review." />
+      } @else {
+        @if (newCount > 0) {
+          <div class="new-banner" role="status" (click)="dismissNewBanner()">
+            {{ newCount }} new alert{{ newCount > 1 ? 's' : '' }} received — click to dismiss
+          </div>
+        }
+
+        <div class="inbox-layout" [class.has-detail]="isDesktop && selectedId">
+          <div class="inbox-list">
+            <app-data-table>
+              <table desktop class="table compact">
+                <thead>
+                  <tr>
+                    @if (auth.isManagerOrAdmin()) { <th class="chk-col"></th> }
+                    <th>Alert</th>
+                    <th>Risk</th>
+                    <th>Status</th>
+                    @if (!isDesktop) { <th></th> }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (a of pagedAlerts(); track a.id) {
+                    <tr
+                      [class.selected-row]="selectedIds.has(a.id) || (isDesktop && selectedId === a.id)"
+                      [class.new-row]="newIds.has(a.id)"
+                      [class.active-row]="isDesktop && selectedId === a.id"
+                      (click)="openAlert(a.id)"
+                      tabindex="0"
+                      (keydown.enter)="openAlert(a.id)">
+                      @if (auth.isManagerOrAdmin()) {
+                        <td class="chk-col" (click)="$event.stopPropagation()">
+                          <input type="checkbox" [checked]="selectedIds.has(a.id)" (change)="toggleSelect(a.id, $event)" aria-label="Select alert" />
+                        </td>
+                      }
+                      <td>
+                        <div class="alert-type">{{ labelType(a.alertType) }}</div>
+                        <div class="muted small">{{ relative(a.createdAt) }} · {{ a.createdAt | date:'MMM d, h:mm a' }}</div>
+                      </td>
+                      <td><app-status-badge [level]="a.riskLevel" /></td>
+                      <td><app-status-pill [status]="a.status" /></td>
+                      @if (!isDesktop) {
+                        <td (click)="$event.stopPropagation()">
+                          <button class="ghost small" type="button" (click)="openAlert(a.id)">Review</button>
+                        </td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+
+              <div mobile class="alert-cards">
+                @for (a of pagedAlerts(); track a.id) {
+                  <div class="alert-card-mobile" (click)="openAlert(a.id)" tabindex="0" (keydown.enter)="openAlert(a.id)">
+                    <div class="alert-card-mobile-head">
+                      <strong>{{ labelType(a.alertType) }}</strong>
+                      <app-status-badge [level]="a.riskLevel" />
+                    </div>
+                    <div class="alert-card-mobile-meta">
+                      <app-status-pill [status]="a.status" />
+                      <span class="muted">{{ relative(a.createdAt) }}</span>
+                    </div>
+                  </div>
+                }
+              </div>
+            </app-data-table>
+
+            @if (totalPages() > 1) {
+              <div class="pagination">
+                <button class="ghost pg-btn" type="button" (click)="prevPage()" [disabled]="page === 1">Prev</button>
+                <span class="pg-info muted">{{ rangeStart() }}–{{ rangeEnd() }} of {{ filteredAlerts.length }}</span>
+                <button class="ghost pg-btn" type="button" (click)="nextPage()" [disabled]="page === totalPages()">Next</button>
               </div>
             }
-            <div class="risk-strip" [class]="a.riskLevel.toLowerCase()"></div>
-            <div class="col-type">
-              <span class="alert-type">{{ a.alertType }}</span>
-              <span class="alert-sub muted">{{ a.createdAt | date:'MMM d, h:mm a' }}</span>
-            </div>
-            <div class="col-risk"><span class="badge" [class]="a.riskLevel.toLowerCase()">{{ a.riskLevel }}</span></div>
-            <div class="col-score"><span class="score-num">{{ a.riskScore }}</span></div>
-            <div class="col-status"><span class="pill" [class]="pillClass(a.status)">{{ pillLabel(a.status) }}</span></div>
-            <div class="col-action"><button class="ghost review-btn" [routerLink]="['/app/alerts', a.id]">Review</button></div>
           </div>
-        }
-      </div>
 
-      @if (totalPages() > 1) {
-        <div class="pagination">
-          <button class="ghost pg-btn" (click)="prevPage()" [disabled]="page === 1">‹ Prev</button>
-          <div class="pg-pages">
-            @for (p of pageNumbers(); track p) {
-              <button class="ghost pg-num" [class.current]="p === page" (click)="goToPage(p)">{{ p }}</button>
-            }
-          </div>
-          <span class="pg-info muted">{{ rangeStart() }}–{{ rangeEnd() }} of {{ alerts.length }}</span>
-          <button class="ghost pg-btn" (click)="nextPage()" [disabled]="page === totalPages()">Next ›</button>
+          @if (isDesktop) {
+            <div class="inbox-detail">
+              <app-alert-review-pane
+                [alertId]="selectedId"
+                [showNav]="true"
+                [hasPrev]="!!prevId"
+                [hasNext]="!!nextId"
+                (prev)="selectById(prevId)"
+                (next)="selectById(nextId)"
+                (reviewed)="onReviewed($event)" />
+            </div>
+          }
         </div>
       }
-    }
-
-    @if (toast) {
-      <div class="toast" (click)="toast = ''">🔔 {{ toast }}</div>
-    }
+    </app-page-container>
   `,
   styles: [`
-    .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; flex-wrap:wrap; gap:.5rem; }
-    .filters { display:flex; gap:.5rem; flex-wrap:wrap; }
-    .bulk-bar {
-      display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;
-      margin-bottom:.75rem; padding:.55rem .75rem;
-      background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm);
+    .inbox-layout { display: block; }
+    @media (min-width: 1024px) {
+      .inbox-layout.has-detail {
+        display: grid;
+        grid-template-columns: minmax(280px, 38%) 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      .inbox-list { max-height: calc(100vh - 220px); overflow-y: auto; }
+      .inbox-detail {
+        position: sticky;
+        top: 0;
+        max-height: calc(100vh - 180px);
+        overflow-y: auto;
+        border-left: 1px solid var(--border);
+        padding-left: 16px;
+      }
+      .table.compact th:last-child, .table.compact td:last-child { display: none; }
     }
-    .select-all { display:flex; align-items:center; gap:.4rem; font-size:.85rem; cursor:pointer; }
-    .col-chk, .col-chk-h { width:28px; display:flex; align-items:center; justify-content:center; }
-    .selected-row { box-shadow:inset 0 0 0 1px rgba(139,92,246,.35); }
-    button.danger { color:var(--danger); border-color:rgba(248,113,113,.35); }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    .badge { padding:.18rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
-    .badge.high { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
-    .badge.medium { background:var(--warning-soft); color:var(--warning); border:1px solid rgba(251,191,36,.3); }
-    .badge.low { background:var(--info-soft); color:var(--info); border:1px solid rgba(167,139,250,.3); }
-    .badge.none { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border-strong); }
-    .live-badge { display:inline-flex; align-items:center; gap:.3rem; font-size:.75rem; font-weight:600;
-                  padding:.2rem .6rem; border-radius:999px; background:var(--surface-2); color:var(--text-muted);
-                  border:1px solid var(--border-strong); }
-    .live-badge.connected { background:var(--success-soft); color:var(--success); border-color:rgba(52,211,153,.3); }
-    .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
-    .live-badge.connected .dot { animation: pulse 1.8s infinite; box-shadow:0 0 6px currentColor; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-    .err-banner { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3);
-                  padding:.5rem .75rem; border-radius:var(--radius-sm);
-                  margin-bottom:.75rem; display:flex; justify-content:space-between; align-items:center; }
-    .new-banner { background:var(--accent-soft); color:var(--accent-2); border:1px solid rgba(139,92,246,.35);
-                  padding:.5rem .75rem; border-radius:var(--radius-sm);
-                  margin-bottom:.5rem; cursor:pointer; font-size:.85rem; font-weight:500; }
-    .new-banner:hover { background:rgba(139,92,246,.22); box-shadow:0 0 14px var(--accent-glow); }
-    .new-row { animation: fadeIn .8s ease; }
-    @keyframes fadeIn { from{background:var(--accent-soft)} to{background:transparent} }
-    .small { font-size:.75rem; }
-
-    .skeleton-row {
-      height:38px; border-radius:var(--radius-sm); margin-bottom:.5rem;
-      background:linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
-      background-size:200% 100%; animation:shimmer 1.4s infinite;
+    .active-row td { background: var(--accent-soft) !important; }
+    .new-banner {
+      background: var(--accent-soft);
+      color: var(--accent-2);
+      border: 1px solid var(--border-strong);
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 12px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
     }
-    .skeleton-row:last-child { margin-bottom:0; }
-    @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-
-    .empty-state { text-align:center; padding:2.5rem 1rem; }
-    .empty-icon {
-      width:52px; height:52px; margin:0 auto .75rem; border-radius:50%;
-      display:flex; align-items:center; justify-content:center; font-size:1.5rem;
-      background:var(--success-soft); color:var(--success); border:1px solid rgba(52,211,153,.3);
-    }
-
-    .alert-list { display:flex; flex-direction:column; gap:.6rem; }
-    .list-header {
-      display:grid; grid-template-columns:4px 1fr 110px 70px 150px 100px;
-      gap:1rem; padding:0 1rem 0 0;
-      font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.07em;
-      color:var(--text-muted);
-    }
-    .with-bulk .list-header { grid-template-columns:28px 4px 1fr 110px 70px 150px 100px; }
-    .col-type-h { padding-left:.2rem; }
-    .col-h { text-align:center; }
-    .alert-card {
-      display:grid; grid-template-columns:4px 1fr 110px 70px 150px 100px;
-      align-items:center; gap:1rem;
-      background:linear-gradient(180deg, var(--surface-2), var(--surface));
-      border:1px solid var(--border); border-radius:var(--radius);
-      padding:.8rem 1rem .8rem 0; overflow:hidden;
-      transition:border-color .15s ease, box-shadow .15s ease;
-    }
-    .with-bulk .alert-card { grid-template-columns:28px 4px 1fr 110px 70px 150px 100px; }
-    .alert-card:hover { border-color:var(--accent); box-shadow:0 0 16px rgba(139,92,246,.12); }
-    .risk-strip { align-self:stretch; width:4px; border-radius:0 4px 4px 0; }
-    .risk-strip.high { background:var(--danger); box-shadow:0 0 8px rgba(248,113,113,.5); }
-    .risk-strip.medium { background:var(--warning); }
-    .risk-strip.low { background:var(--info); }
-    .risk-strip.none { background:var(--border-strong); }
-    .col-type { display:flex; flex-direction:column; gap:.2rem; min-width:0; }
-    .alert-type { font-weight:600; font-size:.95rem; }
-    .alert-sub { font-size:.78rem; }
-    .col-risk, .col-score, .col-status, .col-action { display:flex; justify-content:center; }
-    .score-num { font-variant-numeric:tabular-nums; font-weight:700; font-size:1.05rem; }
-    .review-btn { font-size:.82rem; padding:.35rem .8rem; white-space:nowrap; }
-
-    .pagination { display:flex; align-items:center; gap:.75rem; margin-top:1rem; justify-content:center; }
-    .pg-btn { font-size:.8rem; padding:.35rem .8rem; }
-    .pg-pages { display:flex; gap:.3rem; }
-    .pg-num { font-size:.8rem; padding:.35rem .65rem; min-width:34px; }
-    .pg-num.current { background:var(--accent-soft); border-color:var(--accent); color:var(--accent-2); font-weight:700; }
-    .pg-info { font-size:.78rem; }
-
-    .pill { padding:.16rem .55rem; border-radius:999px; font-size:.72rem; font-weight:600; white-space:nowrap; }
-    .pill.pending { background:var(--warning-soft); color:var(--warning); border:1px solid rgba(251,191,36,.3); }
-    .pill.confirmed { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
-    .pill.dismissed { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border-strong); }
-    .pill.falsepos { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border-strong); }
-    .pill.followup { background:var(--accent-soft); color:var(--accent-2); border:1px solid rgba(139,92,246,.35); }
-
-    .toast {
-      position:fixed; bottom:1.5rem; right:1.5rem; z-index:100;
-      background:linear-gradient(180deg, var(--surface-2), var(--surface));
-      border:1px solid var(--accent); border-radius:var(--radius);
-      padding:.75rem 1.1rem; font-size:.88rem; cursor:pointer;
-      box-shadow:0 0 24px var(--accent-glow), 0 8px 24px rgba(0,0,0,.4);
-      animation:slideIn .3s ease;
-    }
-    @keyframes slideIn { from{transform:translateX(120%); opacity:0} to{transform:translateX(0); opacity:1} }
+    .chk-col { width: 40px; text-align: center; }
+    .alert-type { font-weight: 600; font-size: 0.9rem; }
+    .new-row td { animation: fadeIn 0.8s ease; }
+    @keyframes fadeIn { from { background: var(--accent-soft); } to { background: transparent; } }
+    .pagination { display: flex; align-items: center; gap: 12px; margin-top: 16px; justify-content: center; }
+    .pg-btn { min-height: 44px; padding: 0 16px; }
+    button.danger { color: var(--danger); border-color: rgba(248, 113, 113, 0.35); }
   `],
 })
 export class AlertsComponent implements OnInit, OnDestroy {
   stores: Store[] = [];
   alerts: Alert[] = [];
   storeId = '';
-  status = '';
+  status = 'PendingReview';
+  quickFilter: QuickFilter = '';
   loading = false;
   error = '';
-  sseConnected = false;
   newIds = new Set<string>();
   newCount = 0;
-  toast = '';
   page = 1;
-  readonly pageSize = 7;
+  readonly pageSize = 20;
   bulkDeleting = false;
   selectedIds = new Set<string>();
-  private toastTimer?: any;
-  private es?: EventSource;
-  private sseRetryTimer?: ReturnType<typeof setTimeout>;
-  private sseRetryMs = 2000;
+  selectedId = '';
+  prevId = '';
+  nextId = '';
+  isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 1024 : false;
+  private liveSub?: { unsubscribe: () => void };
 
-  constructor(private api: ApiService, public auth: AuthService, private route: ActivatedRoute) {}
+  constructor(
+    private api: ApiService,
+    public auth: AuthService,
+    private route: ActivatedRoute,
+    private router: Router,
+    private live: LiveAlertsService,
+    private storeCtx: StoreContextService,
+    private confirm: ConfirmDialogService,
+  ) {}
+
+  get filteredAlerts(): Alert[] {
+    let list = this.alerts;
+    if (this.quickFilter === 'pending') {
+      list = list.filter((a) => a.status === 'PendingReview');
+    } else if (this.quickFilter === 'high') {
+      list = list.filter((a) => a.riskLevel === 'High');
+    } else if (this.quickFilter === 'today') {
+      const today = new Date().toDateString();
+      list = list.filter((a) => new Date(a.createdAt).toDateString() === today);
+    }
+    return list;
+  }
 
   get allSelected(): boolean {
-    return this.alerts.length > 0 && this.alerts.every((a) => this.selectedIds.has(a.id));
+    return this.filteredAlerts.length > 0 && this.filteredAlerts.every((a) => this.selectedIds.has(a.id));
+  }
+
+  @HostListener('window:resize')
+  onResize(): void {
+    this.isDesktop = window.innerWidth >= 1024;
   }
 
   ngOnInit(): void {
-    this.api.listStores().subscribe({ next: s => this.stores = s });
+    this.api.listStores().subscribe((s) => (this.stores = s));
     this.route.queryParamMap.subscribe((params) => {
-      const fromQuery = params.get('storeId');
+      const fromQuery = params.get('storeId') ?? this.storeCtx.storeId();
       if (fromQuery) this.storeId = fromQuery;
+      const idParam = params.get('id') ?? '';
+      if (this.isDesktop && idParam) this.selectedId = idParam;
       this.load();
     });
-    this.connectSse();
+    this.liveSub = this.live.newAlert$.subscribe(({ alert }) => {
+      if (this.storeId && alert.storeId !== this.storeId) return;
+      this.alerts = [alert, ...this.alerts];
+      this.newIds.add(alert.id);
+      this.newCount++;
+    });
   }
 
   ngOnDestroy(): void {
-    this.es?.close();
-    clearTimeout(this.sseRetryTimer);
-    clearTimeout(this.toastTimer);
+    this.liveSub?.unsubscribe();
   }
 
-  pillClass(status: string): string {
-    switch (status) {
-      case 'PendingReview': return 'pending';
-      case 'Confirmed': return 'confirmed';
-      case 'Dismissed': return 'dismissed';
-      case 'FalsePositive': return 'falsepos';
-      case 'NeedsFollowUp': return 'followup';
-      default: return 'dismissed';
+  labelType(type: string): string {
+    return alertTypeLabel(type);
+  }
+
+  statusLabel(status: string): string {
+    return pillLabel(status);
+  }
+
+  relative(iso: string): string {
+    return relativeTime(iso);
+  }
+
+  setQuick(filter: QuickFilter): void {
+    this.quickFilter = filter;
+    this.page = 1;
+  }
+
+  openAlert(id: string): void {
+    if (this.isDesktop) {
+      this.selectById(id);
+      return;
     }
+    this.router.navigate(['/app/alerts', id], {
+      queryParams: {
+        storeId: this.storeId || null,
+        status: this.status || null,
+        quick: this.quickFilter || null,
+      },
+    });
   }
 
-  pillLabel(status: string): string {
-    switch (status) {
-      case 'PendingReview': return '● Pending';
-      case 'Confirmed': return '✓ Confirmed';
-      case 'Dismissed': return '✕ Dismissed';
-      case 'FalsePositive': return '✕ False positive';
-      case 'NeedsFollowUp': return '⚑ Follow-up';
-      default: return status;
+  selectById(id: string): void {
+    if (!id) return;
+    this.selectedId = id;
+    this.updateQueueNav();
+    const tree = this.router.parseUrl(this.router.url);
+    tree.queryParams['id'] = id;
+    if (this.storeId) tree.queryParams['storeId'] = this.storeId;
+    this.router.navigateByUrl(tree, { replaceUrl: true });
+  }
+
+  onReviewed(alert: Alert): void {
+    const idx = this.alerts.findIndex((a) => a.id === alert.id);
+    if (idx >= 0) this.alerts[idx] = alert;
+    this.live.refreshPendingCount(this.storeId || undefined);
+    const pending = this.filteredAlerts.filter((a) => a.status === 'PendingReview' && a.id !== alert.id);
+    if (pending.length) {
+      setTimeout(() => this.selectById(pending[0].id), 500);
     }
-  }
-
-  private showToast(msg: string): void {
-    this.toast = msg;
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => (this.toast = ''), 5000);
   }
 
   load(): void {
@@ -305,31 +355,64 @@ export class AlertsComponent implements OnInit, OnDestroy {
     this.error = '';
     this.selectedIds.clear();
     this.api.listAlerts(this.storeId || undefined, this.status || undefined).subscribe({
-      next: (a) => { this.alerts = a; this.loading = false; this.page = 1; },
-      error: (e) => { this.loading = false; this.error = e?.error?.error || 'Failed to load alerts'; },
+      next: (a) => {
+        this.alerts = a;
+        this.loading = false;
+        this.page = 1;
+        if (this.isDesktop) {
+          const idFromRoute = this.route.snapshot.queryParamMap.get('id');
+          const pending = a.find((x) => x.status === 'PendingReview');
+          const pick = idFromRoute && a.some((x) => x.id === idFromRoute)
+            ? idFromRoute
+            : pending?.id ?? a[0]?.id ?? '';
+          if (pick) this.selectById(pick);
+          else this.selectedId = '';
+        }
+        this.updateQueueNav();
+      },
+      error: (e) => {
+        this.loading = false;
+        this.error = e?.error?.error || 'Failed to load alerts';
+      },
     });
   }
 
-  // ---- pagination ----
-  pagedAlerts(): Alert[] {
-    const start = (this.page - 1) * this.pageSize;
-    return this.alerts.slice(start, start + this.pageSize);
-  }
-  totalPages(): number { return Math.max(1, Math.ceil(this.alerts.length / this.pageSize)); }
-  rangeStart(): number { return (this.page - 1) * this.pageSize + 1; }
-  rangeEnd(): number { return Math.min(this.page * this.pageSize, this.alerts.length); }
-  prevPage(): void { if (this.page > 1) this.page--; }
-  nextPage(): void { if (this.page < this.totalPages()) this.page++; }
-  goToPage(p: number): void { this.page = p; }
-  pageNumbers(): number[] {
-    const total = this.totalPages();
-    // Show at most 5 page buttons centred on the current page.
-    const start = Math.max(1, Math.min(this.page - 2, total - 4));
-    const end = Math.min(total, start + 4);
-    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  private updateQueueNav(): void {
+    const list = this.filteredAlerts;
+    const idx = list.findIndex((a) => a.id === this.selectedId);
+    this.prevId = idx > 0 ? list[idx - 1].id : '';
+    this.nextId = idx >= 0 && idx < list.length - 1 ? list[idx + 1].id : '';
   }
 
-  dismissNewBanner(): void { this.newCount = 0; this.newIds.clear(); }
+  pagedAlerts(): Alert[] {
+    const start = (this.page - 1) * this.pageSize;
+    return this.filteredAlerts.slice(start, start + this.pageSize);
+  }
+
+  totalPages(): number {
+    return Math.max(1, Math.ceil(this.filteredAlerts.length / this.pageSize));
+  }
+
+  rangeStart(): number {
+    return (this.page - 1) * this.pageSize + 1;
+  }
+
+  rangeEnd(): number {
+    return Math.min(this.page * this.pageSize, this.filteredAlerts.length);
+  }
+
+  prevPage(): void {
+    if (this.page > 1) this.page--;
+  }
+
+  nextPage(): void {
+    if (this.page < this.totalPages()) this.page++;
+  }
+
+  dismissNewBanner(): void {
+    this.newCount = 0;
+    this.newIds.clear();
+  }
 
   toggleSelect(id: string, event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
@@ -340,20 +423,32 @@ export class AlertsComponent implements OnInit, OnDestroy {
   toggleSelectAll(event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
     this.selectedIds.clear();
-    if (checked) this.alerts.forEach((a) => this.selectedIds.add(a.id));
+    if (checked) this.filteredAlerts.forEach((a) => this.selectedIds.add(a.id));
   }
 
-  deleteSelected(): void {
+  async deleteSelected(): Promise<void> {
     const ids = [...this.selectedIds];
     if (!ids.length) return;
-    if (!confirm(`Delete ${ids.length} selected alert(s)? Clips will remain in storage.`)) return;
+    const ok = await this.confirm.open({
+      title: 'Delete alerts',
+      message: `Delete ${ids.length} selected alert(s)? Clips will remain in storage.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     this.runBulkDelete({ ids });
   }
 
-  deleteAllInStore(): void {
+  async deleteAllInStore(): Promise<void> {
     if (!this.storeId) return;
     const name = this.stores.find((s) => s.id === this.storeId)?.name || 'this store';
-    if (!confirm(`Delete ALL alerts in ${name}? Clips will remain in storage.`)) return;
+    const ok = await this.confirm.open({
+      title: 'Delete all alerts',
+      message: `Delete ALL alerts in ${name}? Clips will remain in storage.`,
+      confirmLabel: 'Delete all',
+      danger: true,
+    });
+    if (!ok) return;
     this.runBulkDelete({ storeId: this.storeId, deleteAllInStore: true });
   }
 
@@ -364,7 +459,7 @@ export class AlertsComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.bulkDeleting = false;
         this.selectedIds.clear();
-        this.showToast(`Deleted ${res.deleted} alert(s)`);
+        this.live.showToast(`Deleted ${res.deleted} alert(s)`);
         this.load();
       },
       error: (e) => {
@@ -373,46 +468,4 @@ export class AlertsComponent implements OnInit, OnDestroy {
       },
     });
   }
-
-  private connectSse(): void {
-    this.es?.close();
-    const token = this.auth.token ?? '';
-    const url = `${API_BASE}/api/alerts/stream?access_token=${encodeURIComponent(token)}`;
-    this.es = new EventSource(url);
-
-    this.es.addEventListener('connected', () => {
-      this.sseConnected = true;
-      this.sseRetryMs = 2000;
-    });
-
-    this.es.addEventListener('alert', (ev: MessageEvent) => {
-      try {
-        const data = JSON.parse(ev.data);
-        if (this.storeId && data.storeId !== this.storeId) return;
-        const newAlert: Alert = {
-          id: data.alertId,
-          alertType: data.alertType,
-          riskLevel: data.riskLevel,
-          riskScore: data.riskScore,
-          status: 'PendingReview',
-          createdAt: data.createdAt,
-          storeId: data.storeId,
-          evidenceJson: '[]',
-          cameraId: '', clipId: '', modelVersion: '', ruleVersion: '',
-        };
-        this.alerts = [newAlert, ...this.alerts];
-        this.newIds.add(newAlert.id);
-        this.newCount++;
-        this.showToast(`New ${data.riskLevel} risk alert — ${data.alertType}`);
-      } catch { /* ignore malformed events */ }
-    });
-
-    this.es.onerror = () => {
-      this.sseConnected = false;
-      this.es?.close();
-      this.sseRetryTimer = setTimeout(() => this.connectSse(), this.sseRetryMs);
-      this.sseRetryMs = Math.min(this.sseRetryMs * 2, 30000);
-    };
-  }
 }
-

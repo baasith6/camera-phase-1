@@ -1,114 +1,92 @@
-:root {
-  color-scheme: dark;
-
-  /* ── Violet Ops theme ─────────────────────────── */
-  --bg: #0c0a12;
-  --surface: #14111e;
-  --surface-2: #1a1627;
-  --border: #241f33;
-  --border-strong: #322a47;
-
-  --accent: #8b5cf6;
-  --accent-2: #a78bfa;
-  --accent-dim: #6d46c9;
-  --accent-soft: rgba(139, 92, 246, 0.14);
-  --accent-glow: rgba(139, 92, 246, 0.35);
-
-  --text: #e9e6f2;
-  --text-muted: #8a8499;
-
-  --success: #34d399;
-  --success-soft: rgba(52, 211, 153, 0.12);
-  --warning: #fbbf24;
-  --warning-soft: rgba(251, 191, 36, 0.12);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.12);
-  --info: #a78bfa;
-  --info-soft: rgba(167, 139, 250, 0.14);
-
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
-  --shadow-glow: 0 0 0 1px var(--accent-soft), 0 4px 20px rgba(139, 92, 246, 0.12);
-}
+@import './app/shared/styles/_tokens.css';
 
 * { box-sizing: border-box; }
 
-html, body { height: 100%; overflow: hidden; }
+html, body { height: 100%; }
+
+body.shell-locked { overflow: hidden; }
 
 body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   background: var(--bg);
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.08), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(139, 92, 246, 0.04), transparent);
-  background-attachment: fixed;
   color: var(--text);
+  line-height: var(--line-height, 1.55);
+  -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3 { font-weight: 600; letter-spacing: -0.02em; }
 
-a { color: var(--accent-2); text-decoration: none; transition: color .15s ease; }
-a:hover { color: var(--accent); }
+a { color: var(--accent); text-decoration: none; transition: color 0.15s ease; }
+a:hover { color: var(--accent-2); }
 
 .card {
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1rem 1.2rem;
-  margin-bottom: 1rem;
-  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+  padding: var(--space-md, 16px) var(--space-lg, 24px);
+  margin-bottom: var(--space-md, 16px);
+  box-shadow: var(--shadow-sm);
 }
-.card:hover { border-color: var(--border-strong); }
 
 .muted { color: var(--text-muted); }
 
 button {
-  background: linear-gradient(180deg, var(--accent), var(--accent-dim));
+  background: var(--accent);
   color: white;
   border: none;
   border-radius: var(--radius-sm);
-  padding: .5rem .95rem;
+  padding: 0.5rem 0.95rem;
   cursor: pointer;
-  font-size: .9rem;
+  font-size: 0.9rem;
   font-family: inherit;
   font-weight: 500;
-  transition: filter .15s ease, box-shadow .15s ease, transform .1s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
-button:hover { filter: brightness(1.12); box-shadow: 0 0 16px var(--accent-glow); }
+
+button:hover { background: var(--accent-2); }
 button:active { transform: translateY(1px); }
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 button:disabled {
   background: var(--surface-2);
   color: var(--text-muted);
   cursor: not-allowed;
   box-shadow: none;
-  filter: none;
 }
+
 button.ghost {
-  background: transparent;
+  background: var(--surface);
   border: 1px solid var(--border-strong);
   color: var(--text);
 }
-button.ghost:hover { background: var(--accent-soft); border-color: var(--accent); box-shadow: none; }
+
+button.ghost:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
 
 input, select, textarea {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border-strong);
   color: var(--text);
   border-radius: var(--radius-sm);
-  padding: .5rem .65rem;
-  font-size: .9rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.9rem;
   font-family: inherit;
-  transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
-label { font-size: .85rem; color: var(--text-muted); }
+label { font-size: 0.85rem; color: var(--text-muted); }
 
 .table {
   width: 100%;
@@ -118,18 +96,26 @@ label { font-size: .85rem; color: var(--text-muted); }
   overflow: hidden;
   border: 1px solid var(--border);
 }
+
 .table th, .table td {
   text-align: left;
-  padding: .65rem .85rem;
+  padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--border);
 }
+
 .table th {
   color: var(--text-muted);
   font-weight: 500;
-  font-size: .75rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: .06em;
+  letter-spacing: 0.06em;
   background: var(--surface-2);
 }
+
 .table tr:last-child td { border-bottom: none; }
-.table tr:hover td { background: var(--accent-soft); }
+.table tr:hover td { background: var(--surface-2); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

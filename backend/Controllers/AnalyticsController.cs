@@ -55,4 +55,35 @@ public class AnalyticsController : ControllerBase
                 .ToDictionary(g => g.Key, g => g.Count())
         ));
     }
+
+    [HttpGet("trends")]
+    public async Task<ActionResult<AnalyticsTrendsResponse>> Trends([FromQuery] Guid? storeId, [FromQuery] int days = 7)
+    {
+        if (storeId is not null && !TenantAccess.CanAccessStore(User, storeId.Value))
+            return Forbid();
+
+        days = Math.Clamp(days, 1, 90);
+        var since = DateTimeOffset.UtcNow.Date.AddDays(1 - days);
+
+        var alerts = TenantAccess.ScopeAlerts(_db.Alerts, User).AsNoTracking();
+        if (storeId is not null)
+            alerts = alerts.Where(a => a.StoreId == storeId);
+
+        var rows = await alerts
+            .Where(a => a.CreatedAt >= since)
+            .GroupBy(a => a.CreatedAt.Date)
+            .Select(g => new { Date = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        var map = rows.ToDictionary(r => DateOnly.FromDateTime(r.Date), r => r.Count);
+        var points = new List<AnalyticsTrendPoint>();
+        for (var i = 0; i < days; i++)
+        {
+            var d = DateOnly.FromDateTime(since.AddDays(i));
+            map.TryGetValue(d, out var count);
+            points.Add(new AnalyticsTrendPoint(d.ToString("MM-dd"), count));
+        }
+
+        return Ok(new AnalyticsTrendsResponse(days, points));
+    }
 }

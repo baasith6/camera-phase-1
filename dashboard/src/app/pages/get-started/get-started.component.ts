@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { InstallerInfo, SetupCodeResponse, Store, StoreOverview, UserAccount } from '../../core/models';
+import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-components';
 
 interface ChecklistStep {
   id: string;
@@ -21,12 +22,12 @@ interface ChecklistStep {
 @Component({
   selector: 'app-get-started',
   standalone: true,
-  imports: [RouterLink, DecimalPipe, FormsModule],
+  imports: [RouterLink, DecimalPipe, FormsModule, PageContainerComponent, PageHeaderComponent],
   template: `
-    <h2>Get started</h2>
-    <p class="muted intro">
-      Follow these steps to connect a store. Progress updates automatically when you refresh.
-    </p>
+    <app-page-container>
+      <app-page-header
+        title="Get started"
+        subtitle="Follow these steps to connect a store. Progress updates automatically when you refresh." />
 
     @if (auth.isAdmin() && stores.length > 1) {
       <div class="card store-pick">
@@ -53,7 +54,13 @@ interface ChecklistStep {
         @if (!step.adminOnly || auth.isAdmin()) {
           <div class="step card" [class.done]="step.done">
             <div class="step-head">
-              <span class="status" [class.ok]="step.done">{{ step.done ? '✓' : '○' }}</span>
+              <span class="status" [class.ok]="step.done" [attr.aria-label]="step.done ? 'Complete' : 'Incomplete'">
+                @if (step.done) {
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                }
+              </span>
               <div>
                 <h3>{{ step.title }}</h3>
                 <p class="muted small">{{ step.detail }}</p>
@@ -97,9 +104,9 @@ interface ChecklistStep {
         <p>Store setup looks complete. You can go to <a routerLink="/app/clips">Clips</a> to review uploads or <a routerLink="/app/alerts">Alerts</a> for day-to-day review.</p>
       </div>
     }
+    </app-page-container>
   `,
   styles: [`
-    .intro { margin: 0 0 1.25rem; max-width: 560px; }
     .store-pick { max-width: 360px; margin-bottom: 1rem; padding: .75rem 1rem; }
     .store-pick label { display: block; font-size: .78rem; color: var(--text-muted); margin-bottom: .25rem; }
     .store-pick select {
@@ -113,7 +120,7 @@ interface ChecklistStep {
       margin-bottom: 1.25rem; overflow: hidden; max-width: 480px;
     }
     .fill {
-      height: 100%; background: linear-gradient(90deg, var(--accent-soft), rgba(139,92,246,.35));
+      height: 100%; background: var(--accent);
       transition: width .25s ease;
     }
     .pct {
@@ -133,7 +140,7 @@ interface ChecklistStep {
       font-size: .85rem; flex-shrink: 0;
       border: 1px solid var(--border-strong); color: var(--text-muted);
     }
-    .status.ok { background: rgba(92,219,127,.15); border-color: #5cdb7f; color: #5cdb7f; }
+    .status.ok { background: var(--success-soft); border-color: var(--success); color: var(--success); }
     h3 { margin: 0 0 .25rem; font-size: .95rem; }
     .small { font-size: .82rem; margin: 0; }
     .muted { color: var(--text-muted); }
@@ -159,8 +166,8 @@ interface ChecklistStep {
       border: 1px solid var(--border-strong); width: 100%;
     }
     code { font-size: 1.1rem; letter-spacing: .06em; }
-    .err { color: #f07070; font-size: .82rem; }
-    .complete-box { max-width: 720px; margin-top: 1rem; border-color: rgba(92,219,127,.35); }
+    .err { color: var(--danger); font-size: .82rem; }
+    .complete-box { max-width: 720px; margin-top: 1rem; border-color: var(--success-soft); }
     .complete-box a { color: var(--accent-2); }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
   `],
@@ -192,7 +199,7 @@ export class GetStartedComponent implements OnInit {
   ngOnInit(): void {
     this.api.getInstallerInfo().subscribe({
       next: (info) => { this.installerInfo = info; this.installerError = ''; this.rebuildSteps(); },
-      error: () => { this.installerInfo = null; this.installerError = 'Installer not built yet — contact ONEVO admin'; this.rebuildSteps(); },
+      error: () => { this.installerInfo = null; this.installerError = 'Installer not built yet — contact onetix admin'; this.rebuildSteps(); },
     });
 
     if (this.auth.isAdmin()) {
@@ -288,7 +295,10 @@ export class GetStartedComponent implements OnInit {
     onlineConnectors: number,
     hasAlerts: boolean,
   ): ChecklistStep[] {
-    const storeQ = this.selectedStoreId ? { storeId: this.selectedStoreId } : undefined;
+    const storeQ = this.selectedStoreId
+      ? { storeId: this.selectedStoreId }
+      : undefined;
+    const setupQ = (step: string) => storeQ ? { ...storeQ, step } : { step };
     return [
       {
         id: 'store',
@@ -335,7 +345,7 @@ export class GetStartedComponent implements OnInit {
         done: cameraCount > 0,
         actionLabel: 'Open Setup & Zones',
         actionLink: ['/app/setup'],
-        queryParams: storeQ,
+        queryParams: setupQ('2'),
       },
       {
         id: 'connector',
@@ -344,7 +354,7 @@ export class GetStartedComponent implements OnInit {
         done: onlineConnectors > 0,
         actionLabel: 'Check status',
         actionLink: ['/app/setup'],
-        queryParams: storeQ,
+        queryParams: setupQ('1'),
       },
       {
         id: 'clips',

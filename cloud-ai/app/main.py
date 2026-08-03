@@ -17,7 +17,7 @@ import torch
 
 from .backend_client import BackendClient
 from .config import Config
-from .detector import DetectorBackend, build_detector
+from .detector import DEFAULT_YOLOE_PROMPTS, DetectorBackend, build_detector
 from .events import extract_events
 from .reid import ReIDExtractor
 from .s3 import ClipStore
@@ -60,12 +60,23 @@ def main() -> None:
 
     cfg = Config.load()
     host, _, port = cfg.redis_connection.partition(":")
-    r = redis.Redis(host=host, port=int(port or 6379), decode_responses=True)
+    r = redis.Redis(
+        host=host,
+        port=int(port or 6379),
+        decode_responses=True,
+        socket_timeout=None,
+        socket_connect_timeout=5,
+    )
     store   = ClipStore(cfg)
     backend = BackendClient(cfg.backend_url, cfg.service_key)
 
     print(f"[cloud-ai] loading backend={cfg.model_backend} model={cfg.model} device={cfg.device} ...", flush=True)
     detector = build_detector(cfg.model_backend, cfg.model, cfg.device, cfg.yoloe_prompts)
+    active_prompts = cfg.yoloe_prompts or DEFAULT_YOLOE_PROMPTS
+    print(
+        f"[cloud-ai] YOLOE prompts ({len(active_prompts)}): {', '.join(active_prompts.keys())}",
+        flush=True,
+    )
     enable_reid = os.getenv("CLOUD_AI_ENABLE_REID", "false").lower() == "true"
     reid_extractor = ReIDExtractor(device=cfg.device) if enable_reid else None
     print(
@@ -106,6 +117,9 @@ def main() -> None:
                     print(f"[cloud-ai] clip {job.get('clipId')} dead-lettered after "
                           f"{MAX_RETRIES} attempts", flush=True)
 
+        except redis.TimeoutError:
+            # BRPOP idle timeout with socket_timeout=None should return None; ignore stray timeouts.
+            continue
         except Exception as e:  # noqa: BLE001
             # Worker-level error (Redis, etc.) — don't lose the current job.
             print(f"[cloud-ai] worker error: {e}", flush=True)

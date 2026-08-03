@@ -1,912 +1,115 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { DecimalPipe } from '@angular/common';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { AuthService } from '../../core/auth.service';
-import { Camera, Connector, InstallerInfo, Store, Zone } from '../../core/models';
+import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-components';
+import { SetupCamerasStepComponent } from './setup-cameras-step.component';
+import { SetupConnectorStepComponent } from './setup-connector-step.component';
+import { SetupContextService } from './setup-context.service';
+import { SetupVerifyStepComponent } from './setup-verify-step.component';
+import { SetupZonesStepComponent } from './setup-zones-step.component';
 
 @Component({
   selector: 'app-setup',
   standalone: true,
-  imports: [FormsModule],
+  providers: [SetupContextService],
+  imports: [
+    PageContainerComponent,
+    PageHeaderComponent,
+    SetupConnectorStepComponent,
+    SetupCamerasStepComponent,
+    SetupZonesStepComponent,
+    SetupVerifyStepComponent,
+  ],
   template: `
-    <h2>Setup &amp; Zones</h2>
+    <app-page-container>
+      <app-page-header
+        title="Setup"
+        subtitle="Set up cameras step by step — about 15 minutes" />
 
-    <!-- Local Connector install -->
-    <div class="card connector-card">
-      <div class="conn-header">
-        <div>
-          <h3>ONEVO Local Connector</h3>
-          <p class="muted small">Install on the shop PC that can reach the cameras. The setup wizard asks for a code, then RTSP links or a test MP4.</p>
-        </div>
-        <div class="conn-status" [class.on]="storeConnectorOnline" [class.off]="!storeConnectorOnline">
-          <span class="dot"></span>
-          {{ storeConnectorOnline ? 'Installed · Online' : (storeConnectors.length ? 'Offline or uninstalled' : 'Not installed') }}
-        </div>
-      </div>
-
-      <div class="conn-actions">
-        @if (!storeConnectorOnline) {
-          <button (click)="downloadInstaller()" [disabled]="!installerInfo">
-            {{ storeConnectors.length ? 'Download / reinstall connector' : 'Download Windows connector' }}
+      <div class="stepper" role="tablist" aria-label="Setup steps">
+        @for (s of ctx.steps; track s.id) {
+          <button
+            type="button"
+            class="stepper-btn"
+            [class.active]="ctx.step === s.id"
+            [class.done]="ctx.step > s.id"
+            (click)="ctx.goToStep(s.id)">
+            @if (ctx.step > s.id) { ✓ }
+            {{ s.label }}
           </button>
-          <button class="ghost" (click)="generateSetupCode()" [disabled]="!storeId || generatingCode">
-            {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
-          </button>
-        } @else {
-          <button disabled>Installed</button>
-          @if (connectorUpdateAvailable) {
-            <span class="update-note">Update v{{ installerInfo?.version }} available in the shop PC tray</span>
-          } @else {
-            <span class="muted small">Updates will appear automatically in the shop PC tray.</span>
-          }
         }
-        <button class="ghost" (click)="refreshConnectors()" [disabled]="!storeId">Refresh status</button>
       </div>
 
-      @if (installerInfo) {
-        <p class="muted small meta">
-          Latest v{{ installerInfo.version }} · {{ installerSizeMb }} MB
-          @if (installerInfo.sha256) { · SHA-256 {{ installerInfo.sha256.slice(0, 12) }}… }
-        </p>
-      } @else if (installerError) {
-        <p class="err-text">{{ installerError }}</p>
+      @switch (ctx.step) {
+        @case (1) { <app-setup-connector-step /> }
+        @case (2) { <app-setup-cameras-step /> }
+        @case (3) { <app-setup-zones-step /> }
+        @case (4) { <app-setup-verify-step /> }
       }
-
-      @if (setupCodeError) {
-        <p class="err-text">{{ setupCodeError }}</p>
-      }
-
-      @if (setupCode) {
-        <div class="code-box">
-          <div>
-            <div class="code-label">Setup code (enter in the Windows wizard)</div>
-            <div class="code-value">{{ setupCode }}</div>
-            <div class="muted small">Expires {{ setupCodeExpires }}</div>
-          </div>
-          <button class="ghost small" (click)="copySetupCode()">Copy</button>
-        </div>
-      }
-
-      @if (storeConnectors.length) {
-        <div class="conn-list">
-          @for (c of storeConnectors; track c.id) {
-            <div class="conn-row">
-              <span>{{ c.name }} <span class="muted small">v{{ c.version }}</span></span>
-              <span class="badge" [class]="c.status.toLowerCase()">{{ c.status }}</span>
-            </div>
-          }
-        </div>
-      }
-    </div>
-
-    <div class="grid3">
-      <!-- Stores -->
-      <div class="card">
-        <h3>Stores</h3>
-        @for (s of stores; track s.id) {
-          <div class="row-item" [class.sel]="s.id === storeId" (click)="selectStore(s.id)">
-            {{ s.name }} <span class="muted small">({{ s.alertVisibilityMode }})</span>
-          </div>
-        }
-        @if (auth.isAdmin()) {
-          <div class="add-row">
-            <input placeholder="New store name" [(ngModel)]="newStoreName" />
-            <button (click)="addStore()">Add</button>
-          </div>
-        }
-      </div>
-
-      <!-- Cameras -->
-      <div class="card">
-        <div class="cam-list-header">
-          <h3>Cameras</h3>
-          @if (cameras.length) {
-            <div>
-              <button class="ghost small" (click)="toggleAllCameras()">
-                {{ selectedCameraIds.size === cameras.length ? 'Clear all' : 'Select all' }}
-              </button>
-              @if (selectedCameraIds.size) {
-                <button class="ghost small danger-text" (click)="removeSelectedCameras()">
-                  Remove {{ selectedCameraIds.size }}
-                </button>
-              }
-            </div>
-          }
-        </div>
-        @if (!storeId) { <p class="muted">Select a store.</p> }
-        @for (c of cameras; track c.id) {
-          <div class="row-item" [class.sel]="c.id === cameraId" (click)="selectCamera(c.id)">
-            <input type="checkbox" [checked]="selectedCameraIds.has(c.id)"
-                   (click)="$event.stopPropagation()" (change)="toggleCameraSelection(c.id)" />
-            <div>
-              <span>{{ c.name }}</span>
-              <span class="muted small"> [{{ c.status }}]</span>
-              @if (c.cameraModel) {
-                <span class="chip">{{ c.cameraManufacturer }} {{ c.cameraModel }}</span>
-              }
-            </div>
-          </div>
-        }
-        @if (storeId) {
-          <div class="add-col" style="margin-top:.75rem">
-            <div class="field-row">
-              <label>Name</label>
-              <input placeholder="Camera name" [(ngModel)]="newCamName" />
-            </div>
-            <div class="field-row">
-              <label>RTSP URL</label>
-              <input placeholder="rtsp://user:pass@ip:554/... (or auto via ONVIF)" [(ngModel)]="newCamUrl" />
-            </div>
-            <div class="onvif-section">
-              <div class="onvif-header" (click)="showOnvifForm = !showOnvifForm">
-                <span>⚙ ONVIF (optional — auto-fetch RTSP URL)</span>
-                <span class="toggle">{{ showOnvifForm ? '▲' : '▼' }}</span>
-              </div>
-              @if (showOnvifForm) {
-                <div class="onvif-fields">
-                  <div class="field-row">
-                    <label>Camera IP</label>
-                    <input placeholder="192.168.1.64" [(ngModel)]="newOnvifHost" />
-                  </div>
-                  <div class="field-row">
-                    <label>ONVIF port</label>
-                    <input type="number" placeholder="80" [(ngModel)]="newOnvifPort" />
-                  </div>
-                </div>
-              }
-            </div>
-            <button (click)="addCamera()" [disabled]="!newCamName">Add camera</button>
-          </div>
-        }
-      </div>
-
-      <!-- Zone list -->
-      <div class="card">
-        <h3>Zones</h3>
-        @if (!cameraId) { <p class="muted">Select a camera.</p> }
-        @for (z of zones; track z.id) {
-          <div class="row-item">
-            {{ z.name }} <span class="muted small">[{{ z.zoneType }}]</span>
-            <button class="ghost small" (click)="deleteZone(z.id)">x</button>
-          </div>
-        }
-      </div>
-    </div>
-
-    <!-- Camera detail panel -->
-    @if (selectedCamera) {
-      <div class="card" style="margin-top:1rem">
-        <div class="cam-detail-header">
-          <h3>{{ selectedCamera.name }}</h3>
-          <div style="display:flex;gap:.5rem">
-            <button class="ghost small" (click)="startCameraEdit()">
-              {{ editingCamera ? 'Editing' : 'Edit' }}
-            </button>
-            <button class="ghost small danger-text" (click)="removeCamera(selectedCamera.id)">Remove</button>
-            <button class="ghost small" (click)="testStream()" [disabled]="testingStream">
-              {{ testingStream ? 'Testing…' : '🔌 Test Stream' }}
-            </button>
-            @if (selectedCamera.id) {
-              <a class="btn-link" [href]="'http://' + connectorAdminHost + ':' + connectorAdminPort + '/snapshot?camera_id=' + selectedCamera.id" target="_blank">
-                📷 Live Snapshot
-              </a>
-            }
-          </div>
-        </div>
-
-        @if (editingCamera) {
-          <div class="edit-grid">
-            <label>Name<input [(ngModel)]="editCamName" /></label>
-            <label>RTSP URL<input [(ngModel)]="editCamUrl" autocomplete="off" /></label>
-            <label>ONVIF host<input [(ngModel)]="editOnvifHost" /></label>
-            <label>ONVIF port<input type="number" [(ngModel)]="editOnvifPort" /></label>
-            <div class="row">
-              <button (click)="saveCameraEdit()" [disabled]="savingCamera">Save changes</button>
-              <button class="ghost" (click)="editingCamera=false">Cancel</button>
-            </div>
-          </div>
-        } @else {
-        <div class="detail-grid">
-          <div class="detail-row">
-            <span class="dk">RTSP URL</span>
-            <span class="dv">{{ maskedRtsp(selectedCamera.rtspUrl) }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="dk">Status</span>
-            <span class="badge" [class]="selectedCamera.status.toLowerCase()">{{ selectedCamera.status }}</span>
-          </div>
-          @if (selectedCamera.onvifHost) {
-            <div class="detail-row">
-              <span class="dk">ONVIF Host</span>
-              <span class="dv">{{ selectedCamera.onvifHost }}:{{ selectedCamera.onvifPort || 80 }}</span>
-            </div>
-          }
-          @if (selectedCamera.cameraManufacturer) {
-            <div class="detail-row">
-              <span class="dk">Manufacturer</span>
-              <span class="dv">{{ selectedCamera.cameraManufacturer }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="dk">Model</span>
-              <span class="dv">{{ selectedCamera.cameraModel }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="dk">Serial</span>
-              <span class="dv">{{ selectedCamera.cameraSerial }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="dk">Firmware</span>
-              <span class="dv">{{ selectedCamera.cameraFirmware }}</span>
-            </div>
-          } @else {
-            <div class="detail-row">
-              <span class="dk">ONVIF Info</span>
-              <span class="dv muted">Not yet populated (start connector with --onvif-host)</span>
-            </div>
-          }
-        </div>
-        }
-
-        @if (streamTestResult) {
-          <div class="test-result" [class.ok]="streamTestResult.ok" [class.err]="!streamTestResult.ok">
-            {{ streamTestResult.message }}
-          </div>
-        }
-      </div>
-    }
-
-    <!-- Zone drawing canvas -->
-    @if (cameraId) {
-      <div class="card" style="margin-top:1rem">
-        <div class="zone-header">
-          <div>
-            <h3>Zone Editor &amp; Visual Canvas</h3>
-            <p class="muted small">
-              Click on the canvas to draw a box or multi-point zone. Drag yellow corner points anytime to adjust exact boundaries.
-            </p>
-          </div>
-        </div>
-
-        <div class="draw-toolbar">
-          <input placeholder="Zone name (e.g. High-Value Shelf)" [(ngModel)]="draftName" style="width:200px" />
-          <select [(ngModel)]="draftType">
-            <option value="HighValue">High-value shelf</option>
-            <option value="Shelf">Shelf</option>
-            <option value="Checkout">Checkout</option>
-            <option value="Exit">Exit</option>
-            <option value="BlindSpot">Blind spot</option>
-            <option value="Staff">Staff</option>
-          </select>
-          <button class="ghost" (click)="undoPoint()" [disabled]="draftPoints.length === 0">↩ Undo Point</button>
-          <button class="ghost" (click)="clearDraft()" [disabled]="draftPoints.length === 0">Clear points</button>
-          <button class="ghost" (click)="loadSnapshot()" [disabled]="loadingSnapshot">
-            {{ loadingSnapshot ? 'Loading…' : '🔄 Refresh frame' }}
-          </button>
-          <button class="btn-primary" (click)="saveZone()" [disabled]="draftPoints.length < 3 || !draftName">
-            💾 Save Zone ({{ draftPoints.length }} pts)
-          </button>
-        </div>
-
-        @if (snapshotError) {
-          <p class="err-text" style="margin:0 0 .5rem">
-            ⚠ {{ snapshotError }} — zones can still be drawn on the blank canvas.
-          </p>
-        }
-
-        <div class="canvas-container">
-          <canvas #zoneCanvas width="640" height="360"
-                  (mousedown)="onCanvasMouseDown($event)"
-                  (mousemove)="onCanvasMouseMove($event)"
-                  (mouseup)="onCanvasMouseUp($event)"
-                  (mouseleave)="onCanvasMouseUp($event)"></canvas>
-          <div class="canvas-hint muted small">
-            💡 <strong>Tip:</strong> Click 2 opposite corners to draw a Box, or keep clicking to add points. Drag yellow dots to adjust points anytime!
-          </div>
-        </div>
-      </div>
-    }
+    </app-page-container>
   `,
   styles: [`
-    .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
-    .row-item { padding:.4rem .5rem; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; }
-    .row-item:hover { background:var(--accent-soft); }
-    .row-item.sel { background:var(--accent-soft); border-left:2px solid var(--accent); }
-    .add-row { display:flex; gap:.4rem; margin-top:.6rem; }
-    .add-col { display:flex; flex-direction:column; gap:.4rem; }
-    .field-row { display:flex; flex-direction:column; gap:.15rem; }
-    .field-row label { font-size:.75rem; color:var(--accent-2); }
-    .onvif-section { border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden; margin:.2rem 0; }
-    .onvif-header { display:flex; justify-content:space-between; padding:.4rem .6rem;
-                    cursor:pointer; font-size:.8rem; color:var(--accent-2); background:var(--surface-2); }
-    .onvif-header:hover { background:var(--accent-soft); }
-    .toggle { font-size:.7rem; }
-    .onvif-fields { padding:.5rem .6rem; display:flex; flex-direction:column; gap:.4rem; background:var(--surface); }
-    .chip { display:inline-block; margin-left:.4rem; padding:.1rem .4rem; border-radius:999px;
-            font-size:.7rem; background:var(--info-soft); color:var(--accent-2); }
-    .zone-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:.75rem; }
-    .draw-toolbar { display:flex; gap:.5rem; margin-bottom:.75rem; align-items:center; flex-wrap:wrap; }
-    .btn-primary { background:var(--accent); color:#fff; border:none; padding:.4rem .9rem; border-radius:var(--radius-sm); font-weight:600; cursor:pointer; }
-    .btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
-    .canvas-container { position:relative; display:inline-block; max-width:100%; }
-    canvas { background:var(--bg); border:1px solid var(--border-strong); border-radius:var(--radius-sm); cursor:crosshair; display:block; }
-    .canvas-hint { margin-top:.4rem; font-size:.8rem; }
-    .small { font-size:.8rem; }
-    .cam-detail-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem; }
-    .cam-list-header { display:flex;justify-content:space-between;gap:.5rem;align-items:center; }
-    .cam-list-header h3 { margin:0; }
-    .danger-text { color:var(--danger)!important; }
-    .edit-grid { display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:.7rem; }
-    .edit-grid label { display:flex;flex-direction:column;gap:.25rem;color:var(--accent-2);font-size:.8rem; }
-    .cam-detail-header h3 { margin:0; }
-    .detail-grid { display:flex; flex-direction:column; gap:.3rem; }
-    .detail-row { display:flex; gap:1rem; font-size:.85rem; }
-    .dk { min-width:140px; color:var(--accent-2); font-size:.8rem; }
-    .dv { color:var(--text); word-break:break-all; }
-    .badge { padding:.18rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
-    .badge.online, .badge.active, .badge.healthy { background:var(--success-soft); color:var(--success); border:1px solid rgba(52,211,153,.3); }
-    .badge.pending { background:var(--surface-2); color:var(--text-muted); border:1px solid var(--border-strong); }
-    .badge.offline, .badge.degraded, .badge.unknown { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(248,113,113,.3); }
-    .btn-link { display:inline-block; padding:.3rem .65rem; border-radius:var(--radius-sm); font-size:.78rem;
-                background:var(--accent-soft); color:var(--accent-2); text-decoration:none; border:1px solid var(--border-strong); }
-    .btn-link:hover { background:rgba(139,92,246,.22); border-color:var(--accent); }
-    .test-result { margin-top:.75rem; padding:.5rem .75rem; border-radius:var(--radius-sm); font-size:.82rem; }
-    .test-result.ok { background:var(--success-soft); color:var(--success); }
-    .test-result.err { background:var(--danger-soft); color:var(--danger); }
-    .connector-card { margin-bottom:1rem; }
-    .conn-header { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:.75rem; }
-    .conn-header h3 { margin:0 0 .25rem; }
-    .conn-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
-    .conn-status { display:flex; align-items:center; gap:.4rem; font-size:.82rem; font-weight:600; white-space:nowrap;
-                   padding:.35rem .65rem; border-radius:999px; border:1px solid var(--border-strong); }
-    .conn-status .dot { width:.55rem; height:.55rem; border-radius:50%; background:var(--text-muted); }
-    .conn-status.on { color:var(--success); border-color:rgba(52,211,153,.35); background:var(--success-soft); }
-    .conn-status.on .dot { background:var(--success); }
-    .conn-status.off { color:var(--text-muted); }
-    .meta { margin:.25rem 0 0; }
-    .err-text { color:var(--danger); font-size:.82rem; margin:.35rem 0 0; }
-    .code-box { margin-top:.75rem; display:flex; justify-content:space-between; align-items:center; gap:1rem;
-                padding:.75rem .9rem; border:1px dashed var(--border-strong); border-radius:var(--radius-sm);
-                background:var(--surface-2); }
-    .code-label { font-size:.75rem; color:var(--accent-2); margin-bottom:.2rem; }
-    .code-value { font-family:ui-monospace,Consolas,monospace; font-size:1.35rem; letter-spacing:.12em; font-weight:700; }
-    .conn-list { margin-top:.75rem; display:flex; flex-direction:column; gap:.35rem; }
-    .conn-row { display:flex; justify-content:space-between; align-items:center; font-size:.85rem; }
-    .update-note { color:var(--warning,#f59e0b);font-size:.82rem;font-weight:600;align-self:center; }
+    .stepper {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: var(--space-md, 16px);
+    }
+    .stepper-btn {
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .stepper-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent-2);
+    }
+    .stepper-btn.done {
+      color: var(--success);
+      border-color: rgba(22, 163, 74, 0.3);
+    }
   `],
 })
-export class SetupComponent implements OnInit, AfterViewInit, OnDestroy {
-  @ViewChild('zoneCanvas') canvasRef?: ElementRef<HTMLCanvasElement>;
-
-  stores: Store[] = [];
-  cameras: Camera[] = [];
-  zones: Zone[] = [];
-  storeId = '';
-  cameraId = '';
-  selectedCamera: Camera | null = null;
-  selectedCameraIds = new Set<string>();
-  editingCamera = false;
-  savingCamera = false;
-  editCamName = '';
-  editCamUrl = '';
-  editOnvifHost = '';
-  editOnvifPort = 80;
-
-  newStoreName = '';
-  newCamName = '';
-  newCamUrl = '';
-  newOnvifHost = '';
-  newOnvifPort: number = 80;
-  showOnvifForm = false;
-
-  draftName = '';
-  draftType = 'HighValue';
-  draftPoints: [number, number][] = [];
-  rectStart: [number, number] | null = null;
-  rectCurrent: [number, number] | null = null;
-
-  draggedPointIndex: number | null = null;
-  hoverPointIndex: number | null = null;
-
-  testingStream = false;
-  streamTestResult: { ok: boolean; message: string } | null = null;
-  connectorAdminHost = 'localhost';
-  connectorAdminPort = 8099;
-
-  loadingSnapshot = false;
-  snapshotError = '';
-  private snapshotImg: HTMLImageElement | null = null;
-  private referenceFrameUrl: string | null = null;
-
-  generatingCode = false;
-  setupCodeError = '';
-  setupCode = '';
-  setupCodeExpires = '';
-  storeConnectors: Connector[] = [];
-  installerInfo: InstallerInfo | null = null;
-  installerError = '';
+export class SetupComponent implements OnInit, OnDestroy {
+  readonly ctx: SetupContextService;
   private pollTimer?: ReturnType<typeof setInterval>;
 
   constructor(
-    private api: ApiService,
-    public auth: AuthService,
+    ctx: SetupContextService,
     private route: ActivatedRoute,
-  ) {}
-
-  get effectiveSnapshotUrl(): string {
-    return this.cameraId
-      ? `url(http://${this.connectorAdminHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId})`
-      : 'none';
-  }
-
-  get liveSnapshotUrl(): string {
-    return this.cameraId
-      ? `http://${this.connectorAdminHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId}`
-      : '';
-  }
-
-  get storeConnectorOnline(): boolean {
-    const now = Date.now();
-    return this.storeConnectors.some((c) => {
-      if (!c.lastHeartbeat) return false;
-      const age = now - new Date(c.lastHeartbeat).getTime();
-      return age < 120_000 && (c.status === 'Healthy' || c.status === 'Degraded');
-    });
-  }
-
-  get installerSizeMb(): string {
-    return this.installerInfo?.sizeBytes
-      ? (this.installerInfo.sizeBytes / 1048576).toFixed(1)
-      : 'Unknown size';
+    private api: ApiService,
+  ) {
+    this.ctx = ctx;
   }
 
   ngOnInit(): void {
-    this.loadStores();
-    this.loadInstallerInfo();
+    this.ctx.loadStores();
+    this.ctx.loadInstallerInfo();
     this.route.queryParamMap.subscribe((params) => {
       const fromQuery = params.get('storeId');
-      const scoped = this.auth.storeId();
+      const stepParam = params.get('step');
+      if (stepParam) {
+        const n = parseInt(stepParam, 10);
+        if (n >= 1 && n <= 4) this.ctx.step = n;
+      }
       this.api.listStores().subscribe((s) => {
-        this.stores = s;
-        const pick = fromQuery || scoped || '';
-        if (pick && s.some((x) => x.id === pick)) this.selectStore(pick);
+        this.ctx.stores = s;
+        const pick = fromQuery || this.ctx.auth.storeId() || '';
+        if (pick && s.some((x) => x.id === pick)) this.ctx.selectStore(pick);
       });
     });
     this.pollTimer = setInterval(() => {
-      if (this.storeId) this.refreshConnectors();
+      if (this.ctx.storeId) this.ctx.refreshConnectors();
     }, 15_000);
   }
 
   ngOnDestroy(): void {
     if (this.pollTimer) clearInterval(this.pollTimer);
-    if (this.referenceFrameUrl) URL.revokeObjectURL(this.referenceFrameUrl);
-  }
-
-  ngAfterViewInit(): void { this.redraw(); }
-
-  loadStores(): void {
-    this.api.listStores().subscribe((s) => {
-      this.stores = s;
-      const scoped = this.auth.storeId();
-      if (scoped && !this.storeId && s.some((x) => x.id === scoped)) this.selectStore(scoped);
-    });
-  }
-
-  loadInstallerInfo(): void {
-    this.api.getInstallerInfo().subscribe({
-      next: (info) => {
-        this.installerInfo = info;
-        this.installerError = '';
-      },
-      error: (err) => {
-        this.installerInfo = null;
-        this.installerError = err?.error?.error || 'Installer information is unavailable';
-      },
-    });
-  }
-
-  downloadInstaller(): void {
-    if (!this.installerInfo?.downloadPath) return;
-    const path = this.installerInfo.downloadPath;
-    if (/^https?:\/\//i.test(path)) {
-      window.location.assign(path);
-      return;
-    }
-    this.api.downloadInstaller(path).subscribe({
-      next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = this.installerInfo?.fileName || 'ONEVO-Connector-Setup.exe';
-        anchor.click();
-        URL.revokeObjectURL(url);
-      },
-      error: (err) => {
-        this.installerError = err?.error?.error || 'Installer download failed';
-      },
-    });
-  }
-
-  generateSetupCode(): void {
-    if (!this.storeId) return;
-    this.generatingCode = true;
-    this.setupCodeError = '';
-    this.api.createSetupCode(this.storeId).subscribe({
-      next: (res) => {
-        this.setupCode = res.code;
-        this.setupCodeExpires = new Date(res.expiresAt).toLocaleString();
-        this.generatingCode = false;
-      },
-      error: (err) => {
-        this.generatingCode = false;
-        this.setupCodeError = err?.error?.error || 'Could not generate setup code';
-      },
-    });
-  }
-
-  copySetupCode(): void {
-    if (!this.setupCode) return;
-    navigator.clipboard?.writeText(this.setupCode);
-  }
-
-  refreshConnectors(): void {
-    if (!this.storeId) { this.storeConnectors = []; return; }
-    this.api.listConnectors(this.storeId).subscribe({
-      next: (c) => {
-        this.storeConnectors = c;
-        const online = c.find((x) => x.adminHost && x.lastHeartbeat);
-        if (online?.adminHost) {
-          this.connectorAdminHost = online.adminHost;
-          this.connectorAdminPort = online.adminPort || 8099;
-        }
-      },
-      error: () => (this.storeConnectors = []),
-    });
-  }
-
-  selectStore(id: string): void {
-    this.storeId = id; this.cameraId = ''; this.zones = []; this.selectedCamera = null;
-    this.setupCode = ''; this.setupCodeExpires = '';
-    this.selectedCameraIds.clear();
-    this.api.listCameras(id).subscribe((c) => (this.cameras = c.filter(x => x.status !== 'Disabled')));
-    this.refreshConnectors();
-  }
-
-  selectCamera(id: string): void {
-    this.cameraId = id;
-    this.streamTestResult = null;
-    this.selectedCamera = this.cameras.find(c => c.id === id) ?? null;
-    this.draftPoints = [];
-    this.rectStart = null;
-    this.rectCurrent = null;
-    this.snapshotImg = null;
-    if (this.referenceFrameUrl) {
-      URL.revokeObjectURL(this.referenceFrameUrl);
-      this.referenceFrameUrl = null;
-    }
-    this.snapshotError = '';
-    this.api.getCamera(id).subscribe(cam => {
-      this.selectedCamera = cam;
-      this.loadSnapshot();
-    });
-    this.api.listZones(id).subscribe((z) => { this.zones = z; setTimeout(() => this.redraw()); });
-  }
-
-  loadSnapshot(): void {
-    if (!this.cameraId) return;
-    this.loadingSnapshot = true;
-    this.snapshotError = '';
-    const img = new Image();
-    // No crossOrigin: the connector admin API sends no CORS headers, and we only
-    // draw the frame (never read pixels back), so a tainted canvas is fine.
-    // Cache-buster so "Refresh frame" always pulls the connector's latest frame.
-    img.src = `http://${this.connectorAdminHost}:${this.connectorAdminPort}/snapshot?camera_id=${this.cameraId}&t=${Date.now()}`;
-    img.onload = () => {
-      this.snapshotImg = img;
-      this.loadingSnapshot = false;
-      this.redraw();
-    };
-    img.onerror = () => {
-      this.loadReferenceFrame();
-    };
-  }
-
-  private loadReferenceFrame(): void {
-    this.api.getCameraReferenceFrame(this.cameraId).subscribe({
-      next: (blob) => {
-        if (this.referenceFrameUrl) URL.revokeObjectURL(this.referenceFrameUrl);
-        this.referenceFrameUrl = URL.createObjectURL(blob);
-        const saved = new Image();
-        saved.onload = () => {
-          this.snapshotImg = saved;
-          this.loadingSnapshot = false;
-          this.snapshotError = '';
-          this.redraw();
-        };
-        saved.onerror = () => this.finishSnapshotError();
-        saved.src = this.referenceFrameUrl;
-      },
-      error: () => this.finishSnapshotError(),
-    });
-  }
-
-  private finishSnapshotError(): void {
-    this.snapshotImg = null;
-    this.loadingSnapshot = false;
-    this.snapshotError =
-      `No live or saved frame for this camera. Connector ${this.connectorAdminHost}:${this.connectorAdminPort} is unavailable.`;
-    this.redraw();
-  }
-
-  addStore(): void {
-    if (!this.newStoreName || !this.auth.isAdmin()) return;
-    this.api.createStore({
-      name: this.newStoreName.trim(),
-      alertVisibilityMode: 'ManagerOnly',
-    }).subscribe(() => { this.newStoreName = ''; this.loadStores(); });
-  }
-
-  addCamera(): void {
-    if (!this.newCamName) return;
-    const rtsp = this.newCamUrl || '';
-    const onvifHost = this.newOnvifHost || undefined;
-    const onvifPort = this.newOnvifHost ? (this.newOnvifPort || 80) : undefined;
-    this.api.createCamera(this.storeId, this.newCamName, rtsp, onvifHost, onvifPort)
-      .subscribe(() => {
-        this.newCamName = ''; this.newCamUrl = ''; this.newOnvifHost = '';
-        this.newOnvifPort = 80; this.showOnvifForm = false;
-        this.selectStore(this.storeId);
-      });
-  }
-
-  get connectorUpdateAvailable(): boolean {
-    if (!this.installerInfo || !this.storeConnectors.length) return false;
-    return this.storeConnectors.some(
-      connector => this.compareVersions(connector.version, this.installerInfo!.version) < 0);
-  }
-
-  private compareVersions(left: string, right: string): number {
-    const parse = (value: string) => value.split('.').map(part => Number.parseInt(part, 10) || 0);
-    const a = parse(left);
-    const b = parse(right);
-    for (let index = 0; index < Math.max(a.length, b.length); index++) {
-      if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
-    }
-    return 0;
-  }
-
-  maskedRtsp(value?: string): string {
-    if (!value) return '—';
-    return value.replace(/(rtsp:\/\/[^:/@\s]+:)[^@\s]+@/i, '$1••••@');
-  }
-
-  startCameraEdit(): void {
-    if (!this.selectedCamera) return;
-    this.editingCamera = true;
-    this.editCamName = this.selectedCamera.name;
-    this.editCamUrl = this.selectedCamera.rtspUrl || '';
-    this.editOnvifHost = this.selectedCamera.onvifHost || '';
-    this.editOnvifPort = this.selectedCamera.onvifPort || 80;
-  }
-
-  saveCameraEdit(): void {
-    if (!this.selectedCamera || !this.editCamName.trim()) return;
-    this.savingCamera = true;
-    this.api.updateCamera(this.selectedCamera.id, {
-      name: this.editCamName.trim(),
-      rtspUrl: this.editCamUrl.trim(),
-      onvifHost: this.editOnvifHost.trim(),
-      onvifPort: this.editOnvifPort || 80,
-    }).subscribe({
-      next: (camera) => {
-        this.savingCamera = false;
-        this.editingCamera = false;
-        this.selectedCamera = camera;
-        this.selectStore(this.storeId);
-      },
-      error: () => (this.savingCamera = false),
-    });
-  }
-
-  toggleCameraSelection(id: string): void {
-    this.selectedCameraIds.has(id)
-      ? this.selectedCameraIds.delete(id)
-      : this.selectedCameraIds.add(id);
-  }
-
-  toggleAllCameras(): void {
-    if (this.selectedCameraIds.size === this.cameras.length) this.selectedCameraIds.clear();
-    else this.selectedCameraIds = new Set(this.cameras.map(camera => camera.id));
-  }
-
-  removeCamera(id: string): void {
-    if (!confirm('Remove this camera from monitoring?')) return;
-    this.api.deleteCamera(id).subscribe(() => this.selectStore(this.storeId));
-  }
-
-  removeSelectedCameras(): void {
-    const ids = [...this.selectedCameraIds];
-    if (!ids.length || !confirm(`Remove ${ids.length} selected camera(s) from monitoring?`)) return;
-    this.api.bulkDisableCameras(ids).subscribe(() => this.selectStore(this.storeId));
-  }
-
-  deleteZone(id: string): void {
-    this.api.deleteZone(id).subscribe(() => this.selectCamera(this.cameraId));
-  }
-
-  testStream(): void {
-    if (!this.cameraId) return;
-    this.testingStream = true;
-    this.streamTestResult = null;
-    this.api.testStream(this.cameraId).subscribe({
-      next: (res) => {
-        this.testingStream = false;
-        this.streamTestResult = { ok: true, message: res.message ?? 'Stream test OK' };
-      },
-      error: (err) => {
-        this.testingStream = false;
-        this.streamTestResult = { ok: false, message: err?.error?.message ?? 'Stream test failed' };
-      },
-    });
-  }
-
-  undoPoint(): void {
-    if (this.draftPoints.length > 0) {
-      this.draftPoints.pop();
-      this.redraw();
-    }
-  }
-
-  clearDraft(): void {
-    this.draftPoints = [];
-    this.rectStart = null;
-    this.rectCurrent = null;
-    this.redraw();
-  }
-
-  onCanvasMouseDown(ev: MouseEvent): void {
-    const canvas = this.canvasRef?.nativeElement;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.round(((ev.clientX - rect.left) / rect.width) * 1000) / 1000;
-    const y = Math.round(((ev.clientY - rect.top) / rect.height) * 1000) / 1000;
-
-    // Check if clicking near an existing draft point to start dragging
-    const clickRadius = 0.04; // 4% threshold for handle hit
-    const nearIdx = this.draftPoints.findIndex(p => Math.hypot(p[0] - x, p[1] - y) < clickRadius);
-
-    if (nearIdx !== -1) {
-      this.draggedPointIndex = nearIdx;
-      return;
-    }
-
-    if (this.draftPoints.length === 0) {
-      // First click: start rectangle / point sequence
-      this.rectStart = [x, y];
-      this.rectCurrent = [x, y];
-      this.draftPoints.push([x, y]);
-    } else if (this.draftPoints.length === 1 && this.rectStart) {
-      // Second click: complete initial box
-      const x1 = Math.min(this.rectStart[0], x);
-      const y1 = Math.min(this.rectStart[1], y);
-      const x2 = Math.max(this.rectStart[0], x);
-      const y2 = Math.max(this.rectStart[1], y);
-      this.draftPoints = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
-      this.rectStart = null;
-      this.rectCurrent = null;
-    } else {
-      // Additional clicks: append polygon point
-      this.draftPoints.push([x, y]);
-    }
-    this.redraw();
-  }
-
-  onCanvasMouseMove(ev: MouseEvent): void {
-    const canvas = this.canvasRef!.nativeElement;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.round(((ev.clientX - rect.left) / rect.width) * 1000) / 1000;
-    const y = Math.round(((ev.clientY - rect.top) / rect.height) * 1000) / 1000;
-
-    // Handle point dragging
-    if (this.draggedPointIndex !== null) {
-      this.draftPoints[this.draggedPointIndex] = [x, y];
-      this.redraw();
-      return;
-    }
-
-    // Hover effect for points
-    const hoverRadius = 0.04;
-    const nearIdx = this.draftPoints.findIndex(p => Math.hypot(p[0] - x, p[1] - y) < hoverRadius);
-    if (nearIdx !== this.hoverPointIndex) {
-      this.hoverPointIndex = nearIdx !== -1 ? nearIdx : null;
-      canvas.style.cursor = nearIdx !== -1 ? 'grab' : 'crosshair';
-      this.redraw();
-    }
-
-    // Live preview for initial box creation
-    if (this.rectStart && this.draftPoints.length === 1) {
-      this.rectCurrent = [x, y];
-      this.redraw();
-    }
-  }
-
-  onCanvasMouseUp(ev: MouseEvent): void {
-    if (this.draggedPointIndex !== null) {
-      this.draggedPointIndex = null;
-      this.redraw();
-    }
-  }
-
-  saveZone(): void {
-    if (this.draftPoints.length < 3 || !this.draftName) return;
-    this.api.createZone(this.cameraId, this.draftName, this.draftType, JSON.stringify(this.draftPoints))
-      .subscribe(() => { this.draftName = ''; this.draftPoints = []; this.selectCamera(this.cameraId); });
-  }
-
-  private redraw(): void {
-    const canvas = this.canvasRef?.nativeElement;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // Camera frame as the drawing background (drawn onto the canvas itself so
-    // zones are always aligned against the real scene).
-    if (this.snapshotImg) {
-      ctx.drawImage(this.snapshotImg, 0, 0, w, h);
-    }
-
-    // Existing saved zones
-    for (const z of this.zones) {
-      let pts: [number, number][] = [];
-      try { pts = JSON.parse(z.polygonJson); } catch { pts = []; }
-      this.drawPoly(ctx, pts, w, h, z.zoneType === 'HighValue' ? 'rgba(255,120,120,0.35)' : 'rgba(120,160,255,0.3)');
-    }
-
-    // Current draft polygon / preview box
-    if (this.draftPoints.length > 1) {
-      this.drawPoly(ctx, this.draftPoints, w, h, 'rgba(255,220,120,0.5)', true);
-    } else if (this.draftPoints.length === 1 && this.rectStart && this.rectCurrent) {
-      const x1 = Math.min(this.rectStart[0], this.rectCurrent[0]);
-      const y1 = Math.min(this.rectStart[1], this.rectCurrent[1]);
-      const x2 = Math.max(this.rectStart[0], this.rectCurrent[0]);
-      const y2 = Math.max(this.rectStart[1], this.rectCurrent[1]);
-      const rectPts: [number, number][] = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
-      this.drawPoly(ctx, rectPts, w, h, 'rgba(255,220,120,0.4)', true);
-    }
-    this.drawPoly(ctx, this.draftPoints, w, h, 'rgba(255,220,120,0.5)', true);
-  }
-
-  private drawPoly(ctx: CanvasRenderingContext2D, pts: [number, number][], w: number, h: number, fill: string, interactive = false): void {
-    if (pts.length === 0) return;
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0] * w, pts[0][1] * h);
-    for (const p of pts.slice(1)) ctx.lineTo(p[0] * w, p[1] * h);
-    if (pts.length >= 3) ctx.closePath();
-    ctx.fillStyle = fill;
-    ctx.strokeStyle = interactive ? '#ffd678' : '#e6e6e6';
-    ctx.lineWidth = interactive ? 2.5 : 1.5;
-    ctx.fill();
-    ctx.stroke();
-
-    if (interactive) {
-      for (let i = 0; i < pts.length; i++) {
-        const px = pts[i][0] * w;
-        const py = pts[i][1] * h;
-        const isHover = i === this.hoverPointIndex || i === this.draggedPointIndex;
-
-        ctx.beginPath();
-        ctx.arc(px, py, isHover ? 8 : 5, 0, Math.PI * 2);
-        ctx.fillStyle = isHover ? '#ffffff' : '#ffd678';
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-        ctx.shadowBlur = 4;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#8b5cf6';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-    }
   }
 }
