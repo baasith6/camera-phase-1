@@ -10,7 +10,7 @@ Deploy ONEVO to a **single GPU Azure VM** with **Docker Compose**, built and rel
 | Windows connector | **Shop PCs** — downloaded from dashboard after login |
 | CI/CD | GitHub Actions or **Jenkins** → ACR or VM build → SSH deploy to VM |
 
-Shop staff download `ONEVO-Connector-Setup-*.exe` from **Get started / Admin / Setup** in the dashboard. The backend serves the file from `/opt/onevo/app/installer-site/` on the VM (mounted into the backend container). The connector service itself does **not** run in Azure.
+Shop staff download `ONEVO-Connector-Setup-*.exe` from **Get started / Admin / Setup** in the dashboard. The backend serves the file from `/opt/onevo/app/connector/dist/` on the VM (mounted into the backend container). The connector service itself does **not** run in Azure.
 
 ## 1. Provision Azure (one time)
 
@@ -157,7 +157,7 @@ docker exec app-cloud-ai-1 python -c "from app.detector import DEFAULT_YOLOE_PRO
 |-------|-----|
 | GPU quota denied | Use CPU VM or request quota increase; set `CLOUD_AI_DEVICE=cpu` in `.env` |
 | ACR pull 401 on VM | Check `ACR_*` in `.env`; run `docker login` manually on VM |
-| Installer 404 | Ensure `build-installer` job succeeded and EXE exists in `/opt/onevo/app/installer-site/` |
+| Installer 404 | Ensure `build-installer` job succeeded and EXE exists in `/opt/onevo/app/connector/dist/` |
 | CORS errors | Set `CORS_ORIGINS=https://app.yourdomain.example` in `.env` |
 | Deploy SSH fails | Verify `VM_SSH_KEY`, NSG allows SSH from GitHub Actions IPs (or use self-hosted runner in same VNet) |
 | Clip upload timeout (`:9000`) | NSG must allow **9000**; set `S3_PUBLIC_ENDPOINT=http://<VM_IP>:9000` in `.env`; test `curl http://<VM_IP>:9000/minio/health/live` from shop PC |

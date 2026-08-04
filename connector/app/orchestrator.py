@@ -26,6 +26,11 @@ class StoreOrchestrator:
     def run(self):
         self.state.log("Orchestrator starting. Polling for cameras...")
         while not self.stop_event.is_set():
+            # Stop all backend polling and pipeline management while the local
+            # control page is in its managed stopped state.
+            if self.state.capture_paused:
+                time.sleep(0.25)
+                continue
             try:
                 cams = self.client.get_cameras()
             except Exception as e:
@@ -88,7 +93,22 @@ class StoreOrchestrator:
                         cam_cfg.onvif_port = cam.get("onvifPort") or 80
 
                     # Note: We reuse the global state for metrics
-                    pipeline = CapturePipeline(cam_cfg, self.state)
+                    def publish_reference(camera_id: str, jpeg: bytes) -> bool:
+                        try:
+                            self.client.upload_reference_frame(camera_id, jpeg)
+                            self.state.log(f"Saved zone reference frame for camera {camera_id}")
+                            return True
+                        except Exception as exc:  # noqa: BLE001
+                            self.state.log(f"Reference frame upload failed for camera {camera_id}: {exc}")
+                            return False
+
+                    pipeline = CapturePipeline(
+                        cam_cfg,
+                        self.state,
+                        zone_provider=lambda _cid=cid: self.client.get_zones(_cid),
+                        zone_revision=lambda _cid=cid: self.state.zone_revision(_cid),
+                        reference_frame_publisher=publish_reference,
+                    )
                     
                     def on_clip(path: str, duration: float, trigger: str, _cid=cid):
                         self.store.enqueue(path, _cid, duration, trigger)

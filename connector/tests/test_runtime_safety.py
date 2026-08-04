@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app.instance_lock import InstanceLock
+from app.runtime import RuntimeState
 from app.store import LocalStore
 from app import tray
 
@@ -27,6 +28,19 @@ class InstanceLockTests(unittest.TestCase):
 
 
 class LocalStoreConcurrencyTests(unittest.TestCase):
+    def test_managed_stop_preserves_local_control_state(self):
+        state = RuntimeState()
+        state.set_paused(True)
+        self.assertTrue(state.capture_paused)
+        self.assertEqual(state.snapshot()["monitoringState"], "stopped")
+        stopped = threading.Event()
+        stopped.set()
+        self.assertFalse(state.wait_until_running(stopped, timeout=0.001))
+
+        state.set_paused(False)
+        self.assertEqual(state.snapshot()["monitoringState"], "running")
+        self.assertTrue(state.wait_until_running(threading.Event(), timeout=0.001))
+
     def test_monitoring_pause_setting_survives_reopen(self):
         with tempfile.TemporaryDirectory() as temp:
             store = LocalStore(temp)
@@ -110,14 +124,16 @@ class TrayLogicTests(unittest.TestCase):
             service.release()
 
     def test_open_admin_starts_stopped_service_and_opens_dashboard(self):
-        with (
-            patch("app.tray.health_ready", return_value=False),
-            patch("app.tray.service_status", return_value="stopped"),
-            patch("app.tray.service_action", return_value=True) as action,
-            patch("app.tray.wait_for_health", return_value=True),
-            patch("app.tray.webbrowser.open", return_value=True) as browser,
-        ):
-            self.assertTrue(tray.open_admin())
+        with tempfile.TemporaryDirectory() as temp:
+            with (
+                patch("app.tray.health_ready", return_value=False),
+                patch("app.tray.service_status", return_value="stopped"),
+                patch("app.tray.pause_marker_path", return_value=Path(temp) / "not-paused"),
+                patch("app.tray.service_action", return_value=True) as action,
+                patch("app.tray.wait_for_health", return_value=True),
+                patch("app.tray.webbrowser.open", return_value=True) as browser,
+            ):
+                self.assertTrue(tray.open_admin())
 
         action.assert_called_once_with("start")
         browser.assert_called_once_with(tray.DEFAULT_ADMIN_URL)
@@ -132,6 +148,39 @@ class TrayLogicTests(unittest.TestCase):
             self.assertFalse(tray.open_admin(max_wait=0))
 
         browser.assert_not_called()
+
+    def test_open_admin_resumes_paused_monitoring_before_opening_dashboard(self):
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch("app.tray.health_ready", return_value=False),
+            patch("app.tray.service_status", return_value="stopped"),
+            patch("app.tray.pause_marker_path", return_value=Path(temp) / "paused"),
+            patch("app.tray.request_resume_monitoring", return_value=True) as resume,
+            patch("app.tray.wait_for_health", return_value=True),
+            patch("app.tray.service_action") as action,
+            patch("app.tray.webbrowser.open", return_value=True) as browser,
+        ):
+            (Path(temp) / "paused").touch()
+            self.assertTrue(tray.open_admin())
+
+        resume.assert_called_once_with()
+        action.assert_not_called()
+        browser.assert_called_once_with(tray.DEFAULT_ADMIN_URL)
+
+    def test_resume_monitoring_repairs_missing_windows_service(self):
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch("app.tray.pause_marker_path", return_value=Path(temp) / "missing.pause"),
+            patch("app.tray.default_state_dir", return_value=temp),
+            patch("app.tray.set_service_auto_start", return_value=True),
+            patch("app.tray.service_status", return_value="missing"),
+            patch("app.tray.service_action", side_effect=[True, True]) as action,
+            patch("app.tray.wait_for_health", return_value=True),
+        ):
+            self.assertTrue(tray.resume_monitoring())
+
+        self.assertEqual(action.call_args_list[0].args, ("install",))
+        self.assertEqual(action.call_args_list[1].args, ("start",))
 
     def test_tray_exit_writes_signal_in_connector_state_directory(self):
         with tempfile.TemporaryDirectory() as temp:

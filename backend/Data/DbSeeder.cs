@@ -23,6 +23,8 @@ public static class DbSeeder
             """
             ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ConnectorId" uuid NULL;
             ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "SourceKey" text NULL;
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ReferenceFrameObjectKey" text NULL;
+            ALTER TABLE "Cameras" ADD COLUMN IF NOT EXISTS "ReferenceFrameCapturedAt" timestamp with time zone NULL;
             CREATE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId" ON "Cameras" ("ConnectorId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_Cameras_ConnectorId_SourceKey"
                 ON "Cameras" ("ConnectorId", "SourceKey")
@@ -281,8 +283,6 @@ public static class DbSeeder
             db.Cameras.Add(camera2);
 
             // Shared installer/seed templates keep test-video behavior identical.
-            db.CameraZones.AddRange(DemoZoneTemplates.Create(camera.Id));
-            db.CameraZones.AddRange(DemoZoneTemplates.Create(camera2.Id));
         }
 
         await db.SaveChangesAsync();

@@ -48,6 +48,9 @@ public class Camera
     public string? CameraModel { get; set; }
     public string? CameraSerial { get; set; }
     public string? CameraFirmware { get; set; }
+    /// <summary>MinIO object captured while zones were last created or updated.</summary>
+    public string? ReferenceFrameObjectKey { get; set; }
+    public DateTimeOffset? ReferenceFrameCapturedAt { get; set; }
 
     public List<CameraZone> Zones { get; set; } = new();
 }

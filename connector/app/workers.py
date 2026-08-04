@@ -21,12 +21,18 @@ def disk_free_pct(path: str) -> float:
 def run_uploader(cfg: Config, client: BackendClient, store: LocalStore,
                  state: RuntimeState, stop: threading.Event) -> None:
     while not stop.is_set():
+        # A managed stop must leave queued clips durable but prevent every
+        # cloud-side upload until the operator explicitly starts monitoring.
+        if not state.wait_until_running(stop):
+            break
         job = store.next_pending()
         if job is None:
             state.queue_depth = store.pending_count()
             stop.wait(1.0)
             continue
 
+        if state.capture_paused:
+            continue
         state.queue_depth = store.pending_count()
         try:
             store.mark(job.id, "uploading")
@@ -61,6 +67,10 @@ def run_heartbeat(cfg: Config, client: BackendClient, store: LocalStore,
 
     admin_host = admin_public_host()
     while not stop.is_set():
+        # Do not report a stopped connector as online. The local UI remains
+        # reachable, but cloud traffic is intentionally paused.
+        if not state.wait_until_running(stop):
+            break
         free = disk_free_pct(cfg.state_dir)
         state.disk_free_pct = free
         operational = None

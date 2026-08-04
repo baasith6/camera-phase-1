@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import paths
+from .capture import validate_rtsp_stream
 from .paths import CameraSource, WizardConfig
 
 
@@ -65,7 +66,14 @@ def claim_setup(client, store, wizard: WizardConfig, version: str) -> tuple[str,
     return cid, store_id
 
 
-def provision_sources(client, sources: list[CameraSource], state, checkpoint=None) -> list[CameraSource]:
+def provision_sources(
+    client,
+    sources: list[CameraSource],
+    state,
+    checkpoint=None,
+    *,
+    preflight_rtsp: bool = False,
+) -> list[CameraSource]:
     validate_sources(sources)
     created: list[CameraSource] = []
 
@@ -90,13 +98,17 @@ def provision_sources(client, sources: list[CameraSource], state, checkpoint=Non
             source.resolved_rtsp_url = rtsp_url
             device_info = onvif.get_device_info()
 
+        if preflight_rtsp and rtsp_url and rtsp_url.lower().startswith("rtsp://"):
+            ok, message = validate_rtsp_stream(rtsp_url)
+            if not ok:
+                raise ValueError(f"{source.name}: RTSP preflight failed: {message}")
+
         camera = client.create_camera({
             "sourceKey": source.source_key,
             "name": source.name,
             "rtspUrl": rtsp_url or f"file://{source.source_file}",
             "onvifHost": source.onvif_host or None,
             "onvifPort": source.onvif_port if source.onvif_host else None,
-            "useDemoZones": bool(source.source_file),
         })
         source.camera_id = camera.get("id") or camera.get("Id") or ""
         if checkpoint:

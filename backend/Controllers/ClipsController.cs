@@ -132,7 +132,12 @@ public class ClipsController : ControllerBase
 
         var alertIds = await _db.Alerts
             .Where(a => clipIds.Contains(a.ClipId))
-            .Select(a => new { a.ClipId, a.Id })
+            .GroupBy(a => a.ClipId)
+            .Select(g => new
+            {
+                ClipId = g.Key,
+                Id = g.OrderByDescending(a => a.CreatedAt).Select(a => a.Id).First()
+            })
             .ToDictionaryAsync(x => x.ClipId, x => x.Id);
 
         var items = rows.Select(r => new ClipListItemResponse(

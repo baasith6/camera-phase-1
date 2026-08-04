@@ -5,6 +5,7 @@ using Onevo.Api.Auth;
 using Onevo.Api.Contracts;
 using Onevo.Api.Data;
 using Onevo.Api.Domain;
+using Onevo.Api.Services;
 
 namespace Onevo.Api.Controllers;
 
@@ -32,6 +33,8 @@ public class ZonesController : ControllerBase
         if (camera is null) return Forbid();
         if (!Enum.TryParse<ZoneType>(req.ZoneType, true, out var zt))
             return BadRequest(new { error = "Invalid zoneType" });
+        if (!ZonePolygonValidator.IsValid(req.PolygonJson))
+            return BadRequest(new { error = "polygonJson must be normalized [[x,y], ...] with at least three points" });
 
         var zone = new CameraZone
         {
@@ -53,7 +56,12 @@ public class ZonesController : ControllerBase
         if (zone is null) return NotFound();
         if (await AuthorizeCameraAsync(zone.CameraId) is null) return Forbid();
         if (req.Name is not null) zone.Name = req.Name;
-        if (req.PolygonJson is not null) zone.PolygonJson = req.PolygonJson;
+        if (req.PolygonJson is not null)
+        {
+            if (!ZonePolygonValidator.IsValid(req.PolygonJson))
+                return BadRequest(new { error = "polygonJson must be normalized [[x,y], ...] with at least three points" });
+            zone.PolygonJson = req.PolygonJson;
+        }
         if (req.ZoneType is not null && Enum.TryParse<ZoneType>(req.ZoneType, true, out var zt))
             zone.ZoneType = zt;
         await _db.SaveChangesAsync();

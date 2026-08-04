@@ -101,7 +101,6 @@ jobs:
             --exclude node_modules \
             --exclude dashboard/dist \
             --exclude connector/dist/build \
-            --exclude "installer-site/*.exe" \
             -e ssh ./ "${VM_USER}@${VM_HOST}:${ONEVO_APP_DIR}/"
 
       - name: Write production .env and deploy
@@ -112,7 +111,7 @@ jobs:
           DASHBOARD_IMAGE: ${{ needs.build-push.outputs.dashboard_image }}
           CLOUD_AI_IMAGE: ${{ needs.build-push.outputs.cloud_ai_image }}
         run: |
-          ssh "${VM_USER}@${VM_HOST}" "mkdir -p ${ONEVO_APP_DIR}/installer-site ${ONEVO_APP_DIR}/connector/dist"
+          ssh "${VM_USER}@${VM_HOST}" "mkdir -p ${ONEVO_APP_DIR}/connector/dist"
           printf '%s\n' "${{ secrets.PRODUCTION_ENV }}" > /tmp/onevo.env
           {
             echo ""
@@ -191,6 +190,5 @@ jobs:
           $keyPath = "$env:RUNNER_TEMP/deploy_key"
           Set-Content -Path $keyPath -Value $env:VM_SSH_KEY -NoNewline
           $appDir = "/opt/onevo/app"
-          scp -i $keyPath -o StrictHostKeyChecking=no $exe.FullName "${env:VM_USER}@${env:VM_HOST}:${appDir}/installer-site/"
           scp -i $keyPath -o StrictHostKeyChecking=no $exe.FullName "${env:VM_USER}@${env:VM_HOST}:${appDir}/connector/dist/"
-          ssh -i $keyPath -o StrictHostKeyChecking=no "${env:VM_USER}@${env:VM_HOST}" "ls -la ${appDir}/installer-site/"
+          ssh -i $keyPath -o StrictHostKeyChecking=no "${env:VM_USER}@${env:VM_HOST}" "ls -la ${appDir}/connector/dist/"

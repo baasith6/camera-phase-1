@@ -37,3 +37,6 @@ installer-site/*.exe
 # IDE
 .vs/
 .idea/
+
+# Claude Code local settings (contains API keys)
+.claude/
