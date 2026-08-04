@@ -172,7 +172,53 @@ public class AlertReview
     public ReviewAction Action { get; set; }
     public string? ReasonCode { get; set; }
     public string? Notes { get; set; }
+    // Patterns the reviewer confirmed at review time, JSON array of AiEventType names.
+    // Null = review submitted by a client without pattern selection (pre-feature).
+    public string? ConfirmedPatternsJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Current training-ready dataset entry built from human alert reviews.
+/// Deliberately has no FK to Alerts: samples must survive alert retention/bulk-delete.
+/// One sample per alert (unique AlertId); re-reviews update it in place.
+/// </summary>
+public class TrainingSample
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AlertId { get; set; }
+    public Guid ClipId { get; set; }
+    /// <summary>Original alert clip object key (may be deleted by retention later).</summary>
+    public string SourceClipObjectKey { get; set; } = string.Empty;
+    /// <summary>Dedicated dataset copy: training-dataset/{storeId}/{sampleId}/clip.mp4</summary>
+    public string DatasetClipObjectKey { get; set; } = string.Empty;
+    public Guid StoreId { get; set; }
+    public Guid CameraId { get; set; }
+    public string AlertType { get; set; } = string.Empty;
+    public ReviewAction ReviewOutcome { get; set; }
+    public Guid ReviewerId { get; set; }
+    public string ModelVersion { get; set; } = "unknown";
+    public string RuleVersion { get; set; } = string.Empty;
+    public DatasetStatus DatasetStatus { get; set; } = DatasetStatus.Ready;
+    public bool IncludeInTraining { get; set; } = true;
+    // Append-only audit of label edits made from the Training page: [{by, at, patterns}].
+    public string EditHistoryJson { get; set; } = "[]";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public List<TrainingSamplePattern> Patterns { get; set; } = new();
+}
+
+/// <summary>Per-pattern label for a training sample (clip-level multi-label classification).</summary>
+public class TrainingSamplePattern
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TrainingSampleId { get; set; }
+    public TrainingSample? TrainingSample { get; set; }
+    public AiEventType Pattern { get; set; }
+    public bool AiDetected { get; set; }
+    public bool HumanConfirmed { get; set; }
+    public PatternLabelStatus LabelStatus { get; set; }
 }
 
 // Scoped risk configuration. Null scope fields = applies as store-wide/global default.

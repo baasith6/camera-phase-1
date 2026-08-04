@@ -168,8 +168,72 @@ public record AiEventDto(
 public record AiEventsBatchRequest(Guid ClipId, string ModelVersion, List<AiEventDto> Events);
 
 // ---- Alerts / reviews ----
-public record ReviewRequest(string Action, string? ReasonCode, string? Notes);
+public record ReviewRequest(
+    string Action,
+    string? ReasonCode,
+    string? Notes,
+    List<string>? ConfirmedPatterns = null);
 
 public record BulkDeleteRequest(Guid? StoreId, List<Guid>? Ids, bool DeleteAllInStore = false);
 
 public record BulkDeleteResponse(int Deleted, int Skipped, List<string> Errors);
+
+// ---- Training dataset ----
+public record TrainingPatternLabel(
+    string Pattern,
+    bool AiDetected,
+    bool HumanConfirmed,
+    string LabelStatus);
+
+public record TrainingSampleListItem(
+    Guid Id,
+    Guid AlertId,
+    Guid ClipId,
+    string AlertType,
+    List<string> AiDetectedPatterns,
+    List<string> HumanConfirmedPatterns,
+    int PositiveCount,
+    int HardNegativeCount,
+    string ReviewOutcome,
+    string DatasetStatus,
+    bool IncludeInTraining,
+    string ReviewerEmail,
+    string ModelVersion,
+    string StoreName,
+    string CameraName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public record TrainingSampleDetail(
+    Guid Id,
+    Guid AlertId,
+    Guid ClipId,
+    string AlertType,
+    List<TrainingPatternLabel> Labels,
+    string ReviewOutcome,
+    string DatasetStatus,
+    bool IncludeInTraining,
+    string ReviewerEmail,
+    string ModelVersion,
+    string RuleVersion,
+    string StoreName,
+    string CameraName,
+    string? ClipUrl,
+    string EditHistoryJson,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public record TrainingStatsResponse(
+    int Total,
+    int Ready,
+    int Pending,
+    int Excluded,
+    int ClipIssues,
+    Dictionary<string, int> PositiveByPattern,
+    Dictionary<string, int> HardNegativeByPattern,
+    Dictionary<string, int> ByModelVersion,
+    Dictionary<string, int> ByStore);
+
+public record UpdateLabelsRequest(List<string> ConfirmedPatterns);
+
+public record IncludeRequest(bool Include);

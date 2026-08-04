@@ -52,6 +52,11 @@ public class AlertsController : ControllerBase
         return Ok(visible);
     }
 
+    // GET /api/alerts/patterns — the supported suspicious-activity patterns.
+    // Single source of truth: the AiEventType enum.
+    [HttpGet("patterns")]
+    public IActionResult Patterns() => Ok(Enum.GetNames<AiEventType>());
+
     // GET /api/alerts/{id} — returns alert with a fresh 24-hour presigned clip URL.
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id)
@@ -82,6 +87,22 @@ public class AlertsController : ControllerBase
             freshUrl = alert.ClipUrl;  // already a URL (legacy alerts or dev mode)
         }
 
+        // AI detections for this clip so the review UI can pre-select patterns.
+        var aiEventRows = await _db.AiEvents
+            .Where(e => e.ClipId == alert.ClipId)
+            .OrderBy(e => e.StartTs)
+            .Select(e => new { e.EventType, e.Confidence, e.StartTs, e.EndTs })
+            .ToListAsync();
+        var aiEvents = aiEventRows
+            .Select(e => new
+            {
+                EventType = e.EventType.ToString(),
+                e.Confidence,
+                e.StartTs,
+                e.EndTs,
+            })
+            .ToList();
+
         // Return the alert with the fresh URL.
         return Ok(new
         {
@@ -99,6 +120,7 @@ public class AlertsController : ControllerBase
             alert.Status,
             alert.CreatedAt,
             alert.Reviews,
+            AiEvents = aiEvents,
             ClipUrl = freshUrl,   // fresh presigned URL, valid 24h
         });
     }
@@ -178,13 +200,36 @@ public class AlertsController : ControllerBase
         if ((action is ReviewAction.Dismiss or ReviewAction.FalsePositive) && string.IsNullOrWhiteSpace(req.ReasonCode))
             return BadRequest(new { error = "Reason code required for dismiss / false positive" });
 
+        // Validate confirmed patterns against the AiEventType enum (single source of truth).
+        // Null = old client without pattern selection: keep saving the review, no dataset entry.
+        List<string>? confirmed = null;
+        if (req.ConfirmedPatterns is not null)
+        {
+            confirmed = new List<string>();
+            foreach (var p in req.ConfirmedPatterns)
+            {
+                if (!Enum.TryParse<AiEventType>(p, true, out var pattern))
+                    return BadRequest(new { error = $"Unknown pattern '{p}'" });
+                var name = pattern.ToString();
+                if (confirmed.Contains(name))
+                    return BadRequest(new { error = $"Duplicate pattern '{p}'" });
+                confirmed.Add(name);
+            }
+
+            if (action is ReviewAction.Confirm && confirmed.Count == 0)
+                return BadRequest(new { error = "Select at least one pattern to confirm the incident" });
+            if (action is ReviewAction.FalsePositive && confirmed.Count > 0)
+                return BadRequest(new { error = "False positive reviews must not have confirmed patterns" });
+        }
+
         var review = new AlertReview
         {
             AlertId = alert.Id,
             ReviewerId = TenantAccess.CurrentUserId(User),
             Action = action,
             ReasonCode = req.ReasonCode,
-            Notes = req.Notes
+            Notes = req.Notes,
+            ConfirmedPatternsJson = confirmed is null ? null : JsonSerializer.Serialize(confirmed)
         };
         _db.AlertReviews.Add(review);
 
@@ -197,8 +242,131 @@ public class AlertsController : ControllerBase
             _ => alert.Status
         };
 
+        await UpsertTrainingSampleAsync(alert, action, confirmed, review.ReviewerId);
+
         await _db.SaveChangesAsync();
         return Ok(alert);
+    }
+
+    /// <summary>
+    /// Dataset bookkeeping for the human-in-the-loop training pipeline.
+    /// Confirm/FalsePositive with pattern data upserts the sample (one per alert) and
+    /// copies the clip into training-dataset storage. Dismiss excludes an existing sample;
+    /// NeedsFollowUp marks it pending. Never fails the review itself.
+    /// </summary>
+    private async Task UpsertTrainingSampleAsync(
+        Alert alert, ReviewAction action, List<string>? confirmed, Guid reviewerId)
+    {
+        var existing = await _db.TrainingSamples
+            .Include(t => t.Patterns)
+            .FirstOrDefaultAsync(t => t.AlertId == alert.Id);
+
+        if (action is ReviewAction.Dismiss)
+        {
+            // Dismiss carries no ground truth — never auto-create a sample.
+            if (existing is not null)
+            {
+                existing.DatasetStatus = DatasetStatus.Excluded;
+                existing.IncludeInTraining = false;
+                existing.ReviewOutcome = action;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            return;
+        }
+
+        if (action is ReviewAction.NeedsFollowUp)
+        {
+            // Undetermined — keep labels but hold the sample out of training.
+            if (existing is not null)
+            {
+                existing.DatasetStatus = DatasetStatus.PendingReview;
+                existing.ReviewOutcome = action;
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            return;
+        }
+
+        // Confirm / FalsePositive: only clients that sent pattern data create samples.
+        if (confirmed is null) return;
+
+        var detected = (await _db.AiEvents
+                .Where(e => e.ClipId == alert.ClipId)
+                .Select(e => e.EventType)
+                .Distinct()
+                .ToListAsync())
+            .Select(e => e.ToString())
+            .ToList();
+        if (!string.IsNullOrEmpty(alert.AlertType)
+            && Enum.TryParse<AiEventType>(alert.AlertType, true, out _)
+            && !detected.Contains(alert.AlertType))
+        {
+            detected.Add(alert.AlertType);
+        }
+
+        var sample = existing;
+        if (sample is null)
+        {
+            sample = new TrainingSample { AlertId = alert.Id };
+            _db.TrainingSamples.Add(sample);
+        }
+
+        sample.ClipId = alert.ClipId;
+        sample.StoreId = alert.StoreId;
+        sample.CameraId = alert.CameraId;
+        sample.AlertType = alert.AlertType;
+        sample.ReviewOutcome = action;
+        sample.ReviewerId = reviewerId;
+        sample.ModelVersion = alert.ModelVersion;
+        sample.RuleVersion = alert.RuleVersion;
+        sample.IncludeInTraining = true;
+        sample.UpdatedAt = DateTimeOffset.UtcNow;
+
+        // Recalculate per-pattern labels: confirmed → Positive, AI-only → HardNegative.
+        _db.TrainingSamplePatterns.RemoveRange(sample.Patterns);
+        sample.Patterns.Clear();
+        foreach (var name in confirmed.Union(detected))
+        {
+            var isConfirmed = confirmed.Contains(name);
+            sample.Patterns.Add(new TrainingSamplePattern
+            {
+                TrainingSampleId = sample.Id,
+                Pattern = Enum.Parse<AiEventType>(name),
+                AiDetected = detected.Contains(name),
+                HumanConfirmed = isConfirmed,
+                LabelStatus = isConfirmed ? PatternLabelStatus.Positive : PatternLabelStatus.HardNegative
+            });
+        }
+
+        // Copy the clip into dedicated dataset storage so it survives alert retention.
+        sample.SourceClipObjectKey =
+            (!string.IsNullOrEmpty(alert.ClipUrl) && !alert.ClipUrl.StartsWith("http"))
+                ? alert.ClipUrl : string.Empty;
+        var destKey = $"training-dataset/{alert.StoreId}/{sample.Id}/clip.mp4";
+
+        if (!string.IsNullOrEmpty(sample.DatasetClipObjectKey)
+            && await _s3.ExistsAsync(sample.DatasetClipObjectKey))
+        {
+            sample.DatasetStatus = DatasetStatus.Ready;  // already copied (re-review)
+        }
+        else if (string.IsNullOrEmpty(sample.SourceClipObjectKey)
+                 || !await _s3.ExistsAsync(sample.SourceClipObjectKey))
+        {
+            sample.DatasetStatus = DatasetStatus.ClipUnavailable;
+        }
+        else
+        {
+            try
+            {
+                await _s3.CopyAsync(sample.SourceClipObjectKey, destKey);
+                sample.DatasetClipObjectKey = destKey;
+                sample.DatasetStatus = DatasetStatus.Ready;
+            }
+            catch
+            {
+                // Copy failure must not lose the review; retried on next re-review.
+                sample.DatasetStatus = DatasetStatus.CopyFailed;
+            }
+        }
     }
 
     [Authorize(Roles = "Admin,Manager")]

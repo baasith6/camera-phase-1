@@ -41,10 +41,6 @@ import { StatusPillComponent } from './status-pill.component';
         }
       </div>
 
-      <p class="disclaimer muted small" role="note">
-        AI flagged this for your review — you decide what happens next.
-      </p>
-
       <div class="pane-body">
         <div class="col-main">
           <div class="card">
@@ -86,6 +82,8 @@ import { StatusPillComponent } from './status-pill.component';
               [saving]="saving"
               [error]="reviewError"
               [saved]="saved"
+              [patterns]="patterns"
+              [detectedPatterns]="detectedPatterns"
               (review)="onReview($event)" />
           </div>
         </div>
@@ -101,7 +99,6 @@ import { StatusPillComponent } from './status-pill.component';
     .pane-header h3 { margin: 0 0 6px; font-size: 1.1rem; }
     .queue-nav { display: flex; gap: 8px; }
     .queue-nav button { min-height: 44px; }
-    .disclaimer { margin: 0 0 12px; }
     .pane-body { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
     @media (max-width: 900px) { .pane-body { grid-template-columns: 1fr; } }
     .col-main, .col-side { display: flex; flex-direction: column; gap: 12px; }
@@ -125,8 +122,15 @@ export class AlertReviewPaneComponent implements OnChanges {
   saving = false;
   saved = false;
   reviewError = '';
+  patterns: string[] = [];
+  detectedPatterns: string[] = [];
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService) {
+    this.api.getPatterns().subscribe({
+      next: (p) => (this.patterns = p),
+      error: () => (this.patterns = []),  // checkboxes hidden; review still works
+    });
+  }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['alertId']) {
@@ -146,12 +150,16 @@ export class AlertReviewPaneComponent implements OnChanges {
     }
   }
 
-  onReview(payload: { action: ReviewAction; reasonCode?: string; notes?: string }): void {
+  onReview(payload: {
+    action: ReviewAction; reasonCode?: string; notes?: string; confirmedPatterns?: string[];
+  }): void {
     if (!this.alert) return;
     this.saving = true;
     this.reviewError = '';
     this.saved = false;
-    this.api.reviewAlert(this.alert.id, payload.action, payload.reasonCode, payload.notes).subscribe({
+    this.api.reviewAlert(
+      this.alert.id, payload.action, payload.reasonCode, payload.notes, payload.confirmedPatterns,
+    ).subscribe({
       next: (a) => {
         this.alert = a;
         this.saving = false;
@@ -177,6 +185,7 @@ export class AlertReviewPaneComponent implements OnChanges {
     this.api.getAlert(this.alertId).subscribe({
       next: (a) => {
         this.alert = a;
+        this.detectedPatterns = this.computeDetected(a);
         this.loading = false;
       },
       error: (e) => {
@@ -184,5 +193,12 @@ export class AlertReviewPaneComponent implements OnChanges {
         this.loadError = e?.error?.error || 'Failed to load alert';
       },
     });
+  }
+
+  /** AI-detected patterns for pre-selection: clip AI events ∪ the alert's own type. */
+  private computeDetected(alert: Alert): string[] {
+    const set = new Set<string>((alert.aiEvents ?? []).map((e) => e.eventType));
+    if (alert.alertType) set.add(alert.alertType);
+    return [...set];
   }
 }
