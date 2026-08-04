@@ -133,6 +133,7 @@ export interface TrainingSampleDetail {
   editHistoryJson: string;
   createdAt: string;
   updatedAt: string;
+  version: number;
 }
 
 export interface TrainingStats {

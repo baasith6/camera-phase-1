@@ -221,7 +221,8 @@ public record TrainingSampleDetail(
     string? ClipUrl,
     string EditHistoryJson,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    uint Version);
 
 public record TrainingStatsResponse(
     int Total,
@@ -234,6 +235,6 @@ public record TrainingStatsResponse(
     Dictionary<string, int> ByModelVersion,
     Dictionary<string, int> ByStore);
 
-public record UpdateLabelsRequest(List<string> ConfirmedPatterns);
+public record UpdateLabelsRequest(List<string> ConfirmedPatterns, uint Version);
 
 public record IncludeRequest(bool Include);

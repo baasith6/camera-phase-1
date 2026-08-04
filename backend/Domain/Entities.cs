@@ -205,6 +205,8 @@ public class TrainingSample
     public string EditHistoryJson { get; set; } = "[]";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>PostgreSQL xmin used as optimistic concurrency token.</summary>
+    public uint Version { get; set; }
 
     public List<TrainingSamplePattern> Patterns { get; set; } = new();
 }
