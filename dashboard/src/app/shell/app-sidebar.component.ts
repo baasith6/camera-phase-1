@@ -51,6 +51,9 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
                   @case ('settings') {
                     <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
                   }
+                  @case ('flask') {
+                    <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v6L4.5 18a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 8V2"/><line x1="8" y1="2" x2="16" y2="2"/><line x1="7" y1="14" x2="17" y2="14"/></svg>
+                  }
                 }
                 <span class="nav-label">{{ item.label }}</span>
                 @if (item.badgeKey === 'pending' && live.pendingCount() > 0) {
@@ -78,16 +81,16 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
     nav a {
       color: var(--text-muted);
       text-decoration: none;
-      padding: 10px 12px;
+      padding: 7px 12px;
       border-radius: var(--radius-sm);
-      font-size: 0.92rem;
+      font-size: 0.9rem;
       font-weight: 500;
       display: flex;
       align-items: center;
       gap: 10px;
       border-left: 2px solid transparent;
       transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-      min-height: 44px;
+      min-height: 36px;
     }
     nav a:hover { background: var(--accent-soft); color: var(--text); }
     nav a.active {
@@ -119,6 +122,8 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
         box-shadow: var(--shadow);
       }
       .sidebar.open { transform: translateX(0); }
+      /* Touch targets stay 44px on mobile. */
+      nav a { min-height: 44px; padding: 10px 12px; }
     }
   `],
 })

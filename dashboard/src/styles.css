@@ -2,6 +2,13 @@
 
 * { box-sizing: border-box; }
 
+/* Hide scrollbars app-wide but keep scrolling functional (wheel/touch/keys). */
+* {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* Legacy Edge/IE */
+}
+*::-webkit-scrollbar { display: none; }  /* Chrome/Safari/Edge */
+
 html, body { height: 100%; }
 
 body.shell-locked { overflow: hidden; }

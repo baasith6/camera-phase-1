@@ -40,6 +40,7 @@ const ADMIN_EXTRA_SECTIONS: NavSection[] = [
   {
     label: 'Advanced',
     items: [
+      { label: 'Training', route: '/app/training', icon: 'flask', adminOnly: true },
       { label: 'Reports', route: '/app/reports', icon: 'file' },
       { label: 'Health', route: '/app/health', icon: 'pulse' },
       { label: 'Logs', route: '/app/logs', icon: 'list' },

@@ -52,6 +52,13 @@ export interface Zone {
   polygonJson: string;
 }
 
+export interface AlertAiEvent {
+  eventType: string;
+  confidence: number;
+  startTs: string;
+  endTs: string;
+}
+
 export interface Alert {
   id: string;
   storeId: string;
@@ -68,6 +75,7 @@ export interface Alert {
   ruleVersion: string;
   createdAt: string;
   reviews?: AlertReview[];
+  aiEvents?: AlertAiEvent[];
 }
 
 export interface AlertReview {
@@ -76,7 +84,67 @@ export interface AlertReview {
   action: string;
   reasonCode?: string;
   notes?: string;
+  confirmedPatternsJson?: string | null;
   createdAt: string;
+}
+
+export interface TrainingPatternLabel {
+  pattern: string;
+  aiDetected: boolean;
+  humanConfirmed: boolean;
+  labelStatus: string;
+}
+
+export interface TrainingSampleItem {
+  id: string;
+  alertId: string;
+  clipId: string;
+  alertType: string;
+  aiDetectedPatterns: string[];
+  humanConfirmedPatterns: string[];
+  positiveCount: number;
+  hardNegativeCount: number;
+  reviewOutcome: string;
+  datasetStatus: string;
+  includeInTraining: boolean;
+  reviewerEmail: string;
+  modelVersion: string;
+  storeName: string;
+  cameraName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TrainingSampleDetail {
+  id: string;
+  alertId: string;
+  clipId: string;
+  alertType: string;
+  labels: TrainingPatternLabel[];
+  reviewOutcome: string;
+  datasetStatus: string;
+  includeInTraining: boolean;
+  reviewerEmail: string;
+  modelVersion: string;
+  ruleVersion: string;
+  storeName: string;
+  cameraName: string;
+  clipUrl?: string | null;
+  editHistoryJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TrainingStats {
+  total: number;
+  ready: number;
+  pending: number;
+  excluded: number;
+  clipIssues: number;
+  positiveByPattern: Record<string, number>;
+  hardNegativeByPattern: Record<string, number>;
+  byModelVersion: Record<string, number>;
+  byStore: Record<string, number>;
 }
 
 export interface Connector {

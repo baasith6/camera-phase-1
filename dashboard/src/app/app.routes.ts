@@ -52,6 +52,12 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/tuning/tuning.component').then((m) => m.TuningComponent),
       },
       {
+        path: 'training',
+        canActivate: [adminGuard],
+        loadComponent: () =>
+          import('./pages/training/training.component').then((m) => m.TrainingComponent),
+      },
+      {
         path: 'health',
         loadComponent: () => import('./pages/health/health.component').then((m) => m.HealthComponent),
       },

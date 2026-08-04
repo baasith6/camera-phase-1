@@ -161,6 +161,62 @@ public static class DbSeeder
             ALTER TABLE "Stores" ADD COLUMN IF NOT EXISTS "NotificationEmail" text NULL;
             ALTER TABLE "Connectors" ADD COLUMN IF NOT EXISTS "AdminHost" text NULL;
             ALTER TABLE "Connectors" ADD COLUMN IF NOT EXISTS "AdminPort" integer NULL;
+
+            -- Human-in-the-loop training dataset (Stage 1+2).
+            ALTER TABLE "AlertReviews" ADD COLUMN IF NOT EXISTS "ConfirmedPatternsJson" text NULL;
+            CREATE TABLE IF NOT EXISTS "TrainingSamples" (
+                "Id" uuid NOT NULL,
+                "AlertId" uuid NOT NULL,
+                "ClipId" uuid NOT NULL,
+                "SourceClipObjectKey" text NOT NULL,
+                "DatasetClipObjectKey" text NOT NULL,
+                "StoreId" uuid NOT NULL,
+                "CameraId" uuid NOT NULL,
+                "AlertType" text NOT NULL,
+                "ReviewOutcome" text NOT NULL,
+                "ReviewerId" uuid NOT NULL,
+                "ModelVersion" text NOT NULL,
+                "RuleVersion" text NOT NULL,
+                "DatasetStatus" text NOT NULL,
+                "IncludeInTraining" boolean NOT NULL,
+                "EditHistoryJson" text NOT NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                "UpdatedAt" timestamp with time zone NOT NULL,
+                CONSTRAINT "PK_TrainingSamples" PRIMARY KEY ("Id")
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_TrainingSamples_AlertId"
+                ON "TrainingSamples" ("AlertId");
+            CREATE INDEX IF NOT EXISTS "IX_TrainingSamples_StoreId"
+                ON "TrainingSamples" ("StoreId");
+            CREATE INDEX IF NOT EXISTS "IX_TrainingSamples_DatasetStatus"
+                ON "TrainingSamples" ("DatasetStatus");
+            CREATE INDEX IF NOT EXISTS "IX_TrainingSamples_CreatedAt"
+                ON "TrainingSamples" ("CreatedAt");
+            CREATE TABLE IF NOT EXISTS "TrainingSamplePatterns" (
+                "Id" uuid NOT NULL,
+                "TrainingSampleId" uuid NOT NULL,
+                "Pattern" text NOT NULL,
+                "AiDetected" boolean NOT NULL,
+                "HumanConfirmed" boolean NOT NULL,
+                "LabelStatus" text NOT NULL,
+                CONSTRAINT "PK_TrainingSamplePatterns" PRIMARY KEY ("Id")
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_TrainingSamplePatterns_TrainingSampleId_Pattern"
+                ON "TrainingSamplePatterns" ("TrainingSampleId", "Pattern");
+            CREATE INDEX IF NOT EXISTS "IX_TrainingSamplePatterns_Pattern_LabelStatus"
+                ON "TrainingSamplePatterns" ("Pattern", "LabelStatus");
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'FK_TrainingSamplePatterns_TrainingSamples_TrainingSampleId'
+                ) THEN
+                    ALTER TABLE "TrainingSamplePatterns"
+                    ADD CONSTRAINT "FK_TrainingSamplePatterns_TrainingSamples_TrainingSampleId"
+                    FOREIGN KEY ("TrainingSampleId") REFERENCES "TrainingSamples" ("Id")
+                    ON DELETE CASCADE;
+                END IF;
+            END $$;
             """
         );
 

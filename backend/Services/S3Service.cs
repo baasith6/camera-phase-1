@@ -86,4 +86,16 @@ public class S3Service
             // Best-effort — object may already be gone.
         }
     }
+
+    /// <summary>Server-side copy within the bucket (no data leaves MinIO). Throws on failure.</summary>
+    public async Task CopyAsync(string sourceKey, string destKey)
+    {
+        var source = new CopySourceObjectArgs()
+            .WithBucket(_opts.Bucket)
+            .WithObject(sourceKey);
+        await _internal.CopyObjectAsync(new CopyObjectArgs()
+            .WithBucket(_opts.Bucket)
+            .WithObject(destKey)
+            .WithCopyObjectSource(source));
+    }
 }

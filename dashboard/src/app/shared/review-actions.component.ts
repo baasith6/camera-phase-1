@@ -1,6 +1,7 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ErrorBannerComponent } from './ui-components';
+import { alertTypeLabel } from './alert-labels';
 
 export type ReviewAction = 'Confirm' | 'Dismiss' | 'FalsePositive' | 'NeedsFollowUp';
 
@@ -10,7 +11,36 @@ export type ReviewAction = 'Confirm' | 'Dismiss' | 'FalsePositive' | 'NeedsFollo
   imports: [FormsModule, ErrorBannerComponent],
   template: `
     <div class="review-actions">
-      <p class="hint muted small">What do you think happened?</p>
+      @if (detectedPatterns.length) {
+        <div class="ai-detected">
+          <span class="ai-detected-label">AI detected</span>
+          <div class="ai-detected-chips">
+            @for (p of detectedPatterns; track p) {
+              <span class="ai-chip" [title]="label(p)">{{ label(p) }}</span>
+            }
+          </div>
+        </div>
+      }
+
+      @if (patterns.length) {
+        <fieldset class="patterns">
+          <legend title="AI-detected ones are pre-selected — untick anything wrong, tick anything missed.">
+            Patterns you can see in this clip
+          </legend>
+          <div class="chip-grid">
+            @for (p of patterns; track p) {
+              <label class="chip" [class.on]="selected.has(p)" [title]="label(p)">
+                <input
+                  type="checkbox"
+                  [checked]="selected.has(p)"
+                  (change)="toggle(p)" />
+                <span>{{ label(p) }}</span>
+              </label>
+            }
+          </div>
+        </fieldset>
+      }
+
       <div class="action-row">
         <button type="button" class="primary" (click)="submit('Confirm')" [disabled]="saving">
           Confirm incident
@@ -49,7 +79,38 @@ export type ReviewAction = 'Confirm' | 'Dismiss' | 'FalsePositive' | 'NeedsFollo
   `,
   styles: [`
     .review-actions { display: flex; flex-direction: column; gap: 10px; }
-    .hint { margin: 0; }
+    .ai-detected { display: flex; flex-direction: column; gap: 6px; }
+    .ai-detected-label {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+      color: var(--accent);
+    }
+    .ai-detected-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ai-chip {
+      display: inline-flex; align-items: center; max-width: 100%;
+      padding: 3px 10px; border-radius: 999px; font-size: 0.78rem;
+      border: 1px solid var(--accent); color: var(--accent);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .patterns {
+      border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+      border-radius: var(--radius-sm);
+      padding: 10px 12px 12px;
+      margin: 0;
+    }
+    .patterns legend { font-size: 0.85rem; font-weight: 600; padding: 0 4px; }
+    .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px; cursor: pointer;
+      border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+      font-size: 0.85rem; user-select: none;
+      max-width: 100%; min-width: 0;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .chip input { position: absolute; opacity: 0; pointer-events: none; }
+    .chip.on { background: var(--accent); border-color: var(--accent); color: white; }
+    .chip:not(.on):hover { border-color: var(--accent); }
     .action-row { display: flex; flex-wrap: wrap; gap: 8px; }
     .action-row button { min-height: 44px; }
     button.primary { background: var(--accent); color: white; border: none; border-radius: var(--radius-sm); padding: 0.5rem 1rem; font-weight: 600; cursor: pointer; }
@@ -65,11 +126,17 @@ export type ReviewAction = 'Confirm' | 'Dismiss' | 'FalsePositive' | 'NeedsFollo
     .ok { color: var(--success); margin: 0; font-size: 0.9rem; }
   `],
 })
-export class ReviewActionsComponent {
+export class ReviewActionsComponent implements OnChanges {
   @Input() saving = false;
   @Input() error = '';
   @Input() saved = false;
-  @Output() review = new EventEmitter<{ action: ReviewAction; reasonCode?: string; notes?: string }>();
+  /** All supported patterns (from the backend enum). */
+  @Input() patterns: string[] = [];
+  /** Patterns the AI detected in this clip — pre-selected. */
+  @Input() detectedPatterns: string[] = [];
+  @Output() review = new EventEmitter<{
+    action: ReviewAction; reasonCode?: string; notes?: string; confirmedPatterns?: string[];
+  }>();
 
   showDetails = false;
   reasonCode = '';
@@ -77,17 +144,44 @@ export class ReviewActionsComponent {
 
   validationError = '';
 
+  selected = new Set<string>();
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['detectedPatterns']) {
+      this.selected = new Set(this.detectedPatterns);
+    }
+  }
+
+  label(pattern: string): string {
+    return alertTypeLabel(pattern);
+  }
+
+  toggle(pattern: string): void {
+    if (this.selected.has(pattern)) this.selected.delete(pattern);
+    else this.selected.add(pattern);
+    this.validationError = '';
+  }
+
   submit(action: ReviewAction): void {
     if ((action === 'Dismiss' || action === 'FalsePositive') && !this.reasonCode.trim()) {
       this.showDetails = true;
       this.validationError = 'Please add a short reason for this decision.';
       return;
     }
+    if (action === 'Confirm' && this.patterns.length && this.selected.size === 0) {
+      this.validationError = 'Tick at least one pattern you actually saw in the clip.';
+      return;
+    }
+    if (action === 'FalsePositive') {
+      // False alarm means none of the detected patterns are real.
+      this.selected.clear();
+    }
     this.validationError = '';
     this.review.emit({
       action,
       reasonCode: this.reasonCode.trim() || undefined,
       notes: this.notes.trim() || undefined,
+      confirmedPatterns: this.patterns.length ? [...this.selected] : undefined,
     });
   }
 }

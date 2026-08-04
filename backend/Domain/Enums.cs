@@ -90,3 +90,21 @@ public enum AlertVisibilityMode
     ManagerOnly,  // only managers/admins see alerts
     All           // all reviewers see alerts
 }
+
+/// <summary>Per-pattern label attached to a training sample by human review.</summary>
+public enum PatternLabelStatus
+{
+    Positive,     // reviewer confirmed the pattern is present in the clip
+    HardNegative, // AI detected it but reviewer rejected it
+    Uncertain     // no final human decision yet
+}
+
+/// <summary>Lifecycle of a training dataset sample.</summary>
+public enum DatasetStatus
+{
+    Ready,          // labeled and clip copied; usable for training
+    PendingReview,  // awaiting a final reviewer decision (NeedsFollowUp)
+    Excluded,       // manually or automatically excluded from training
+    ClipUnavailable,// source clip missing when the sample was created
+    CopyFailed      // dataset clip copy failed; retry on next re-review
+}

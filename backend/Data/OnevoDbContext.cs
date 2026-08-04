@@ -19,6 +19,8 @@ public class OnevoDbContext : DbContext
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<AlertReview> AlertReviews => Set<AlertReview>();
     public DbSet<RuleConfig> RuleConfigs => Set<RuleConfig>();
+    public DbSet<TrainingSample> TrainingSamples => Set<TrainingSample>();
+    public DbSet<TrainingSamplePattern> TrainingSamplePatterns => Set<TrainingSamplePattern>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -71,6 +73,22 @@ public class OnevoDbContext : DbContext
         b.Entity<Clip>().HasIndex(c => c.Status);
         b.Entity<Alert>().HasIndex(a => a.Status);
         b.Entity<AiEvent>().HasIndex(e => e.ClipId);
+
+        // Training dataset: no FK to Alerts (samples must survive alert deletion).
+        b.Entity<TrainingSample>().HasIndex(t => t.AlertId).IsUnique();
+        b.Entity<TrainingSample>().HasIndex(t => t.StoreId);
+        b.Entity<TrainingSample>().HasIndex(t => t.DatasetStatus);
+        b.Entity<TrainingSample>().HasIndex(t => t.CreatedAt);
+        b.Entity<TrainingSamplePattern>()
+            .HasOne(p => p.TrainingSample)
+            .WithMany(t => t.Patterns)
+            .HasForeignKey(p => p.TrainingSampleId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<TrainingSamplePattern>()
+            .HasIndex(p => new { p.TrainingSampleId, p.Pattern })
+            .IsUnique();
+        b.Entity<TrainingSamplePattern>().HasIndex(p => new { p.Pattern, p.LabelStatus });
+
         // Store enums as strings for readability in the DB.
         b.Entity<User>().Property(x => x.Role).HasConversion<string>();
         b.Entity<Store>().Property(x => x.AlertVisibilityMode).HasConversion<string>();
@@ -82,6 +100,10 @@ public class OnevoDbContext : DbContext
         b.Entity<Alert>().Property(x => x.RiskLevel).HasConversion<string>();
         b.Entity<Alert>().Property(x => x.Status).HasConversion<string>();
         b.Entity<AlertReview>().Property(x => x.Action).HasConversion<string>();
+        b.Entity<TrainingSample>().Property(x => x.ReviewOutcome).HasConversion<string>();
+        b.Entity<TrainingSample>().Property(x => x.DatasetStatus).HasConversion<string>();
+        b.Entity<TrainingSamplePattern>().Property(x => x.Pattern).HasConversion<string>();
+        b.Entity<TrainingSamplePattern>().Property(x => x.LabelStatus).HasConversion<string>();
 
         base.OnModelCreating(b);
     }

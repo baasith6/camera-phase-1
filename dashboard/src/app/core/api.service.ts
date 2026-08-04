@@ -1,12 +1,15 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { shareReplay } from 'rxjs/operators';
 import { API_BASE } from './api.config';
-import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone, AnalyticsSummary, SystemLogs } from './models';
+import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone, AnalyticsSummary, SystemLogs, TrainingSampleItem, TrainingSampleDetail, TrainingStats } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   constructor(private http: HttpClient) {}
+
+  private patterns$?: Observable<string[]>;
 
   // Stores
   listStores(): Observable<Store[]> { return this.http.get<Store[]>(`${API_BASE}/api/stores`); }
@@ -93,8 +96,41 @@ export class ApiService {
     return this.http.get<Alert[]>(`${API_BASE}/api/alerts${q}`);
   }
   getAlert(id: string): Observable<Alert> { return this.http.get<Alert>(`${API_BASE}/api/alerts/${id}`); }
-  reviewAlert(id: string, action: string, reasonCode?: string, notes?: string): Observable<Alert> {
-    return this.http.put<Alert>(`${API_BASE}/api/alerts/${id}/review`, { action, reasonCode, notes });
+  reviewAlert(id: string, action: string, reasonCode?: string, notes?: string,
+              confirmedPatterns?: string[]): Observable<Alert> {
+    return this.http.put<Alert>(`${API_BASE}/api/alerts/${id}/review`,
+      { action, reasonCode, notes, confirmedPatterns: confirmedPatterns ?? null });
+  }
+  // Supported suspicious-activity patterns (backend enum is the source of truth). Cached.
+  getPatterns(): Observable<string[]> {
+    this.patterns$ ??= this.http
+      .get<string[]>(`${API_BASE}/api/alerts/patterns`)
+      .pipe(shareReplay(1));
+    return this.patterns$;
+  }
+
+  // Training dataset
+  listTrainingSamples(storeId?: string, status?: string): Observable<TrainingSampleItem[]> {
+    const params: string[] = [];
+    if (storeId) params.push(`storeId=${storeId}`);
+    if (status) params.push(`status=${status}`);
+    const q = params.length ? `?${params.join('&')}` : '';
+    return this.http.get<TrainingSampleItem[]>(`${API_BASE}/api/training/samples${q}`);
+  }
+  getTrainingSample(id: string): Observable<TrainingSampleDetail> {
+    return this.http.get<TrainingSampleDetail>(`${API_BASE}/api/training/samples/${id}`);
+  }
+  updateTrainingLabels(id: string, confirmedPatterns: string[]): Observable<TrainingSampleDetail> {
+    return this.http.put<TrainingSampleDetail>(
+      `${API_BASE}/api/training/samples/${id}/labels`, { confirmedPatterns });
+  }
+  setTrainingInclude(id: string, include: boolean): Observable<TrainingSampleDetail> {
+    return this.http.put<TrainingSampleDetail>(
+      `${API_BASE}/api/training/samples/${id}/include`, { include });
+  }
+  getTrainingStats(storeId?: string): Observable<TrainingStats> {
+    const q = storeId ? `?storeId=${storeId}` : '';
+    return this.http.get<TrainingStats>(`${API_BASE}/api/training/stats${q}`);
   }
 
   // Clips
