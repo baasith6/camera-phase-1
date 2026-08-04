@@ -210,6 +210,8 @@ public class AlertsController : ControllerBase
             {
                 if (!Enum.TryParse<AiEventType>(p, true, out var pattern))
                     return BadRequest(new { error = $"Unknown pattern '{p}'" });
+                if (!Enum.IsDefined(typeof(AiEventType), pattern))
+                    return BadRequest(new { error = $"Unknown pattern '{p}'" });
                 var name = pattern.ToString();
                 if (confirmed.Contains(name))
                     return BadRequest(new { error = $"Duplicate pattern '{p}'" });
@@ -220,6 +222,8 @@ public class AlertsController : ControllerBase
                 return BadRequest(new { error = "Select at least one pattern to confirm the incident" });
             if (action is ReviewAction.FalsePositive && confirmed.Count > 0)
                 return BadRequest(new { error = "False positive reviews must not have confirmed patterns" });
+            if ((action is ReviewAction.Dismiss or ReviewAction.NeedsFollowUp) && confirmed.Count > 0)
+                return BadRequest(new { error = "Dismiss and NeedsFollowUp reviews must not have confirmed patterns" });
         }
 
         var review = new AlertReview
@@ -242,9 +246,60 @@ public class AlertsController : ControllerBase
             _ => alert.Status
         };
 
-        await UpsertTrainingSampleAsync(alert, action, confirmed, review.ReviewerId);
+        var destKey = await UpsertTrainingSampleAsync(alert, action, confirmed, review.ReviewerId);
 
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message?.Contains("IX_TrainingSamples_AlertId") == true)
+        {
+            // Unique constraint violation on AlertId: another concurrent review created the sample.
+            // Discard our in-memory sample, reload the winner, and retry the upsert logic.
+            _db.ChangeTracker.Clear();  // Detach all tracked entities
+            if (!string.IsNullOrEmpty(destKey))
+            {
+                try { await _s3.DeleteAsync(destKey); }
+                catch { /* best-effort cleanup */ }
+            }
+
+            // Reload alert and retry: ChangeTracker.Clear() detached the review and the
+            // alert status change, so re-add/re-apply them before retrying the upsert.
+            alert = await _db.Alerts.FindAsync(id) ?? alert;
+            _db.AlertReviews.Add(review);
+            alert.Status = action switch
+            {
+                ReviewAction.Confirm => AlertStatus.Confirmed,
+                ReviewAction.Dismiss => AlertStatus.Dismissed,
+                ReviewAction.FalsePositive => AlertStatus.FalsePositive,
+                ReviewAction.NeedsFollowUp => AlertStatus.NeedsFollowUp,
+                _ => alert.Status
+            };
+            var retryDestKey = await UpsertTrainingSampleAsync(alert, action, confirmed, review.ReviewerId);
+            try
+            {
+                await _db.SaveChangesAsync();
+            }
+            catch
+            {
+                if (!string.IsNullOrEmpty(retryDestKey))
+                {
+                    try { await _s3.DeleteAsync(retryDestKey); }
+                    catch { /* best-effort cleanup */ }
+                }
+                throw;
+            }
+        }
+        catch
+        {
+            // Cleanup orphaned clip if SaveChanges failed after copying
+            if (!string.IsNullOrEmpty(destKey))
+            {
+                try { await _s3.DeleteAsync(destKey); }
+                catch { /* best-effort cleanup */ }
+            }
+            throw;
+        }
         return Ok(alert);
     }
 
@@ -253,8 +308,9 @@ public class AlertsController : ControllerBase
     /// Confirm/FalsePositive with pattern data upserts the sample (one per alert) and
     /// copies the clip into training-dataset storage. Dismiss excludes an existing sample;
     /// NeedsFollowUp marks it pending. Never fails the review itself.
+    /// Returns the destination key if a clip was copied (for cleanup on SaveChanges failure).
     /// </summary>
-    private async Task UpsertTrainingSampleAsync(
+    private async Task<string?> UpsertTrainingSampleAsync(
         Alert alert, ReviewAction action, List<string>? confirmed, Guid reviewerId)
     {
         var existing = await _db.TrainingSamples
@@ -271,7 +327,7 @@ public class AlertsController : ControllerBase
                 existing.ReviewOutcome = action;
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
             }
-            return;
+            return null;
         }
 
         if (action is ReviewAction.NeedsFollowUp)
@@ -283,11 +339,11 @@ public class AlertsController : ControllerBase
                 existing.ReviewOutcome = action;
                 existing.UpdatedAt = DateTimeOffset.UtcNow;
             }
-            return;
+            return null;
         }
 
         // Confirm / FalsePositive: only clients that sent pattern data create samples.
-        if (confirmed is null) return;
+        if (confirmed is null) return null;
 
         var detected = (await _db.AiEvents
                 .Where(e => e.ClipId == alert.ClipId)
@@ -297,10 +353,12 @@ public class AlertsController : ControllerBase
             .Select(e => e.ToString())
             .ToList();
         if (!string.IsNullOrEmpty(alert.AlertType)
-            && Enum.TryParse<AiEventType>(alert.AlertType, true, out _)
-            && !detected.Contains(alert.AlertType))
+            && Enum.TryParse<AiEventType>(alert.AlertType, true, out var alertPattern)
+            && Enum.IsDefined(typeof(AiEventType), alertPattern))
         {
-            detected.Add(alert.AlertType);
+            var normalizedAlertType = alertPattern.ToString();
+            if (!detected.Contains(normalizedAlertType))
+                detected.Add(normalizedAlertType);
         }
 
         var sample = existing;
@@ -347,11 +405,13 @@ public class AlertsController : ControllerBase
             && await _s3.ExistsAsync(sample.DatasetClipObjectKey))
         {
             sample.DatasetStatus = DatasetStatus.Ready;  // already copied (re-review)
+            return null;  // no new copy created
         }
         else if (string.IsNullOrEmpty(sample.SourceClipObjectKey)
                  || !await _s3.ExistsAsync(sample.SourceClipObjectKey))
         {
             sample.DatasetStatus = DatasetStatus.ClipUnavailable;
+            return null;
         }
         else
         {
@@ -360,11 +420,13 @@ public class AlertsController : ControllerBase
                 await _s3.CopyAsync(sample.SourceClipObjectKey, destKey);
                 sample.DatasetClipObjectKey = destKey;
                 sample.DatasetStatus = DatasetStatus.Ready;
+                return destKey;  // clip copied, return key for cleanup if SaveChanges fails
             }
             catch
             {
                 // Copy failure must not lose the review; retried on next re-review.
                 sample.DatasetStatus = DatasetStatus.CopyFailed;
+                return null;
             }
         }
     }

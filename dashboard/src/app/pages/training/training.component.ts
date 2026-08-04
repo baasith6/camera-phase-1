@@ -136,14 +136,19 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
         </app-data-table>
       }
 
-      @if (detail) {
-        <div class="drawer-backdrop" (click)="detail = undefined"></div>
+      @if (detail || detailLoading || detailError) {
+        <div class="drawer-backdrop" (click)="detail = undefined; detailError = ''; detailLoading = false;"></div>
         <div class="card detail-panel">
           <div class="detail-head">
             <h3>Sample detail</h3>
-            <button class="ghost small" type="button" (click)="detail = undefined">Close</button>
+            <button class="ghost small" type="button" (click)="detail = undefined; detailError = ''; detailLoading = false;">Close</button>
           </div>
 
+          @if (detailLoading) {
+            <p class="muted">Loading...</p>
+          } @else if (detailError) {
+            <app-error-banner [message]="detailError" />
+          } @else if (detail) {
           <div class="detail-grid">
             <div class="detail-main">
               @if (detail.clipUrl) {
@@ -204,6 +209,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
               </div>
             </div>
           </div>
+          }
         </div>
       }
     </app-page-container>
@@ -290,6 +296,7 @@ export class TrainingComponent implements OnInit {
   loading = false;
   error = '';
   detailError = '';
+  detailLoading = false;
   savingDetail = false;
   editing = false;
   editSelected = new Set<string>();
@@ -360,9 +367,16 @@ export class TrainingComponent implements OnInit {
   openDetail(id: string): void {
     this.editing = false;
     this.detailError = '';
+    this.detailLoading = true;
     this.api.getTrainingSample(id).subscribe({
-      next: (d) => (this.detail = d),
-      error: (e) => (this.detailError = e?.error?.error || 'Failed to load sample'),
+      next: (d) => {
+        this.detail = d;
+        this.detailLoading = false;
+      },
+      error: (e) => {
+        this.detailError = e?.error?.error || 'Failed to load sample';
+        this.detailLoading = false;
+      },
     });
   }
 
@@ -383,7 +397,7 @@ export class TrainingComponent implements OnInit {
     if (!this.detail) return;
     this.savingDetail = true;
     this.detailError = '';
-    this.api.updateTrainingLabels(this.detail.id, [...this.editSelected]).subscribe({
+    this.api.updateTrainingLabels(this.detail.id, [...this.editSelected], this.detail.version).subscribe({
       next: (d) => {
         this.detail = d;
         this.savingDetail = false;

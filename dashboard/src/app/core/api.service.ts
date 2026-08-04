@@ -130,9 +130,9 @@ export class ApiService {
   getTrainingSample(id: string): Observable<TrainingSampleDetail> {
     return this.http.get<TrainingSampleDetail>(`${API_BASE}/api/training/samples/${id}`);
   }
-  updateTrainingLabels(id: string, confirmedPatterns: string[]): Observable<TrainingSampleDetail> {
+  updateTrainingLabels(id: string, confirmedPatterns: string[], version: number): Observable<TrainingSampleDetail> {
     return this.http.put<TrainingSampleDetail>(
-      `${API_BASE}/api/training/samples/${id}/labels`, { confirmedPatterns });
+      `${API_BASE}/api/training/samples/${id}/labels`, { confirmedPatterns, version });
   }
   setTrainingInclude(id: string, include: boolean): Observable<TrainingSampleDetail> {
     return this.http.put<TrainingSampleDetail>(

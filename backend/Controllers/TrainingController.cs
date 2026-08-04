@@ -118,7 +118,8 @@ public class TrainingController : ControllerBase
             clipUrl,
             sample.EditHistoryJson,
             sample.CreatedAt,
-            sample.UpdatedAt));
+            sample.UpdatedAt,
+            sample.Version));
     }
 
     // PUT /api/training/samples/{id}/labels — correct confirmed patterns from the Training page.
@@ -130,6 +131,10 @@ public class TrainingController : ControllerBase
             .FirstOrDefaultAsync(t => t.Id == id);
         if (sample is null) return NotFound();
         if (!TenantAccess.CanAccessStore(User, sample.StoreId)) return Forbid();
+
+        // Validate optimistic concurrency token
+        if (sample.Version != req.Version)
+            return Conflict(new { error = "This sample was modified by another user. Please refresh and try again." });
 
         var confirmed = new List<string>();
         foreach (var p in req.ConfirmedPatterns ?? [])
@@ -164,7 +169,18 @@ public class TrainingController : ControllerBase
         }
 
         // Append-only edit audit.
-        var history = JsonSerializer.Deserialize<List<JsonElement>>(sample.EditHistoryJson) ?? [];
+        List<JsonElement> history;
+        try
+        {
+            history = string.IsNullOrWhiteSpace(sample.EditHistoryJson)
+                ? new List<JsonElement>()
+                : JsonSerializer.Deserialize<List<JsonElement>>(sample.EditHistoryJson) ?? new List<JsonElement>();
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON: fall back to empty history
+            history = new List<JsonElement>();
+        }
         history.Add(JsonSerializer.SerializeToElement(new
         {
             by = TenantAccess.CurrentUserId(User),
@@ -181,7 +197,14 @@ public class TrainingController : ControllerBase
         }
         sample.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "This sample was modified by another user. Please refresh and try again." });
+        }
         return await Get(id);
     }
 
@@ -194,52 +217,98 @@ public class TrainingController : ControllerBase
         if (!TenantAccess.CanAccessStore(User, sample.StoreId)) return Forbid();
 
         sample.IncludeInTraining = req.Include;
-        // Only flip Ready <-> Excluded; clip-problem statuses stay visible.
-        if (!req.Include && sample.DatasetStatus is DatasetStatus.Ready or DatasetStatus.PendingReview)
+        // Toggle inclusion without losing PendingReview or clip-problem statuses.
+        // IncludeInTraining controls dataset exports; DatasetStatus tracks review/clip state.
+        if (!req.Include && sample.DatasetStatus is DatasetStatus.Ready)
             sample.DatasetStatus = DatasetStatus.Excluded;
         else if (req.Include && sample.DatasetStatus is DatasetStatus.Excluded)
-            sample.DatasetStatus = DatasetStatus.Ready;
+        {
+            // Re-include: set Ready only if clip is confirmed available
+            if (!string.IsNullOrEmpty(sample.DatasetClipObjectKey) && await _s3.ExistsAsync(sample.DatasetClipObjectKey))
+                sample.DatasetStatus = DatasetStatus.Ready;
+            else
+                sample.DatasetStatus = DatasetStatus.ClipUnavailable;
+        }
+        // PendingReview, ClipUnavailable, CopyFailed stay unchanged
         sample.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "This sample was modified by another user. Please refresh and try again." });
+        }
         return await Get(id);
     }
 
     [HttpGet("stats")]
     public async Task<IActionResult> Stats([FromQuery] Guid? storeId)
     {
-        var query = Scoped(_db.TrainingSamples.Include(t => t.Patterns));
+        var query = Scoped(_db.TrainingSamples);
         if (storeId is not null)
         {
             if (!TenantAccess.CanAccessStore(User, storeId.Value)) return Forbid();
             query = query.Where(t => t.StoreId == storeId);
         }
 
-        var samples = await query.ToListAsync();
-        var storeNames = await _db.Stores.ToDictionaryAsync(s => s.Id, s => s.Name);
+        // Compute totals and status counts via SQL aggregation
+        var total = await query.CountAsync();
+        var ready = await query.CountAsync(t => t.DatasetStatus == DatasetStatus.Ready);
+        var pending = await query.CountAsync(t => t.DatasetStatus == DatasetStatus.PendingReview);
+        var excluded = await query.CountAsync(t => t.DatasetStatus == DatasetStatus.Excluded);
+        var clipIssues = await query.CountAsync(t =>
+            t.DatasetStatus == DatasetStatus.ClipUnavailable || t.DatasetStatus == DatasetStatus.CopyFailed);
+
+        // Per-pattern label counts via grouped SQL projection
+        var patternQuery = from sample in query
+                           from pattern in _db.TrainingSamplePatterns
+                           where pattern.TrainingSampleId == sample.Id
+                           group pattern by new { pattern.Pattern, pattern.LabelStatus } into g
+                           select new { g.Key.Pattern, g.Key.LabelStatus, Count = g.Count() };
+        var patternCounts = await patternQuery.ToListAsync();
 
         var positive = new Dictionary<string, int>();
         var hardNegative = new Dictionary<string, int>();
-        foreach (var p in samples.SelectMany(t => t.Patterns))
+        foreach (var pc in patternCounts)
         {
-            var name = p.Pattern.ToString();
-            if (p.LabelStatus == PatternLabelStatus.Positive)
-                positive[name] = positive.GetValueOrDefault(name) + 1;
-            else if (p.LabelStatus == PatternLabelStatus.HardNegative)
-                hardNegative[name] = hardNegative.GetValueOrDefault(name) + 1;
+            var name = pc.Pattern.ToString();
+            if (pc.LabelStatus == PatternLabelStatus.Positive)
+                positive[name] = pc.Count;
+            else if (pc.LabelStatus == PatternLabelStatus.HardNegative)
+                hardNegative[name] = pc.Count;
         }
 
+        // Model version counts via grouped SQL
+        var modelVersionCounts = await query
+            .GroupBy(t => t.ModelVersion)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
+
+        // Per-store counts via grouped SQL, then load only needed store names
+        var storeCountPairs = await query
+            .GroupBy(t => t.StoreId)
+            .Select(g => new { StoreId = g.Key, Count = g.Count() })
+            .ToListAsync();
+        var storeIds = storeCountPairs.Select(x => x.StoreId).Distinct().ToList();
+        var storeNames = await _db.Stores
+            .Where(s => storeIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => s.Name);
+        var storeCounts = storeCountPairs.ToDictionary(
+            x => storeNames.GetValueOrDefault(x.StoreId, x.StoreId.ToString()),
+            x => x.Count);
+
         return Ok(new TrainingStatsResponse(
-            samples.Count,
-            samples.Count(t => t.DatasetStatus == DatasetStatus.Ready),
-            samples.Count(t => t.DatasetStatus == DatasetStatus.PendingReview),
-            samples.Count(t => t.DatasetStatus == DatasetStatus.Excluded),
-            samples.Count(t => t.DatasetStatus is DatasetStatus.ClipUnavailable or DatasetStatus.CopyFailed),
+            total,
+            ready,
+            pending,
+            excluded,
+            clipIssues,
             positive,
             hardNegative,
-            samples.GroupBy(t => t.ModelVersion).ToDictionary(g => g.Key, g => g.Count()),
-            samples.GroupBy(t => t.StoreId)
-                .ToDictionary(g => storeNames.GetValueOrDefault(g.Key, g.Key.ToString()), g => g.Count())));
+            modelVersionCounts,
+            storeCounts));
     }
 
     // Stage 3 placeholder — actual training is not part of this build.

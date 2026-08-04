@@ -147,8 +147,10 @@ export class ReviewActionsComponent implements OnChanges {
   selected = new Set<string>();
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['detectedPatterns']) {
-      this.selected = new Set(this.detectedPatterns);
+    if (changes['detectedPatterns'] || changes['patterns']) {
+      // Rebuild selected as intersection of detectedPatterns and patterns
+      const validDetected = this.detectedPatterns.filter(p => this.patterns.includes(p));
+      this.selected = new Set(validDetected);
     }
   }
 
@@ -172,16 +174,25 @@ export class ReviewActionsComponent implements OnChanges {
       this.validationError = 'Tick at least one pattern you actually saw in the clip.';
       return;
     }
-    if (action === 'FalsePositive') {
-      // False alarm means none of the detected patterns are real.
-      this.selected.clear();
+
+    // Determine confirmed patterns based on action
+    let confirmedPatterns: string[] | undefined;
+    if (action === 'Confirm') {
+      confirmedPatterns = this.patterns.length ? [...this.selected] : undefined;
+    } else if (action === 'FalsePositive') {
+      // False alarm means none of the detected patterns are real
+      confirmedPatterns = [];
+    } else if (action === 'Dismiss' || action === 'NeedsFollowUp') {
+      // Dismiss and NeedsFollowUp must not send patterns
+      confirmedPatterns = undefined;
     }
+
     this.validationError = '';
     this.review.emit({
       action,
       reasonCode: this.reasonCode.trim() || undefined,
       notes: this.notes.trim() || undefined,
-      confirmedPatterns: this.patterns.length ? [...this.selected] : undefined,
+      confirmedPatterns,
     });
   }
 }

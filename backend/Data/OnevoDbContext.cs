@@ -79,6 +79,12 @@ public class OnevoDbContext : DbContext
         b.Entity<TrainingSample>().HasIndex(t => t.StoreId);
         b.Entity<TrainingSample>().HasIndex(t => t.DatasetStatus);
         b.Entity<TrainingSample>().HasIndex(t => t.CreatedAt);
+        b.Entity<TrainingSample>()
+            .Property(t => t.Version)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
         b.Entity<TrainingSamplePattern>()
             .HasOne(p => p.TrainingSample)
             .WithMany(t => t.Patterns)
