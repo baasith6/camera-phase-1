@@ -21,8 +21,8 @@ import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-com
       </div>
 
       @if (tab === 'stores') {
-    <div class="card">
-        <h3>Create store</h3>
+    <div class="card flex flex-col gap-2">
+        <h3 class="m-0 mb-1 text-[0.95rem]">Create store</h3>
         <label>Store name</label>
         <input [(ngModel)]="newStoreName" placeholder="Downtown Market" />
 
@@ -36,15 +36,15 @@ import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-com
           <option value="Silent">Silent (admin only)</option>
         </select>
 
-        <button (click)="createStore()" [disabled]="!newStoreName || creatingStore">
+        <button class="self-start" (click)="createStore()" [disabled]="!newStoreName || creatingStore">
           {{ creatingStore ? 'Creating…' : 'Create store' }}
         </button>
-        @if (storeError) { <p class="err">{{ storeError }}</p> }
+        @if (storeError) { <p class="m-0 text-[0.85rem] text-danger">{{ storeError }}</p> }
       </div>
 
     <div class="card">
-      <h3>Connector installer</h3>
-      <div class="row">
+      <h3 class="m-0 mb-3 text-[0.95rem]">Connector installer</h3>
+      <div class="flex flex-wrap items-center gap-4">
         <button (click)="downloadInstaller()" [disabled]="downloadingInstaller || !installerInfo">
           {{ downloadingInstaller ? 'Downloading…' : 'Download Windows installer' }}
         </button>
@@ -54,49 +54,49 @@ import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-com
           </span>
         }
       </div>
-      @if (installerError) { <p class="err">{{ installerError }}</p> }
+      @if (installerError) { <p class="m-0 mt-2 text-[0.85rem] text-danger">{{ installerError }}</p> }
     </div>
 
     <div class="card">
-      <h3>Stores</h3>
+      <h3 class="m-0 mb-3 text-[0.95rem]">Stores</h3>
       @if (!stores.length) {
         <p class="muted">No stores yet. Create one above.</p>
       }
       @for (s of stores; track s.id) {
-        <div class="store-row" [class.sel]="selectedStoreId === s.id">
-          <div class="store-main" (click)="selectStore(s)">
+        <div [class]="selectedStoreId === s.id ? 'flex items-start justify-between gap-4 border-b border-border rounded-ctl bg-accent-soft p-2.5' : 'flex items-start justify-between gap-4 border-b border-border py-2.5'">
+          <div class="flex-1 cursor-pointer" (click)="selectStore(s)">
             <strong>{{ s.name }}</strong>
             <span class="muted small">{{ s.alertVisibilityMode }}</span>
             @if (s.notificationEmail) {
               <span class="muted small"> · {{ s.notificationEmail }}</span>
             }
-            <div class="stats muted small">
+            <div class="muted small">
               {{ s.cameraCount }} cameras ·
               {{ s.onlineConnectorCount }}/{{ s.connectorCount }} connectors online ·
               {{ s.pendingAlertCount }} pending alerts
             </div>
           </div>
-          <div class="store-actions">
+          <div class="flex flex-col items-end gap-1.5">
             <button class="ghost small" (click)="generateCode(s.id)">Setup code</button>
-            <a class="btn-link" [routerLink]="['/app/setup']" [queryParams]="{ storeId: s.id }">Cameras &amp; zones</a>
+            <a class="rounded-ctl border border-border-strong px-2 py-1 text-[0.78rem] text-accent-2 no-underline" [routerLink]="['/app/setup']" [queryParams]="{ storeId: s.id }">Cameras &amp; zones</a>
           </div>
         </div>
       }
 
       @if (setupCode) {
-        <div class="code-box">
-          <div class="code-label">Setup code for selected store</div>
-          <div class="code-value">{{ setupCode }}</div>
+        <div class="mt-4 rounded-ctl border border-border-strong bg-surface-2 p-3">
+          <div>Setup code for selected store</div>
+          <div class="my-1 font-mono text-[1.2rem] tracking-[0.08em]">{{ setupCode }}</div>
           <div class="muted small">Expires {{ setupCodeExpires }}</div>
-          <button class="ghost small" (click)="copyCode()">Copy</button>
+          <button class="ghost small mt-2" (click)="copyCode()">Copy</button>
         </div>
       }
     </div>
       }
 
       @if (tab === 'users') {
-      <div class="card">
-        <h3>Create user</h3>
+      <div class="card flex flex-col gap-2">
+        <h3 class="m-0 mb-1 text-[0.95rem]">Create user</h3>
         <label>Store</label>
         <select [(ngModel)]="userStoreId">
           <option value="">Select store…</option>
@@ -118,18 +118,18 @@ import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-com
           <option value="Installer">Installer</option>
         </select>
 
-        <button (click)="createUser()" [disabled]="!userStoreId || !userEmail || !userPassword || creatingUser">
+        <button class="self-start" (click)="createUser()" [disabled]="!userStoreId || !userEmail || !userPassword || creatingUser">
           {{ creatingUser ? 'Creating…' : 'Create user' }}
         </button>
-        @if (userError) { <p class="err">{{ userError }}</p> }
-        @if (userSuccess) { <p class="ok">{{ userSuccess }}</p> }
+        @if (userError) { <p class="m-0 text-[0.85rem] text-danger">{{ userError }}</p> }
+        @if (userSuccess) { <p class="m-0 text-[0.85rem] text-success">{{ userSuccess }}</p> }
       </div>
 
     @if (storeUsers.length) {
       <div class="card">
-        <h3>Users — {{ selectedStoreName || 'select a store' }}</h3>
+        <h3 class="m-0 mb-3 text-[0.95rem]">Users — {{ selectedStoreName || 'select a store' }}</h3>
         @for (u of storeUsers; track u.id) {
-          <div class="user-row">
+          <div class="flex justify-between border-b border-border py-1.5">
             <span>{{ u.email }}</span>
             <span class="badge">{{ u.role }}</span>
           </div>
@@ -141,55 +141,6 @@ import { PageContainerComponent, PageHeaderComponent } from '../../shared/ui-com
       }
     </app-page-container>
   `,
-  styles: [`
-    .muted { color: var(--text-muted); }
-    .small { font-size: .82rem; }
-    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
-    @media (max-width:900px) { .grid2 { grid-template-columns:1fr; } }
-    .card {
-      background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-      padding:1rem; margin-bottom:1rem;
-    }
-    h3 { margin:0 0 .75rem; font-size:.95rem; }
-    label { display:block; font-size:.78rem; color:var(--text-muted); margin:.5rem 0 .2rem; }
-    input, select {
-      width:100%; padding:.45rem .55rem; border-radius:var(--radius-sm);
-      border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text);
-      margin-bottom:.35rem;
-    }
-    button {
-      margin-top:.5rem; padding:.45rem .85rem; border-radius:var(--radius-sm);
-      border:1px solid var(--accent); background:var(--accent-soft); color:var(--accent-2);
-      cursor:pointer; font-weight:600;
-    }
-    button.ghost { background:transparent; border-color:var(--border-strong); color:var(--text-muted); }
-    button.small { font-size:.78rem; padding:.25rem .55rem; margin-top:0; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-    .err { color: var(--danger); font-size: .85rem; }
-    .ok { color: var(--success); font-size: .85rem; }
-    .row { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
-    .store-row {
-      display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;
-      padding:.65rem 0; border-bottom:1px solid var(--border);
-    }
-    .store-row.sel { background:var(--accent-soft); border-radius:var(--radius-sm); padding:.65rem; }
-    .store-main { flex:1; cursor:pointer; }
-    .store-actions { display:flex; flex-direction:column; gap:.35rem; align-items:flex-end; }
-    .btn-link {
-      font-size:.78rem; color:var(--accent-2); text-decoration:none;
-      border:1px solid var(--border-strong); padding:.25rem .55rem; border-radius:var(--radius-sm);
-    }
-    .code-box {
-      margin-top:1rem; padding:.75rem; background:var(--surface-2);
-      border-radius:var(--radius-sm); border:1px solid var(--border-strong);
-    }
-    .code-value { font-family:monospace; font-size:1.2rem; letter-spacing:.08em; margin:.25rem 0; }
-    .user-row { display:flex; justify-content:space-between; padding:.35rem 0; border-bottom:1px solid var(--border); }
-    .badge {
-      font-size:.7rem; text-transform:uppercase; letter-spacing:.06em;
-      color:var(--accent-2); background:var(--accent-soft); padding:.1rem .45rem; border-radius:10px;
-    }
-  `],
 })
 export class AdminStoresComponent implements OnInit {
   tab: 'stores' | 'users' = 'stores';

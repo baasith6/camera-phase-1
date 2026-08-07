@@ -4,38 +4,23 @@ import { Component, Input } from '@angular/core';
   selector: 'app-page-header',
   standalone: true,
   template: `
-    <header class="page-header">
+    <header class="mb-4">
       @if (breadcrumb) {
-        <nav class="breadcrumb muted small" aria-label="Breadcrumb">{{ breadcrumb }}</nav>
+        <nav class="muted small mb-1" aria-label="Breadcrumb">{{ breadcrumb }}</nav>
       }
-      <div class="header-row">
-        <div class="title-block">
-          <h2>{{ title }}</h2>
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h2 class="m-0 text-lg tracking-tight">{{ title }}</h2>
           @if (subtitle) {
-            <p class="muted subtitle">{{ subtitle }}</p>
+            <p class="muted mt-1.5 mb-0 text-sm">{{ subtitle }}</p>
           }
         </div>
-        <div class="actions"><ng-content select="[actions]"></ng-content></div>
+        <div class="flex flex-wrap items-center gap-2"><ng-content select="[actions]"></ng-content></div>
       </div>
       <ng-content select="[hint]"></ng-content>
       <ng-content select="[below]"></ng-content>
     </header>
   `,
-  styles: [`
-    .page-header { margin-bottom: var(--space-md, 16px); }
-    .page-header h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; }
-    .title-block { flex: 1; min-width: 0; }
-    .breadcrumb { margin-bottom: 4px; }
-    .subtitle { margin: 6px 0 0; font-size: 0.9rem; line-height: var(--line-height, 1.55); }
-    .header-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: var(--space-md, 16px);
-      flex-wrap: wrap;
-    }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  `],
 })
 export class PageHeaderComponent {
   @Input({ required: true }) title = '';

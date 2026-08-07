@@ -40,9 +40,9 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
           [total]="clips.length"
           [selectedCount]="selectedIds.size"
           (toggleAll)="toggleSelectAll($event)">
-          <button class="ghost danger" type="button" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">Delete selected</button>
+          <button class="ghost !text-danger !border-danger/35" type="button" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">Delete selected</button>
           @if (storeId) {
-            <button class="ghost danger" type="button" (click)="deleteAllInStore()" [disabled]="bulkDeleting">Delete all in store</button>
+            <button class="ghost !text-danger !border-danger/35" type="button" (click)="deleteAllInStore()" [disabled]="bulkDeleting">Delete all in store</button>
           }
         </app-bulk-action-bar>
       }
@@ -64,7 +64,8 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
           <table desktop class="table">
             <thead>
               <tr>
-                @if (auth.isManagerOrAdmin()) { <th class="chk-col"></th> }
+                <!-- Column always rendered — only the input is role-gated (no geometry shift). -->
+                <th class="w-10 text-center"></th>
                 <th>Time</th>
                 <th>Camera</th>
                 <th>Status</th>
@@ -81,11 +82,11 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                   (click)="openClip(c.id)"
                   tabindex="0"
                   (keydown.enter)="openClip(c.id)">
-                  @if (auth.isManagerOrAdmin()) {
-                    <td class="chk-col" (click)="$event.stopPropagation()">
+                  <td class="w-10 text-center" (click)="$event.stopPropagation()">
+                    @if (auth.isManagerOrAdmin()) {
                       <input type="checkbox" [checked]="selectedIds.has(c.id)" (change)="toggleSelect(c.id, $event)" aria-label="Select clip" />
-                    </td>
-                  }
+                    }
+                  </td>
                   <td>{{ c.createdAt | date:'MMM d, h:mm a' }}</td>
                   <td>{{ c.cameraName }}</td>
                   <td><app-status-badge [level]="c.status" [label]="c.status" /></td>
@@ -95,7 +96,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                   <td (click)="$event.stopPropagation()">
                     <button class="ghost small" type="button" [routerLink]="['/app/clips', c.id]">View</button>
                     @if (c.alertId) {
-                      <a class="alert-link" [routerLink]="['/app/alerts', c.alertId]">Alert</a>
+                      <a class="ml-2 text-[0.78rem]" [routerLink]="['/app/alerts', c.alertId]">Alert</a>
                     }
                   </td>
                 </tr>
@@ -103,22 +104,22 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
             </tbody>
           </table>
 
-          <div mobile class="alert-cards">
+          <div mobile class="flex flex-col gap-2.5">
             @for (c of clips; track c.id) {
               <div class="alert-card-mobile" (click)="openClip(c.id)" tabindex="0" (keydown.enter)="openClip(c.id)">
-                <div class="alert-card-mobile-head">
+                <div class="mb-2 flex items-start justify-between gap-2">
                   <strong>{{ c.cameraName }}</strong>
                   <app-status-badge [level]="c.status" [label]="c.status" />
                 </div>
-                <div class="alert-card-mobile-meta">
+                <div class="flex flex-wrap gap-2 text-[0.82rem]">
                   <span class="muted">{{ c.createdAt | date:'MMM d, h:mm a' }}</span>
                   <span class="muted">{{ c.durationSec }}s · {{ c.eventCount }} events</span>
                   <span class="muted">Risk {{ c.riskScore ?? '—' }}</span>
                 </div>
-                <div class="alert-card-mobile-actions" (click)="$event.stopPropagation()">
+                <div class="mt-2 flex items-center gap-2" (click)="$event.stopPropagation()">
                   <button class="ghost small" type="button" [routerLink]="['/app/clips', c.id]">View</button>
                   @if (c.alertId) {
-                    <a class="alert-link" [routerLink]="['/app/alerts', c.alertId]">Alert</a>
+                    <a class="text-[0.78rem]" [routerLink]="['/app/alerts', c.alertId]">Alert</a>
                   }
                 </div>
               </div>
@@ -128,12 +129,6 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       }
     </app-page-container>
   `,
-  styles: [`
-    .chk-col { width: 40px; text-align: center; }
-    .alert-link { margin-left: 8px; font-size: 0.78rem; }
-    .alert-card-mobile-actions { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
-    button.danger { color: var(--danger); border-color: rgba(248, 113, 113, 0.35); }
-  `],
 })
 export class ClipsComponent implements OnInit {
   clips: ClipListItem[] = [];

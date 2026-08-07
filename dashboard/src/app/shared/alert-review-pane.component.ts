@@ -28,25 +28,25 @@ import { StatusPillComponent } from './status-pill.component';
     } @else if (loading) {
       <app-skeleton-list [count]="3" />
     } @else if (alert) {
-      <div class="pane-header">
+      <div class="mb-2 flex items-start justify-between gap-3">
         <div>
-          <h3>{{ labelType(alert.alertType) }}</h3>
+          <h3 class="m-0 mb-1.5 text-[1.1rem]">{{ labelType(alert.alertType) }}</h3>
           <app-status-badge [level]="alert.riskLevel" [label]="alert.riskLevel + ' · ' + alert.riskScore" />
         </div>
         @if (showNav) {
-          <div class="queue-nav">
-            <button class="ghost" type="button" (click)="prev.emit()" [disabled]="!hasPrev">Previous</button>
-            <button class="ghost" type="button" (click)="next.emit()" [disabled]="!hasNext">Next</button>
+          <div class="flex gap-2">
+            <button class="ghost min-h-11" type="button" (click)="prev.emit()" [disabled]="!hasPrev">Previous</button>
+            <button class="ghost min-h-11" type="button" (click)="next.emit()" [disabled]="!hasNext">Next</button>
           </div>
         }
       </div>
 
-      <div class="pane-body">
-        <div class="col-main">
+      <div class="grid items-start gap-4 lg:grid-cols-[1fr_280px]">
+        <div class="flex min-w-0 flex-col gap-3">
           <div class="card">
             <h4>Clip</h4>
             @if (alert.clipUrl) {
-              <video class="clip" [src]="alert.clipUrl" controls width="100%"></video>
+              <video class="rounded-[6px] border border-border-strong" [src]="alert.clipUrl" controls width="100%"></video>
             } @else {
               <p class="muted">Clip not available — it may have been removed by storage retention.</p>
             }
@@ -54,10 +54,10 @@ import { StatusPillComponent } from './status-pill.component';
 
           <div class="card">
             <h4>Evidence timeline</h4>
-            <div class="evidence-timeline">
+            <div class="flex flex-col gap-2">
               @for (e of evidence(); track e) {
-                <div class="evidence-timeline-item">
-                  <span class="ev-marker" aria-hidden="true"></span>
+                <div class="flex gap-3 rounded-[6px] border border-border border-l-[3px] border-l-accent bg-surface-2 px-3 py-2.5">
+                  <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
                   <span>{{ e }}</span>
                 </div>
               } @empty {
@@ -67,16 +67,16 @@ import { StatusPillComponent } from './status-pill.component';
           </div>
         </div>
 
-        <div class="col-side">
+        <div class="flex min-w-0 flex-col gap-3">
           <div class="card">
             <h4>Details</h4>
-            <div class="detail-list">
-              <div class="detail-item"><span class="dk">Status</span><app-status-pill [status]="alert.status" /></div>
-              <div class="detail-item"><span class="dk">Created</span><span>{{ alert.createdAt | date:'medium' }}</span></div>
+            <div class="flex flex-col">
+              <div class="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"><span class="text-[0.8rem] text-ink-muted">Status</span><app-status-pill [status]="alert.status" /></div>
+              <div class="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"><span class="text-[0.8rem] text-ink-muted">Created</span><span>{{ alert.createdAt | date:'medium' }}</span></div>
             </div>
           </div>
 
-          <div class="card review-card">
+          <div class="card">
             <h4>Your review</h4>
             <app-review-actions
               [saving]="saving"
@@ -89,21 +89,12 @@ import { StatusPillComponent } from './status-pill.component';
         </div>
       </div>
     } @else {
-      <div class="empty-pane muted">
+      <div class="muted px-6 py-12 text-center">
         <p>Select an alert from the list to review it here.</p>
       </div>
     }
   `,
   styles: [`
-    .pane-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
-    .pane-header h3 { margin: 0 0 6px; font-size: 1.1rem; }
-    .queue-nav { display: flex; gap: 8px; }
-    .queue-nav button { min-height: 44px; }
-    .pane-body { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
-    @media (max-width: 900px) { .pane-body { grid-template-columns: 1fr; } }
-    .col-main, .col-side { display: flex; flex-direction: column; gap: 12px; }
-    .review-card h4 { margin: 0 0 8px; }
-    .empty-pane { padding: 48px 24px; text-align: center; }
     h4 { margin: 0 0 8px; font-size: 0.95rem; }
   `],
 })

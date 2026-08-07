@@ -26,7 +26,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       }
 
       @if (auth.isAdmin() && pipeline) {
-        <div class="grid-stats">
+        <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <app-stat-card label="Redis queue depth" [value]="pipeline.redisQueueDepth" [tone]="pipeline.redisQueueDepth > 0 ? 'warn' : 'default'" />
           <app-stat-card label="Failed jobs" [value]="pipeline.failedJobs" [tone]="pipeline.failedJobs > 0 ? 'danger' : 'default'" />
         </div>
@@ -36,7 +36,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       @if (!error && connectors.length === 0 && !loading) {
         <div class="card"><p class="muted">No connectors registered yet.</p></div>
       } @else if (connectors.length > 0) {
-        <div class="data-table-wrap health-desktop">
+        <div class="data-table-wrap hidden md:block">
           <table class="table">
             <thead>
               <tr>
@@ -54,9 +54,9 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                 <tr>
                   <td>{{ c.name }} <span class="muted small">v{{ c.version }}</span></td>
                   <td><app-status-badge [level]="c.status" [label]="c.status" /></td>
-                  <td [class.warn]="c.diskFreePct < 20" [class.crit]="c.diskFreePct < 10">{{ c.diskFreePct | number:'1.0-1' }}%</td>
-                  <td [class.warn]="c.uploadQueueDepth > 50">{{ c.uploadQueueDepth }}</td>
-                  <td [class.warn]="(c.rtspReconnects || 0) > 0">{{ c.rtspReconnects ?? 0 }}</td>
+                  <td [class.text-warning]="c.diskFreePct < 20" [class.text-danger]="c.diskFreePct < 10">{{ c.diskFreePct | number:'1.0-1' }}%</td>
+                  <td [class.text-warning]="c.uploadQueueDepth > 50">{{ c.uploadQueueDepth }}</td>
+                  <td [class.text-warning]="(c.rtspReconnects || 0) > 0">{{ c.rtspReconnects ?? 0 }}</td>
                   <td>{{ c.lastHeartbeat ? (c.lastHeartbeat | date:'short') : '—' }}</td>
                   <td>{{ c.degradedReason || '—' }}</td>
                 </tr>
@@ -65,31 +65,22 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
           </table>
         </div>
 
-        <div class="health-cards">
+        <div class="flex flex-col gap-2.5 md:hidden">
           @for (c of connectors; track c.id) {
-            <div class="card health-card">
-              <div class="health-card-head">
+            <div class="card !mb-0">
+              <div class="mb-2 flex justify-between gap-2">
                 <strong>{{ c.name }}</strong>
                 <app-status-badge [level]="c.status" [label]="c.status" />
               </div>
               <p class="muted small">v{{ c.version }} · Disk {{ c.diskFreePct | number:'1.0-1' }}% · Queue {{ c.uploadQueueDepth }}</p>
               <p class="muted small">Heartbeat: {{ c.lastHeartbeat ? (c.lastHeartbeat | date:'short') : '—' }}</p>
-              @if (c.degradedReason) { <p class="warn small">{{ c.degradedReason }}</p> }
+              @if (c.degradedReason) { <p class="small text-warning">{{ c.degradedReason }}</p> }
             </div>
           }
         </div>
       }
     </app-page-container>
   `,
-  styles: [`
-    .warn { color: var(--warning); } .crit { color: var(--danger); }
-    .health-cards { display: none; flex-direction: column; gap: 10px; }
-    @media (max-width: 768px) {
-      .health-desktop { display: none; }
-      .health-cards { display: flex; }
-    }
-    .health-card-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-  `],
 })
 export class HealthComponent implements OnInit, OnDestroy {
   connectors: Connector[] = [];

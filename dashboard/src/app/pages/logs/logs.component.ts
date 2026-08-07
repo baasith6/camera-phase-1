@@ -56,7 +56,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       @if (loading) {
         <app-skeleton-list />
       } @else if (logs) {
-        <div class="card meta-row">
+        <div class="card !mb-3 flex flex-wrap justify-between gap-2">
           <span class="muted small">Generated {{ logs.generatedAt | date:'medium' }}</span>
           <span class="muted small">Queue depth: {{ logs.redisQueueDepth }} · Failed jobs: {{ logs.failedJobs }}</span>
         </div>
@@ -92,23 +92,23 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
               </tbody>
             </table>
 
-            <div mobile class="alert-cards">
+            <div mobile class="flex flex-col gap-2.5">
               @for (c of filteredConnectors(); track c.id) {
                 <div class="alert-card-mobile">
-                  <div class="alert-card-mobile-head">
+                  <div class="mb-2 flex items-start justify-between gap-2">
                     <strong>{{ c.name }}</strong>
                     <app-status-badge [level]="c.status" [label]="c.status" />
                   </div>
-                  <div class="alert-card-mobile-meta">
+                  <div class="flex flex-wrap gap-2 text-[0.82rem]">
                     <span class="muted">v{{ c.version }}</span>
                     <span class="muted">Queue {{ c.uploadQueueDepth }}</span>
                     <span class="muted">Disk {{ c.diskFreePct }}%</span>
                   </div>
-                  <div class="alert-card-mobile-meta">
+                  <div class="mt-1 flex flex-wrap gap-2 text-[0.82rem]">
                     <span class="muted">{{ c.lastHeartbeat ? (c.lastHeartbeat | date:'MMM d, h:mm a') : 'No heartbeat' }}</span>
                   </div>
                   @if (c.degradedReason) {
-                    <p class="muted small card-note">{{ c.degradedReason }}</p>
+                    <p class="muted small mt-2 mb-0">{{ c.degradedReason }}</p>
                   }
                 </div>
               }
@@ -118,11 +118,6 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       }
     </app-page-container>
   `,
-  styles: [`
-    .meta-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .mono { font-family: ui-monospace, monospace; font-size: 0.82rem; }
-    .card-note { margin: 8px 0 0; }
-  `],
 })
 export class LogsComponent implements OnInit, OnDestroy {
   logs: SystemLogs | null = null;

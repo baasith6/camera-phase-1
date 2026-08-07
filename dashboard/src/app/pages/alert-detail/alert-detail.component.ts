@@ -27,12 +27,12 @@ import {
         </app-error-banner>
       } @else {
         <app-page-header title="Review alert">
-          <div actions class="queue-nav">
-            <button class="ghost" type="button" (click)="goPrev()" [disabled]="!prevId">Previous</button>
-            <button class="ghost" type="button" (click)="goNext()" [disabled]="!nextId">Next</button>
+          <div actions class="flex flex-wrap items-center gap-2">
+            <button class="ghost min-h-11" type="button" (click)="goPrev()" [disabled]="!prevId">Previous</button>
+            <button class="ghost min-h-11" type="button" (click)="goNext()" [disabled]="!nextId">Next</button>
           </div>
           <div below>
-            <a class="back-link" routerLink="/app/alerts" [queryParams]="backQuery">Back to Review</a>
+            <a class="text-[0.82rem] text-accent no-underline" routerLink="/app/alerts" [queryParams]="backQuery">Back to Review</a>
           </div>
         </app-page-header>
 
@@ -42,11 +42,6 @@ import {
       }
     </app-page-container>
   `,
-  styles: [`
-    .queue-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .queue-nav button { min-height: 44px; }
-    .back-link { font-size: 0.82rem; color: var(--accent); text-decoration: none; }
-  `],
 })
 export class AlertDetailComponent implements OnInit {
   alertId = '';

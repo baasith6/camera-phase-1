@@ -48,7 +48,7 @@ import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBa
             title="No activity yet"
             detail="Charts will populate once clips are uploaded and alerts are generated for this store." />
         } @else {
-        <div class="grid-stats">
+        <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
           <app-stat-card label="Total alerts" [value]="summary.totalAlerts" />
           <app-stat-card label="Pending review" [value]="summary.pendingAlerts" tone="warn" />
           <app-stat-card label="High risk" [value]="summary.highRiskAlerts" tone="danger" />
@@ -56,23 +56,21 @@ import { PageContainerComponent, PageHeaderComponent, StatCardComponent, ErrorBa
           <app-stat-card label="Clips analyzed" [value]="summary.analyzedClips + ' / ' + summary.totalClips" />
         </div>
 
-        <div class="grid-2">
-          <div class="card chart-card">
+        <!-- min-w-0 on chart cards: canvas in a grid child overflows without it -->
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div class="card min-w-0 !mb-0">
             <h3>Alerts over time</h3>
             @if (trendConfig) { <app-chart [config]="trendConfig" /> }
           </div>
-          <div class="card chart-card">
+          <div class="card min-w-0 !mb-0">
             <h3>Risk distribution</h3>
             @if (riskConfig) { <app-chart [config]="riskConfig" /> }
           </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="card chart-card">
+          <div class="card min-w-0 !mb-0">
             <h3>Alerts by type</h3>
             @if (typeConfig) { <app-chart [config]="typeConfig" /> }
           </div>
-          <div class="card chart-card">
+          <div class="card min-w-0 !mb-0">
             <h3>Review outcomes</h3>
             @if (outcomeConfig) { <app-chart [config]="outcomeConfig" /> }
           </div>

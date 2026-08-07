@@ -6,43 +6,22 @@ import { ConfirmDialogService } from './confirm-dialog.service';
   standalone: true,
   template: `
     @if (dialog.visible() && dialog.options(); as opts) {
-      <div class="backdrop" role="presentation" (click)="dialog.cancel()"></div>
-      <div class="modal" role="alertdialog" [attr.aria-labelledby]="'confirm-title'" aria-modal="true">
-        <h3 id="confirm-title">{{ opts.title }}</h3>
-        <p>{{ opts.message }}</p>
-        <div class="actions">
+      <div class="fixed inset-0 z-[200] bg-black/40" role="presentation" (click)="dialog.cancel()"></div>
+      <div
+        class="fixed left-1/2 top-1/2 z-[201] w-[min(400px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-card border border-border bg-surface p-6 shadow-pop"
+        role="alertdialog" [attr.aria-labelledby]="'confirm-title'" aria-modal="true">
+        <h3 id="confirm-title" class="mb-2 mt-0 text-[1.05rem]">{{ opts.title }}</h3>
+        <p class="mb-5 mt-0 leading-normal text-ink-muted">{{ opts.message }}</p>
+        <div class="flex justify-end gap-2">
           <button #cancelBtn type="button" class="ghost" (click)="dialog.cancel()">{{ opts.cancelLabel }}</button>
-          <button type="button" [class.danger]="opts.danger" (click)="dialog.confirm()">{{ opts.confirmLabel }}</button>
+          <button
+            type="button"
+            [class]="opts.danger ? '!border-none !bg-danger !text-white hover:brightness-95' : ''"
+            (click)="dialog.confirm()">{{ opts.confirmLabel }}</button>
         </div>
       </div>
     }
   `,
-  styles: [`
-    .backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.4);
-      z-index: 200;
-    }
-    .modal {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 201;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 24px;
-      width: min(400px, calc(100vw - 32px));
-      box-shadow: var(--shadow-md);
-    }
-    .modal h3 { margin: 0 0 8px; font-size: 1.05rem; }
-    .modal p { margin: 0 0 20px; color: var(--text-muted); line-height: 1.5; }
-    .actions { display: flex; justify-content: flex-end; gap: 8px; }
-    button.danger { background: var(--danger); color: #fff; border: none; }
-    button.danger:hover { filter: brightness(0.95); }
-  `],
 })
 export class ConfirmDialogComponent implements AfterViewChecked {
   @ViewChild('cancelBtn') cancelBtn?: ElementRef<HTMLButtonElement>;

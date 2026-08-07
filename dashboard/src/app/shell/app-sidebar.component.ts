@@ -1,8 +1,8 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, computed } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { LiveAlertsService } from '../core/live-alerts.service';
-import { navSectionsForRole, NavSection } from '../shared/nav.config';
+import { navSectionsForRole } from '../shared/nav.config';
 
 @Component({
   selector: 'app-sidebar',
@@ -11,12 +11,10 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
   template: `
     <aside class="sidebar" [class.open]="open" aria-label="Main navigation">
       <nav>
-        @for (section of sections; track section.label) {
+        @for (section of sections(); track section.label) {
           <div class="nav-section-label">{{ section.label }}</div>
           @for (item of section.items; track item.route) {
-            @if (!item.adminOnly || auth.isAdmin()) {
-              <a [routerLink]="item.route" routerLinkActive="active" (click)="navigate.emit()">
-                <span class="icon" [attr.data-icon]="item.icon"></span>
+            <a [routerLink]="item.route" routerLinkActive="active" (click)="navigate.emit()">
                 @switch (item.icon) {
                   @case ('bell') {
                     <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -60,30 +58,49 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
                   <span class="nav-badge">{{ live.pendingCount() }} pending</span>
                 }
               </a>
-            }
           }
         }
       </nav>
     </aside>
   `,
   styles: [`
-    .sidebar {
+    /* Background lives on :host — flex stretch sizes the host, but % height
+       on the inner aside often stays content-sized (height:auto parent). */
+    :host {
+      display: block;
+      flex-shrink: 0;
+      align-self: stretch;
       width: 240px;
+      min-height: 0;
       background: var(--surface);
       border-right: 1px solid var(--border);
+      overflow-y: auto;
+    }
+    .sidebar {
+      /* .sidebar + .open class names are load-bearing: shell focus trap and
+         e2e smoke tests query them. Layout via Tailwind-equivalent rules. */
+      width: 100%;
+      min-height: 100%;
       display: flex;
       flex-direction: column;
       padding: 12px 10px;
-      overflow-y: auto;
-      flex-shrink: 0;
     }
     nav { display: flex; flex-direction: column; gap: 2px; }
+    .nav-section-label {
+      font-size: var(--fs-xs);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      padding: 8px 10px 4px;
+      opacity: 0.85;
+    }
     nav a {
       color: var(--text-muted);
       text-decoration: none;
       padding: 7px 12px;
       border-radius: var(--radius-sm);
-      font-size: 0.9rem;
+      font-size: var(--fs-md);
       font-weight: 500;
       display: flex;
       align-items: center;
@@ -100,7 +117,7 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
     }
     .nav-label { flex: 1; }
     .nav-badge {
-      font-size: 0.7rem;
+      font-size: var(--fs-xs);
       font-weight: 600;
       padding: 2px 8px;
       border-radius: 999px;
@@ -109,13 +126,25 @@ import { navSectionsForRole, NavSection } from '../shared/nav.config';
       white-space: nowrap;
     }
     .svg-icon { width: 16px; height: 16px; flex-shrink: 0; }
-    .icon { display: none; }
-    @media (max-width: 991px) {
+    @media (max-width: 1023.98px) {
+      :host {
+        /* Drawer is position:fixed on .sidebar; host should not reserve width. */
+        width: 0;
+        border-right: none;
+        background: transparent;
+        overflow: visible;
+      }
       .sidebar {
         position: fixed;
         top: 56px;
         left: 0;
         bottom: 0;
+        width: 240px;
+        min-height: 0;
+        height: auto;
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
         z-index: 50;
         transform: translateX(-100%);
         transition: transform 0.2s ease;
@@ -131,12 +160,12 @@ export class AppSidebarComponent {
   @Input() open = false;
   @Output() navigate = new EventEmitter<void>();
 
-  readonly sections: NavSection[];
+  /* Reactive: recomputes when the auth role signal changes (e.g. sign-out →
+     sign-in as a different role without a full page reload). */
+  readonly sections = computed(() => navSectionsForRole(this.auth.isAdmin()));
 
   constructor(
     public auth: AuthService,
     public live: LiveAlertsService,
-  ) {
-    this.sections = navSectionsForRole(this.auth.isAdmin());
-  }
+  ) {}
 }
