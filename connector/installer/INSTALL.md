@@ -1,7 +1,12 @@
-# ONEVO Connector — Installer Build Guide
+# onetix Connector — Installer Build Guide
 
 Connector runtime already works. This packages it into
-`ONEVO-Connector-Setup-1.1.18.exe`.
+`ONEVO-Connector-Setup-1.1.18.exe` (filename keeps ONEVO for backend download APIs).
+
+**Brand note:** The wizard shows **onetix** (fonts, logo, labels). Install
+paths, AppId, and the Windows service name stay **ONEVO** so existing shops
+upgrade without migration (`Program Files\ONEVO\Connector`,
+`%ProgramData%\ONEVO\Connector`, service `ONEVOConnector`).
 
 ## 1. Prerequisites (one-time)
 
@@ -19,6 +24,18 @@ connector/installer/tools/WinSW-x64.exe
 ```
 
 Missing either file = build fails immediately. See `tools/README.md`.
+
+### Brand assets (checked in)
+
+```
+connector/installer/assets/onetix.ico
+connector/installer/assets/onevo.ico          # same mark; kept for compatibility
+connector/installer/assets/wizard-side.bmp    # 164×314 sidebar
+connector/installer/assets/wizard-small.bmp   # 55×55
+connector/installer/assets/fonts/             # IBM Plex Sans/Mono (OFL) + OFL.txt
+```
+
+Regenerate BMP/ICO (optional): `python connector/installer/assets/_gen_brand_assets.py`
 
 ## 2. Build
 
@@ -53,18 +70,14 @@ connector/dist/ONEVO-Connector-Setup-1.1.18.exe
 
 ## 3. What the installer does on a shop PC
 
-1. Installs under `Program Files\ONEVO\Connector`
-2. Registers a Windows service via WinSW (`ONEVO Local Connector`)
+1. Installs under `Program Files\ONEVO\Connector` (internal path; UI says onetix)
+2. Registers a Windows service via WinSW (`ONEVOConnector` / display name from WinSW XML)
 3. Collects a dashboard-generated setup code in the native installer
 4. Collects one or more RTSP URLs, ONVIF cameras, or a local MP4 test video
 5. Writes pending configuration under `%ProgramData%\ONEVO\Connector`
 6. Starts the service; it claims the selected store and provisions its cameras
 7. Service continuously monitors → motion clips → signed MinIO upload → backend
-2. Writes `config.json` under `%ProgramData%\ONEVO\Connector\` (setup code + camera source)
-3. Registers and starts a Windows service via WinSW (`ONEVO Local Connector`)
-4. Waits for `http://localhost:8099/health` before opening the local status page
-5. Service claims the setup code, registers cameras on the cloud backend, then monitors continuously
-6. Motion clips upload via signed URLs to the backend
+8. Opens the local status page at `http://localhost:8099/` after first install
 
 If activation fails, the service **still** keeps the admin UI running at `http://localhost:8099/`. Open **Sources** (`/#sources`) to retry camera setup and **Zones** (`/#zones`) to draw detection areas. Generate a new setup code in the dashboard before retrying.
 

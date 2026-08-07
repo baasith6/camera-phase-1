@@ -34,10 +34,10 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       <app-page-header title="Training dataset">
         <div actions>
           <button class="ghost" type="button" (click)="load()">Refresh</button>
-          <button class="primary train-btn" type="button" disabled
+          <button class="relative inline-flex items-center gap-2 disabled:opacity-65" type="button" disabled
                   title="Model training will be available in a later release">
             Train Model
-            <span class="soon-badge">Coming Soon</span>
+            <span class="rounded-full bg-white/25 px-1.5 py-0.5 text-[0.62rem] font-bold uppercase tracking-[0.04em]">Coming Soon</span>
           </button>
         </div>
       </app-page-header>
@@ -49,25 +49,26 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       }
 
       @if (stats) {
-        <div class="stat-row">
-          <div class="stat-tile"><span class="sv">{{ stats.total }}</span><span class="sl">Total samples</span></div>
-          <div class="stat-tile"><span class="sv ok">{{ stats.ready }}</span><span class="sl">Ready</span></div>
-          <div class="stat-tile"><span class="sv warn">{{ stats.pending }}</span><span class="sl">Pending</span></div>
-          <div class="stat-tile"><span class="sv muted-v">{{ stats.excluded }}</span><span class="sl">Excluded</span></div>
-          <div class="stat-tile"><span class="sv danger-v">{{ stats.clipIssues }}</span><span class="sl">Clip issues</span></div>
+        <!-- .stat-tile/.sv are marker classes only (e2e verify-training.spec.ts queries them). -->
+        <div class="mb-2 flex flex-wrap gap-3">
+          <div class="stat-tile flex flex-1 basis-[120px] flex-col gap-0.5 rounded-ctl border border-border px-3 py-2"><span class="sv text-[1.15rem] font-bold">{{ stats.total }}</span><span class="text-xs text-ink-muted">Total samples</span></div>
+          <div class="stat-tile flex flex-1 basis-[120px] flex-col gap-0.5 rounded-ctl border border-border px-3 py-2"><span class="sv text-[1.15rem] font-bold text-success">{{ stats.ready }}</span><span class="text-xs text-ink-muted">Ready</span></div>
+          <div class="stat-tile flex flex-1 basis-[120px] flex-col gap-0.5 rounded-ctl border border-border px-3 py-2"><span class="sv text-[1.15rem] font-bold text-warning">{{ stats.pending }}</span><span class="text-xs text-ink-muted">Pending</span></div>
+          <div class="stat-tile flex flex-1 basis-[120px] flex-col gap-0.5 rounded-ctl border border-border px-3 py-2"><span class="sv text-[1.15rem] font-bold text-ink-muted">{{ stats.excluded }}</span><span class="text-xs text-ink-muted">Excluded</span></div>
+          <div class="stat-tile flex flex-1 basis-[120px] flex-col gap-0.5 rounded-ctl border border-border px-3 py-2"><span class="sv text-[1.15rem] font-bold text-danger">{{ stats.clipIssues }}</span><span class="text-xs text-ink-muted">Clip issues</span></div>
         </div>
 
         @if (patternRows.length) {
-          <button type="button" class="link-toggle" (click)="showPatternStats = !showPatternStats">
+          <button type="button" class="mb-2 cursor-pointer border-none !bg-transparent !p-0 text-[0.85rem] !text-accent font-normal" (click)="showPatternStats = !showPatternStats">
             {{ showPatternStats ? 'Hide label counts by pattern' : 'Show label counts by pattern' }}
           </button>
           @if (showPatternStats) {
-            <div class="pattern-stats">
+            <div class="mb-3 flex flex-wrap gap-2">
               @for (row of patternRows; track row.pattern) {
-                <div class="pattern-stat">
-                  <span class="pn">{{ label(row.pattern) }}</span>
-                  <span class="pos" title="Positive labels">+{{ row.positive }}</span>
-                  <span class="neg" title="Hard-negative labels">−{{ row.hardNegative }}</span>
+                <div class="inline-flex items-center gap-2 rounded-full border border-border px-2.5 py-1 text-[0.8rem]">
+                  <span class="text-ink-muted">{{ label(row.pattern) }}</span>
+                  <span class="font-semibold text-success" title="Positive labels">+{{ row.positive }}</span>
+                  <span class="font-semibold text-danger" title="Hard-negative labels">−{{ row.hardNegative }}</span>
                 </div>
               }
             </div>
@@ -103,30 +104,30 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                   (keydown.enter)="openDetail(s.id)">
                   <td>{{ s.updatedAt | date:'MMM d, h:mm a' }}</td>
                   <td>{{ label(s.alertType) }}</td>
-                  <td class="chips-cell">
+                  <td class="max-w-[200px]">
                     @for (p of s.humanConfirmedPatterns; track p) {
-                      <span class="mini-chip on">{{ label(p) }}</span>
+                      <span class="mini-chip !border-accent !bg-accent !text-white">{{ label(p) }}</span>
                     } @empty { <span class="muted">—</span> }
                   </td>
-                  <td class="nowrap">
-                    <span class="pos">{{ s.positiveCount }} pos</span> ·
-                    <span class="neg">{{ s.hardNegativeCount }} neg</span>
+                  <td class="whitespace-nowrap">
+                    <span class="font-semibold text-success">{{ s.positiveCount }} pos</span> ·
+                    <span class="font-semibold text-danger">{{ s.hardNegativeCount }} neg</span>
                   </td>
                   <td><app-status-badge [level]="statusLevel(s.datasetStatus)" [label]="s.datasetStatus" /></td>
-                  <td class="ellipsis">{{ s.reviewerEmail || '—' }}</td>
+                  <td class="max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap">{{ s.reviewerEmail || '—' }}</td>
                 </tr>
               }
             </tbody>
           </table>
 
-          <div mobile class="alert-cards">
+          <div mobile class="flex flex-col gap-2.5">
             @for (s of samples; track s.id) {
               <div class="alert-card-mobile" (click)="openDetail(s.id)" tabindex="0" (keydown.enter)="openDetail(s.id)">
-                <div class="alert-card-mobile-head">
+                <div class="mb-2 flex items-start justify-between gap-2">
                   <strong>{{ label(s.alertType) }}</strong>
                   <app-status-badge [level]="statusLevel(s.datasetStatus)" [label]="s.datasetStatus" />
                 </div>
-                <div class="alert-card-mobile-meta">
+                <div class="flex flex-wrap gap-2 text-[0.82rem]">
                   <span class="muted">{{ s.updatedAt | date:'MMM d, h:mm a' }}</span>
                   <span class="muted">{{ s.positiveCount }} pos · {{ s.hardNegativeCount }} neg · {{ s.reviewOutcome }}</span>
                 </div>
@@ -137,10 +138,11 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
       }
 
       @if (detail || detailLoading || detailError) {
-        <div class="drawer-backdrop" (click)="detail = undefined; detailError = ''; detailLoading = false;"></div>
-        <div class="card detail-panel">
-          <div class="detail-head">
-            <h3>Sample detail</h3>
+        <div class="fixed inset-0 z-[200] bg-black/40" (click)="detail = undefined; detailError = ''; detailLoading = false;"></div>
+        <!-- .detail-panel/.label-row are marker classes only (e2e verify-training.spec.ts queries them). -->
+        <div class="detail-panel card fixed bottom-0 right-0 top-0 z-[201] !m-0 w-[min(760px,100vw)] overflow-y-auto !rounded-none border-l border-border !p-4 shadow-pop">
+          <div class="mb-3 flex items-center justify-between">
+            <h3 class="m-0 text-base">Sample detail</h3>
             <button class="ghost small" type="button" (click)="detail = undefined; detailError = ''; detailLoading = false;">Close</button>
           </div>
 
@@ -149,56 +151,57 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
           } @else if (detailError) {
             <app-error-banner [message]="detailError" />
           } @else if (detail) {
-          <div class="detail-grid">
-            <div class="detail-main">
+          <div class="flex flex-col gap-4">
+            <div>
               @if (detail.clipUrl) {
-                <video class="clip" [src]="detail.clipUrl" controls width="100%"></video>
+                <video [src]="detail.clipUrl" controls width="100%"></video>
               } @else {
                 <p class="muted">Clip not available — the dataset copy could not be found.</p>
               }
             </div>
 
-            <div class="detail-side">
-              <h4>Per-pattern labels</h4>
+            <div>
+              <h4 class="m-0 mb-2 text-[0.9rem]">Per-pattern labels</h4>
               @if (!editing) {
-                <div class="label-list">
+                <div class="flex flex-col gap-1.5">
                   @for (l of detail.labels; track l.pattern) {
-                    <div class="label-row">
-                      <span class="ln">{{ label(l.pattern) }}</span>
-                      <span class="badges">
-                        @if (l.aiDetected) { <span class="mini-chip ai">AI</span> }
-                        <span class="mini-chip" [class.pos-chip]="l.labelStatus === 'Positive'"
-                              [class.neg-chip]="l.labelStatus === 'HardNegative'">
+                    <div class="label-row flex items-center justify-between gap-2 text-[0.85rem]">
+                      <span>{{ label(l.pattern) }}</span>
+                      <span class="inline-flex gap-1">
+                        @if (l.aiDetected) { <span class="mini-chip !border-accent !text-accent">AI</span> }
+                        <span class="mini-chip"
+                              [class.!border-success]="l.labelStatus === 'Positive'" [class.!text-success]="l.labelStatus === 'Positive'"
+                              [class.!border-danger]="l.labelStatus === 'HardNegative'" [class.!text-danger]="l.labelStatus === 'HardNegative'">
                           {{ l.labelStatus }}
                         </span>
                       </span>
                     </div>
                   } @empty { <p class="muted">No labels.</p> }
                 </div>
-                <div class="detail-actions">
+                <div class="mt-2.5 flex gap-2">
                   <button class="ghost small" type="button" (click)="startEdit()">Edit labels</button>
                   <button class="ghost small" type="button" (click)="toggleInclude()" [disabled]="savingDetail">
                     {{ detail.includeInTraining ? 'Exclude from training' : 'Include in training' }}
                   </button>
                 </div>
               } @else {
-                <div class="chip-grid">
+                <div class="flex flex-wrap gap-2">
                   @for (p of allPatterns; track p) {
-                    <label class="chip" [class.on]="editSelected.has(p)">
-                      <input type="checkbox" [checked]="editSelected.has(p)" (change)="toggleEdit(p)" />
-                      <span>{{ label(p) }}</span>
+                    <label class="chip inline-flex min-w-0 max-w-full cursor-pointer select-none items-center gap-1.5" [class.active]="editSelected.has(p)">
+                      <input class="pointer-events-none absolute opacity-0" type="checkbox" [checked]="editSelected.has(p)" (change)="toggleEdit(p)" />
+                      <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{{ label(p) }}</span>
                     </label>
                   }
                 </div>
-                <div class="detail-actions">
-                  <button class="primary small" type="button" (click)="saveLabels()" [disabled]="savingDetail">Save labels</button>
+                <div class="mt-2.5 flex gap-2">
+                  <button class="small" type="button" (click)="saveLabels()" [disabled]="savingDetail">Save labels</button>
                   <button class="ghost small" type="button" (click)="editing = false">Cancel</button>
                 </div>
               }
               @if (detailError) { <app-error-banner [message]="detailError" /> }
 
-              <h4>Audit</h4>
-              <div class="audit-list muted small">
+              <h4 class="m-0 mb-2 mt-4 text-[0.9rem]">Audit</h4>
+              <div class="muted small flex flex-col gap-1">
                 <div>Reviewer: {{ detail.reviewerEmail || '—' }}</div>
                 <div>Outcome: {{ detail.reviewOutcome }}</div>
                 <div>Store: {{ detail.storeName }} · {{ detail.cameraName }}</div>
@@ -215,77 +218,11 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
     </app-page-container>
   `,
   styles: [`
-    .train-btn { position: relative; display: inline-flex; align-items: center; gap: 8px; }
-    .train-btn:disabled { opacity: 0.65; cursor: not-allowed; }
-    .soon-badge {
-      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-      padding: 2px 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.25);
-    }
-    .stat-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
-    .stat-tile {
-      flex: 1 1 120px; display: flex; flex-direction: column; gap: 2px;
-      padding: 8px 12px; border: 1px solid var(--border, rgba(128,128,128,0.25));
-      border-radius: var(--radius-sm); background: var(--card, transparent);
-    }
-    .sv { font-size: 1.15rem; font-weight: 700; }
-    .sv.ok { color: var(--success); }
-    .sv.warn { color: var(--warning, #f59e0b); }
-    .sv.muted-v { color: var(--text-muted); }
-    .sv.danger-v { color: var(--danger); }
-    .sl { font-size: 0.75rem; color: var(--text-muted); }
-    .link-toggle {
-      background: none; border: none; color: var(--accent); padding: 0;
-      font-size: 0.85rem; cursor: pointer; margin-bottom: 8px;
-    }
-    .pattern-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .pattern-stat {
-      display: inline-flex; align-items: center; gap: 8px; font-size: 0.8rem;
-      padding: 4px 10px; border: 1px solid var(--border, rgba(128,128,128,0.25));
-      border-radius: 999px;
-    }
-    .pn { color: var(--text-muted); }
-    .pos { color: var(--success); font-weight: 600; }
-    .neg { color: var(--danger); font-weight: 600; }
-    .chips-cell { max-width: 200px; }
+    .selected-row td { background: var(--accent-soft) !important; }
     .mini-chip {
       display: inline-block; font-size: 0.7rem; padding: 2px 8px; margin: 1px;
-      border-radius: 999px; border: 1px solid var(--border, rgba(128,128,128,0.35));
+      border-radius: 999px; border: 1px solid var(--border-strong);
     }
-    .mini-chip.ai { border-color: var(--accent); color: var(--accent); }
-    .mini-chip.on { background: var(--accent); border-color: var(--accent); color: white; }
-    .mini-chip.pos-chip { border-color: var(--success); color: var(--success); }
-    .mini-chip.neg-chip { border-color: var(--danger); color: var(--danger); }
-    .nowrap { white-space: nowrap; }
-    .ellipsis { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 200; }
-    .detail-panel {
-      position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 100vw);
-      z-index: 201; overflow-y: auto; margin: 0; padding: 16px;
-      border-radius: 0; border-left: 1px solid var(--border, rgba(128,128,128,0.25));
-      box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.25));
-    }
-    .detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .detail-head h3 { margin: 0; font-size: 1rem; }
-    .detail-grid { display: flex; flex-direction: column; gap: 16px; }
-    .detail-side h4 { margin: 0 0 8px; font-size: 0.9rem; }
-    .detail-side h4:not(:first-child) { margin-top: 16px; }
-    .label-list { display: flex; flex-direction: column; gap: 6px; }
-    .label-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.85rem; }
-    .badges { display: inline-flex; gap: 4px; }
-    .detail-actions { display: flex; gap: 8px; margin-top: 10px; }
-    .audit-list { display: flex; flex-direction: column; gap: 4px; }
-    .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-    .chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 12px; border-radius: 999px; cursor: pointer;
-      border: 1px solid var(--border, rgba(128,128,128,0.35));
-      font-size: 0.85rem; user-select: none;
-      max-width: 100%; min-width: 0;
-    }
-    .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .chip input { position: absolute; opacity: 0; pointer-events: none; }
-    .chip.on { background: var(--accent); border-color: var(--accent); color: white; }
-    button.primary { background: var(--accent); color: white; border: none; border-radius: var(--radius-sm); padding: 0.5rem 1rem; font-weight: 600; cursor: pointer; }
   `],
 })
 export class TrainingComponent implements OnInit {

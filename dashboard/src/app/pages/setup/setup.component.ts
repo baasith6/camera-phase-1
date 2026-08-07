@@ -48,33 +48,6 @@ import { SetupZonesStepComponent } from './setup-zones-step.component';
       }
     </app-page-container>
   `,
-  styles: [`
-    .stepper {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: var(--space-md, 16px);
-    }
-    .stepper-btn {
-      padding: 8px 14px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text-muted);
-      font-size: 0.85rem;
-      font-weight: 500;
-      cursor: pointer;
-    }
-    .stepper-btn.active {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: var(--accent-2);
-    }
-    .stepper-btn.done {
-      color: var(--success);
-      border-color: rgba(22, 163, 74, 0.3);
-    }
-  `],
 })
 export class SetupComponent implements OnInit, OnDestroy {
   readonly ctx: SetupContextService;

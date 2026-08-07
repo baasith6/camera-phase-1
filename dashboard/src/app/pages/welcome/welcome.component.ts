@@ -1,103 +1,43 @@
 import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { BrandLogoComponent } from '../../shared/brand-logo.component';
 
 @Component({
   selector: 'app-welcome',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, BrandLogoComponent],
   template: `
-    <div class="welcome">
-      <header class="hero">
-        <div class="brand">onetix</div>
-        <h1>Retail loss prevention, powered by your cameras</h1>
-        <p class="lead">
+    <div class="flex min-h-screen flex-col items-center gap-8 bg-bg px-6 py-12">
+      <header class="max-w-[560px] text-center">
+        <app-brand-logo size="lg" class="mb-5 justify-center" />
+        <h1 class="m-0 mb-3 text-[clamp(1.75rem,4vw,2.25rem)] font-semibold leading-tight">Retail loss prevention, powered by your cameras</h1>
+        <p class="m-0 mb-3 text-[1.05rem] leading-[1.6] text-ink-muted">
           Connect in-store cameras to AI analysis and staff alerts — review suspicious activity quickly and confidently.
         </p>
-        <p class="reassurance muted">Takes about 15 minutes to set up your first store.</p>
-        <a class="cta" routerLink="/login">Sign in</a>
+        <p class="muted m-0 mb-7 text-[0.95rem]">Takes about 15 minutes to set up your first store.</p>
+        <a class="inline-block rounded-ctl bg-accent px-5 py-2.5 text-[0.95rem] font-medium text-white no-underline hover:bg-accent-2 hover:text-white" routerLink="/login">Sign in</a>
       </header>
 
-      <section class="steps card">
-        <h2>Getting started</h2>
-        <ol>
+      <section class="card w-full max-w-[480px] !mb-0 !p-6">
+        <h2 class="m-0 mb-4 text-[0.9rem] font-semibold uppercase tracking-[0.05em] text-ink-muted">Getting started</h2>
+        <ol class="m-0 flex flex-col gap-4 pl-5 leading-normal">
           <li>
-            <strong>Account setup</strong>
-            <span>Your onetix administrator creates your store and staff login.</span>
+            <strong class="mb-1 block font-semibold">Account setup</strong>
+            <span class="text-[0.9rem] text-ink-muted">Your onetix administrator creates your store and staff login.</span>
           </li>
           <li>
-            <strong>Download the Windows connector</strong>
-            <span>After signing in, download the installer from Get started or Setup &amp; Zones.</span>
+            <strong class="mb-1 block font-semibold">Download the Windows connector</strong>
+            <span class="text-[0.9rem] text-ink-muted">After signing in, download the installer from Get started or Setup &amp; Zones.</span>
           </li>
           <li>
-            <strong>Install on the shop PC</strong>
-            <span>Run the installer, enter your setup code, and add RTSP camera URLs.</span>
+            <strong class="mb-1 block font-semibold">Install on the shop PC</strong>
+            <span class="text-[0.9rem] text-ink-muted">Run the installer, enter your setup code, and add RTSP camera URLs.</span>
           </li>
         </ol>
       </section>
 
-      <p class="footer muted">Support: contact your onetix administrator</p>
+      <p class="muted text-[0.85rem]">Support: contact your onetix administrator</p>
     </div>
   `,
-  styles: [`
-    .welcome {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 48px 24px;
-      gap: 32px;
-      background: var(--bg);
-    }
-    .hero { max-width: 560px; text-align: center; }
-    .brand {
-      font-weight: 700;
-      font-size: 1.25rem;
-      letter-spacing: -0.03em;
-      color: var(--text);
-      margin-bottom: 20px;
-    }
-    h1 {
-      margin: 0 0 12px;
-      font-size: clamp(1.75rem, 4vw, 2.25rem);
-      line-height: 1.2;
-      font-weight: 600;
-    }
-    .lead {
-      color: var(--text-muted);
-      margin: 0 0 12px;
-      line-height: 1.6;
-      font-size: 1.05rem;
-    }
-    .reassurance { margin: 0 0 28px; font-size: 0.95rem; }
-    .cta {
-      display: inline-block;
-      padding: 10px 20px;
-      border-radius: var(--radius-sm);
-      background: var(--accent);
-      color: white;
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.95rem;
-    }
-    .cta:hover { background: var(--accent-2); color: white; }
-    .steps {
-      max-width: 480px;
-      width: 100%;
-      padding: 24px;
-    }
-    .steps h2 { margin: 0 0 16px; font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-    .steps ol {
-      margin: 0;
-      padding-left: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .steps li { line-height: 1.5; }
-    .steps li strong { display: block; margin-bottom: 4px; font-weight: 600; }
-    .steps li span { color: var(--text-muted); font-size: 0.9rem; }
-    .footer { font-size: 0.85rem; }
-    .muted { color: var(--text-muted); }
-  `],
 })
 export class WelcomeComponent {}

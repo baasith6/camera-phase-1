@@ -52,10 +52,7 @@
               }
             ],
             "styles": [
-              "src/app/shared/styles/_tokens.css",
-              "src/styles.css",
-              "src/app/shared/styles/_utilities.css",
-              "src/app/shared/styles/_components.css"
+              "src/styles.css"
             ],
             "scripts": []
           },
@@ -116,10 +113,7 @@
               }
             ],
             "styles": [
-              "src/app/shared/styles/_tokens.css",
-              "src/styles.css",
-              "src/app/shared/styles/_utilities.css",
-              "src/app/shared/styles/_components.css"
+              "src/styles.css"
             ],
             "scripts": []
           }

@@ -4,19 +4,13 @@ import { Component } from '@angular/core';
   selector: 'app-data-table',
   standalone: true,
   template: `
-    <div class="data-table-wrap data-table-desktop">
+    <!-- .data-table-desktop is a marker class only (e2e smoke.spec.ts queries it). -->
+    <div class="data-table-desktop data-table-wrap hidden md:block">
       <ng-content select="[desktop]"></ng-content>
     </div>
-    <div class="data-table-mobile">
+    <div class="md:hidden">
       <ng-content select="[mobile]"></ng-content>
     </div>
   `,
-  styles: [`
-    .data-table-mobile { display: none; }
-    @media (max-width: 768px) {
-      .data-table-desktop { display: none; }
-      .data-table-mobile { display: block; }
-    }
-  `],
 })
 export class DataTableComponent {}

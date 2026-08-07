@@ -1,24 +1,3 @@
-.header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.page-container {
-  max-width: 1280px;
-  margin: 0 auto;
-}
-
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
 .filter-chips {
   display: flex;
   gap: 8px;
@@ -28,7 +7,7 @@
 .chip {
   padding: 6px 12px;
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   font-weight: 500;
   border: 1px solid var(--border-strong);
   background: transparent;
@@ -48,32 +27,13 @@
   color: var(--accent-2);
 }
 
-.grid-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.grid-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-@media (max-width: 900px) {
-  .grid-2 {
-    grid-template-columns: 1fr;
-  }
-}
-
 .small {
-  font-size: 0.78rem;
+  font-size: var(--fs-xs);
 }
 
 .mono {
-  font-family: ui-monospace, monospace;
-  font-size: 0.82rem;
+  font-family: var(--font-code);
+  font-size: var(--fs-sm);
 }
 
 .skip-link {

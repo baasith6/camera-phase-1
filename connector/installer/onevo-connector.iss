@@ -1,9 +1,13 @@
-#define AppName "ONEVO Local Connector"
+; Display brand is onetix; install paths / AppId / service stay ONEVO for upgrades.
+#define AppName "onetix Local Connector"
 #define AppVersion "1.1.18"
-#define AppPublisher "ONEVO"
+#define AppPublisher "onetix"
 #define AppExeName "onevo-connector.exe"
 #define AppServiceExe "onevo-connector-service.exe"
 #define AppId "{{A7C3E91F-4B2D-4E8A-9F01-0E0C0C001100}"
+#define BrandFont "IBM Plex Sans"
+#define BrandFontMono "IBM Plex Mono"
+#define BrandFontFallback "Segoe UI"
 
 [Setup]
 AppId={#AppId}
@@ -12,12 +16,13 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\ONEVO\Connector
-DefaultGroupName=ONEVO
+DefaultGroupName=onetix
 DisableProgramGroupPage=yes
 ; Keep the standard Ready to Install page after the native camera-zone page.
 DisableReadyPage=no
 DirExistsWarning=no
 OutputDir=..\dist
+; Filename keeps ONEVO prefix so backend ConnectorInstallerService still finds it.
 OutputBaseFilename=ONEVO-Connector-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -28,6 +33,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupIconFile=assets\onevo.ico
+WizardImageFile=assets\wizard-side.bmp
+WizardSmallImageFile=assets\wizard-small.bmp
 ; --- FIX: auto-detect & force-close any process locking these files
 ;     (the running service child exe, or a manually-launched/orphaned
 ;     copy) instead of failing with "file in use" and forcing a manual
@@ -48,16 +55,23 @@ Source: "tools\ffmpeg.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "tools\WinSW-x64.exe"; DestDir: "{app}"; DestName: "{#AppServiceExe}"; Flags: ignoreversion
 Source: "winsw\onevo-connector-service.xml"; DestDir: "{app}"; DestName: "onevo-connector-service.xml"; Flags: ignoreversion
 Source: "assets\onevo.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+; Brand fonts for the wizard (OFL) — loaded at runtime via AddFontResource.
+Source: "assets\fonts\IBMPlexSans-Regular.ttf"; Flags: dontcopy
+Source: "assets\fonts\IBMPlexSans-Medium.ttf"; Flags: dontcopy
+Source: "assets\fonts\IBMPlexSans-SemiBold.ttf"; Flags: dontcopy
+Source: "assets\fonts\IBMPlexMono-Medium.ttf"; Flags: dontcopy
+Source: "assets\fonts\OFL.txt"; DestDir: "{app}\assets\fonts"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\ONEVO\Connector\data"; Permissions: users-modify
 Name: "{commonappdata}\ONEVO\Connector\media"; Permissions: users-modify
 Name: "{app}\bin"
+Name: "{app}\assets\fonts"
 
 [Icons]
-Name: "{group}\ONEVO Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
+Name: "{group}\onetix Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\ONEVO Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
+Name: "{autodesktop}\onetix Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
 
 [Run]
 ; In-place updates preserve the existing service registration. Unregistering and
@@ -66,8 +80,8 @@ Name: "{autodesktop}\ONEVO Connector Status"; Filename: "{app}\{#AppExeName}"; P
 Filename: "{app}\{#AppServiceExe}"; Parameters: "install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Installing Windows service..."; Check: not ExistingService
 Filename: "{sys}\sc.exe"; Parameters: "config ONEVOConnector start= demand"; Flags: runhidden waituntilterminated; Check: PausedMarkerExists
 Filename: "{app}\{#AppServiceExe}"; Parameters: "start"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Activating connector and starting monitoring..."; Check: not PausedMarkerExists
-Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; WorkingDir: "{app}"; Flags: runasoriginaluser runhidden nowait; StatusMsg: "Starting ONEVO system tray..."
-Filename: "http://localhost:8099/"; Flags: shellexec runasoriginaluser nowait; StatusMsg: "Opening ONEVO local dashboard..."; Check: OpenDashboardAfterFirstInstall
+Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; WorkingDir: "{app}"; Flags: runasoriginaluser runhidden nowait; StatusMsg: "Starting onetix system tray..."
+Filename: "http://localhost:8099/"; Flags: shellexec runasoriginaluser nowait; StatusMsg: "Opening onetix local dashboard..."; Check: OpenDashboardAfterFirstInstall
 
 [UninstallRun]
 Filename: "{app}\{#AppExeName}"; Parameters: "--tray-uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"
@@ -84,7 +98,19 @@ Filename: "{app}\{#AppServiceExe}"; Parameters: "uninstall"; WorkingDir: "{app}"
 Type: filesandordirs; Name: "{commonappdata}\ONEVO\Connector"
 
 [Code]
+const
+  WM_FONTCHANGE = $001D;
+
+function AddFontResource(lpszFilename: String): Integer;
+  external 'AddFontResourceW@gdi32.dll stdcall';
+function RemoveFontResource(lpFileName: String): Boolean;
+  external 'RemoveFontResourceW@gdi32.dll stdcall';
+function BrandSendMessage(hWnd: LongWord; Msg, wParam, lParam: LongWord): LongWord;
+  external 'SendMessageW@user32.dll stdcall';
+
 var
+  BrandFontsLoaded: Boolean;
+  ActiveBrandFont: String;
   IdentityPage: TInputQueryWizardPage;
   SourcePage: TInputOptionWizardPage;
   RtspPage: TInputQueryWizardPage;
@@ -186,10 +212,75 @@ begin
     end;
 end;
 
+procedure LoadBrandFonts;
+var
+  Loaded: Integer;
+begin
+  BrandFontsLoaded := False;
+  ActiveBrandFont := '{#BrandFontFallback}';
+  try
+    ExtractTemporaryFile('IBMPlexSans-Regular.ttf');
+    ExtractTemporaryFile('IBMPlexSans-Medium.ttf');
+    ExtractTemporaryFile('IBMPlexSans-SemiBold.ttf');
+    ExtractTemporaryFile('IBMPlexMono-Medium.ttf');
+    Loaded := 0;
+    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexSans-Regular.ttf'));
+    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexSans-Medium.ttf'));
+    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexSans-SemiBold.ttf'));
+    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexMono-Medium.ttf'));
+    if Loaded > 0 then begin
+      BrandFontsLoaded := True;
+      ActiveBrandFont := '{#BrandFont}';
+      BrandSendMessage(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
+    end;
+  except
+    BrandFontsLoaded := False;
+    ActiveBrandFont := '{#BrandFontFallback}';
+  end;
+end;
+
+procedure UnloadBrandFonts;
+begin
+  if not BrandFontsLoaded then Exit;
+  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexSans-Regular.ttf'));
+  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexSans-Medium.ttf'));
+  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexSans-SemiBold.ttf'));
+  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexMono-Medium.ttf'));
+  BrandSendMessage(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
+  BrandFontsLoaded := False;
+end;
+
+procedure StyleFont(AFont: TFont; FontSize: Integer; Bold: Boolean);
+begin
+  AFont.Name := ActiveBrandFont;
+  AFont.Size := FontSize;
+  if Bold then AFont.Style := [fsBold] else AFont.Style := [];
+  AFont.Color := $242529; { ink #292524 in BGR }
+end;
+
+procedure ApplyWizardBrandFonts;
+begin
+  StyleFont(WizardForm.Font, 9, False);
+  StyleFont(WizardForm.PageNameLabel.Font, 12, True);
+  StyleFont(WizardForm.PageDescriptionLabel.Font, 9, False);
+  StyleFont(WizardForm.WelcomeLabel1.Font, 14, True);
+  StyleFont(WizardForm.WelcomeLabel2.Font, 9, False);
+  StyleFont(WizardForm.FinishedLabel.Font, 9, False);
+  StyleFont(WizardForm.NextButton.Font, 9, False);
+  StyleFont(WizardForm.BackButton.Font, 9, False);
+  StyleFont(WizardForm.CancelButton.Font, 9, False);
+end;
+
+procedure DeinitializeSetup();
+begin
+  UnloadBrandFonts;
+end;
+
 function InitializeSetup(): Boolean;
 var
   Choice: Integer;
 begin
+  LoadBrandFonts;
   UpdateMode := CmdLineParamExists('/UPDATE');
   ExistingInstall := ReadInstalledVersion(InstalledVersion) or
     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ONEVOConnector');
@@ -211,7 +302,7 @@ begin
   if (InstalledVersion <> '') and
      (CompareVersions(InstalledVersion, '{#AppVersion}') > 0) then begin
     MsgBox(
-      'ONEVO Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
+      'onetix Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
       'This installer is version {#AppVersion}. Downgrading is not supported.',
       mbError, MB_OK);
     Result := False;
@@ -221,7 +312,7 @@ begin
   if ExistingInstall and not UpdateMode then begin
     if InstalledVersion = '' then InstalledVersion := 'an earlier version';
     Choice := MsgBox(
-      'ONEVO Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
+      'onetix Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
       'Update it to version {#AppVersion}?' + #13#10#13#10 +
       'Your existing connector identity and camera data will be preserved.',
       mbConfirmation, MB_OKCANCEL);
@@ -231,13 +322,13 @@ begin
     end;
   end else if OrphanedRepair then begin
     MsgBox(
-      'A previous ONEVO connector pairing was found, but its Windows service is missing.' +
+      'A previous onetix connector pairing was found, but its Windows service is missing.' +
       Chr(13) + Chr(10) + Chr(13) + Chr(10) +
       'Setup will repair the local service and keep the existing store, cameras, and zones.',
       mbInformation, MB_OK);
   end else if PreviousConfigFound then begin
     MsgBox(
-      'A previous ONEVO configuration was found, but the application is not installed.' +
+      'A previous onetix configuration was found, but the application is not installed.' +
       Chr(13) + Chr(10) + Chr(13) + Chr(10) +
       'Setup will remove the incomplete data and start a new configuration. ' +
       'You will enter the setup code, connector name, and camera sources again.',
@@ -704,9 +795,10 @@ begin
   // Draw into an off-screen bitmap and replace the visible image once. Loading
   // the BMP into ZoneImage on every mouse event caused a visible frame shake.
   ZoneRenderBitmap.Assign(ZoneBaseBitmap);
-  ZoneRenderBitmap.Canvas.Pen.Color := $00D2FF;
+  { Dashboard accent #2563EB as BGR }
+  ZoneRenderBitmap.Canvas.Pen.Color := $EB6325;
   ZoneRenderBitmap.Canvas.Pen.Width := 3;
-  ZoneRenderBitmap.Canvas.Brush.Color := $00D2FF;
+  ZoneRenderBitmap.Canvas.Brush.Color := $EB6325;
   for I := 0 to ZonePointCount - 1 do begin
     X := ZonePointX[I];
     Y := ZonePointY[I];
@@ -1036,13 +1128,21 @@ begin
   ZoneRenderBitmap := TBitmap.Create;
   ZoneLoadedFramePath := '';
   WizardForm.CancelButton.Visible := False;
+  ApplyWizardBrandFonts;
 
   IdentityPage := CreateInputQueryPage(wpSelectDir,
-    'Connect to ONEVO', 'Enter the connector identity',
-    'Generate a one-time setup code in the ONEVO dashboard and enter it here.');
+    'Connect to onetix', 'Enter the connector identity',
+    'Generate a one-time setup code in the onetix dashboard and enter it here.');
   IdentityPage.Add('Setup code:', False);
   IdentityPage.Add('Connector name:', False);
-  IdentityPage.Values[1] := 'ONEVO Store Connector';
+  IdentityPage.Values[1] := 'onetix Store Connector';
+  { Setup code uses mono when brand fonts loaded; otherwise UI fallback. }
+  if BrandFontsLoaded then
+    IdentityPage.Edits[0].Font.Name := '{#BrandFontMono}'
+  else
+    IdentityPage.Edits[0].Font.Name := ActiveBrandFont;
+  IdentityPage.Edits[0].Font.Size := 11;
+  StyleFont(IdentityPage.Edits[1].Font, 9, False);
 
   SourcePage := CreateInputOptionPage(IdentityPage.ID,
     'Camera source', 'Choose the input type',
@@ -1234,6 +1334,28 @@ begin
   ZoneStatusLabel.Top := ScaleY(428);
   ZoneStatusLabel.Width := ScaleX(600);
   ZoneStatusLabel.Caption := 'Select a camera and click Refresh Frame.';
+
+  StyleFont(ZoneCameraLabel.Font, 8, False);
+  StyleFont(ZoneNameLabel.Font, 8, False);
+  StyleFont(ZoneTypeLabel.Font, 8, False);
+  StyleFont(SavedZonesLabel.Font, 8, False);
+  StyleFont(PointCountLabel.Font, 8, False);
+  StyleFont(ZoneStatusLabel.Font, 8, False);
+  ZoneStatusLabel.Font.Color := $6C7178; { muted #78716C BGR }
+  StyleFont(ZoneCameraCombo.Font, 9, False);
+  StyleFont(ZoneTypeCombo.Font, 9, False);
+  StyleFont(ZoneNameEdit.Font, 9, False);
+  StyleFont(ZoneList.Font, 9, False);
+  StyleFont(RefreshFrameButton.Font, 9, False);
+  StyleFont(NewZoneButton.Font, 9, False);
+  StyleFont(EditZoneButton.Font, 9, False);
+  StyleFont(DeleteZoneButton.Font, 9, False);
+  StyleFont(UndoPointButton.Font, 9, False);
+  StyleFont(ClearPointsButton.Font, 9, False);
+  StyleFont(SaveZoneButton.Font, 9, False);
+  StyleFont(AddRtspButton.Font, 9, False);
+  StyleFont(AddOnvifButton.Font, 9, False);
+  StyleFont(AddVideoButton.Font, 9, False);
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

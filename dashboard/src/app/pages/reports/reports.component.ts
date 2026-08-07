@@ -80,14 +80,14 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
               </tbody>
             </table>
 
-            <div mobile class="alert-cards">
+            <div mobile class="flex flex-col gap-2.5">
               @for (a of alerts; track a.id) {
                 <div class="alert-card-mobile">
-                  <div class="alert-card-mobile-head">
+                  <div class="mb-2 flex items-start justify-between gap-2">
                     <strong>{{ labelType(a.alertType) }}</strong>
                     <app-status-badge [level]="a.riskLevel" />
                   </div>
-                  <div class="alert-card-mobile-meta">
+                  <div class="flex flex-wrap gap-2 text-[0.82rem]">
                     <app-status-pill [status]="a.status" />
                     <span class="muted">Score {{ a.riskScore }}</span>
                     <span class="muted">{{ a.createdAt | date:'MMM d, h:mm a' }}</span>
