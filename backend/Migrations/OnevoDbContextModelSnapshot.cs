@@ -285,6 +285,9 @@ namespace Onevo.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("TrackOverlayJson")
+                        .HasColumnType("text");
+
                     b.Property<string>("TriggerReason")
                         .IsRequired()
                         .HasColumnType("text");

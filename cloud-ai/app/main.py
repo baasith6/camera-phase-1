@@ -21,6 +21,8 @@ from .detector import DEFAULT_YOLOE_PROMPTS, DetectorBackend, build_detector
 from .events import extract_events
 from .reid import ReIDExtractor
 from .s3 import ClipStore
+from .track_merge import merge_fragmented_person_tracks
+from .track_overlay import build_track_overlay
 from .zones import parse_zones
 
 QUEUE_KEY       = "onevo:clip-jobs"
@@ -41,8 +43,12 @@ def process_job(job: dict, cfg: Config, store: ClipStore, detector: DetectorBack
         raw_zones = backend.get_zones(camera_id)
         zones     = parse_zones(raw_zones)
         fps, frames = detector.track_clip(tmp, reid_extractor=reid_extractor)
+        frames    = merge_fragmented_person_tracks(frames)
         events    = extract_events(fps, frames, zones)
-        result    = backend.post_ai_events(clip_id, detector.version, events)
+        overlay   = build_track_overlay(fps, frames)
+        result    = backend.post_ai_events(
+            clip_id, detector.version, events, track_overlay=overlay,
+        )
         print(f"[cloud-ai] clip {clip_id}: {len(events)} events -> {result}", flush=True)
     finally:
         try:

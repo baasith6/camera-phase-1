@@ -74,6 +74,9 @@ public class AiEventsController : ControllerBase
 
         clip.Status = ClipStatus.Analyzed;
         clip.AnalyzedAt = DateTimeOffset.UtcNow;
+        if (req.TrackOverlay is JsonElement overlay
+            && overlay.ValueKind is not JsonValueKind.Undefined and not JsonValueKind.Null)
+            clip.TrackOverlayJson = overlay.GetRawText();
         await _db.SaveChangesAsync();
 
         // Score via the Risk Engine.

@@ -98,7 +98,8 @@ public record ClipAiEventItemResponse(
     double Confidence,
     DateTimeOffset StartTs,
     DateTimeOffset EndTs,
-    string ModelVersion);
+    string ModelVersion,
+    int TrackId);
 
 public record ClipDetailResponse(
     Guid Id,
@@ -118,7 +119,8 @@ public record ClipDetailResponse(
     Guid? AlertId,
     string? ModelVersion,
     string? AnalysisNote,
-    List<ClipAiEventItemResponse> AiEvents);
+    List<ClipAiEventItemResponse> AiEvents,
+    string? TrackOverlayJson);
 
 public record PipelineHealthResponse(int RedisQueueDepth, int FailedJobs);
 
@@ -165,7 +167,11 @@ public record AiEventDto(
     int[]? EvidenceFrames,
     float[]? Embedding);
 
-public record AiEventsBatchRequest(Guid ClipId, string ModelVersion, List<AiEventDto> Events);
+public record AiEventsBatchRequest(
+    Guid ClipId,
+    string ModelVersion,
+    List<AiEventDto> Events,
+    System.Text.Json.JsonElement? TrackOverlay = null);
 
 // ---- Alerts / reviews ----
 public record ReviewRequest(
