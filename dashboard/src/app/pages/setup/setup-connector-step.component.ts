@@ -33,7 +33,6 @@ import { SetupContextService } from './setup-context.service';
             {{ ctx.generatingCode ? 'Generating…' : 'Get setup code' }}
           </button>
         } @else {
-          <button disabled>Connected</button>
           @if (ctx.connectorUpdateAvailable) {
             <span class="self-center text-[0.82rem] font-semibold text-warning">Update v{{ ctx.installerInfo?.version }} available in the shop PC tray</span>
           } @else {

@@ -261,26 +261,14 @@ export class AdminStoresComponent implements OnInit {
 
   downloadInstaller(): void {
     if (!this.installerInfo?.downloadPath) return;
-    const path = this.installerInfo.downloadPath;
-    if (/^https?:\/\//i.test(path)) {
-      window.location.assign(path);
-      return;
-    }
     this.downloadingInstaller = true;
-    this.api.downloadInstaller(path).subscribe({
-      next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = this.installerInfo!.fileName;
-        a.click();
-        URL.revokeObjectURL(url);
-        this.downloadingInstaller = false;
-      },
-      error: () => {
-        this.downloadingInstaller = false;
-        this.installerError = 'Download failed';
-      },
-    });
+    this.installerError = '';
+    try {
+      this.api.startInstallerDownload(this.installerInfo.downloadPath);
+    } catch {
+      this.installerError = 'Download failed';
+    } finally {
+      setTimeout(() => (this.downloadingInstaller = false), 1500);
+    }
   }
 }

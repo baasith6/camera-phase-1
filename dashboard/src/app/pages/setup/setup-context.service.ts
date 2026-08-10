@@ -131,24 +131,11 @@ export class SetupContextService implements OnDestroy {
 
   downloadInstaller(): void {
     if (!this.installerInfo?.downloadPath) return;
-    const path = this.installerInfo.downloadPath;
-    if (/^https?:\/\//i.test(path)) {
-      window.location.assign(path);
-      return;
+    try {
+      this.api.startInstallerDownload(this.installerInfo.downloadPath);
+    } catch {
+      this.installerError = 'Installer download failed';
     }
-    this.api.downloadInstaller(path).subscribe({
-      next: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = this.installerInfo?.fileName || 'onetix-Connector-Setup.exe';
-        anchor.click();
-        URL.revokeObjectURL(url);
-      },
-      error: (err) => {
-        this.installerError = err?.error?.error || 'Installer download failed';
-      },
-    });
   }
 
   generateSetupCode(): void {

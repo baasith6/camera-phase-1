@@ -18,8 +18,9 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\ONEVO\Connector
 DefaultGroupName=onetix
 DisableProgramGroupPage=yes
-; Keep the standard Ready to Install page after the native camera-zone page.
-DisableReadyPage=no
+DisableDirPage=yes
+DisableWelcomePage=yes
+DisableReadyPage=yes
 DirExistsWarning=no
 OutputDir=..\dist
 ; Filename keeps ONEVO prefix so backend ConnectorInstallerService still finds it.
@@ -112,11 +113,40 @@ var
   BrandFontsLoaded: Boolean;
   ActiveBrandFont: String;
   IdentityPage: TInputQueryWizardPage;
-  SourcePage: TInputOptionWizardPage;
-  RtspPage: TInputQueryWizardPage;
-  OnvifPage: TInputQueryWizardPage;
-  FilePage: TInputFileWizardPage;
+  IdentityKeyLabel, IdentitySecureLabel, IdentityExampleLabel: TNewStaticText;
+  GlobalSidebar, IdentitySidebar, SourceSidebar, ZoneSidebar: TBitmapImage;
+  IdentityHeadingLabel, IdentityDescriptionLabel: TNewStaticText;
+  SourcePage: TWizardPage;
   ZonePage: TWizardPage;
+  SelectedSourceType: Integer;
+  EditingSourceIndex: Integer;
+  AddedSourceCount: Integer;
+  AddedSourceKind: array[0..15] of Integer;
+  AddedSourceRtsp: array[0..15] of String;
+  AddedSourceHost, AddedSourcePort, AddedSourceUser, AddedSourcePass: array[0..15] of String;
+  AddedSourceMp4: array[0..15] of String;
+  RtspBtn, OnvifBtn, Mp4Btn: TNewButton;
+  RtspCardLabel, OnvifCardLabel, Mp4CardLabel: TNewStaticText;
+  RtspHintLabel, Mp4HintLabel, AddedSourcesLabel: TNewStaticText;
+  RtspUrlEdit: TNewEdit;
+  RtspUrlLabel: TNewStaticText;
+  OnvifHostEdit, OnvifPortEdit, OnvifUserEdit, OnvifPassEdit: TNewEdit;
+  OnvifHostLabel, OnvifPortLabel, OnvifUserLabel, OnvifPassLabel: TNewStaticText;
+  Mp4PathEdit: TNewEdit;
+  Mp4BrowseButton: TNewButton;
+  Mp4DropPanel: TPanel;
+  Mp4DropTitle, Mp4DropOrLabel: TNewStaticText;
+  AddSourceButton: TNewButton;
+  Mp4PathLabel: TNewStaticText;
+  SourceList: TNewListBox;
+  SourceRowLabel: array[0..15] of TNewStaticText;
+  SourceRowTypeLabel, SourceRowPathLabel, SourceRowStatusLabel: array[0..15] of TNewStaticText;
+  SourceRowEditButton, SourceRowDeleteButton: array[0..15] of TNewButton;
+  SourceHeaderName, SourceHeaderType, SourceHeaderPath, SourceHeaderStatus,
+    SourceHeaderActions: TNewStaticText;
+  ClearAllSourcesButton: TNewButton;
+  SuccessSummaryLabel: TNewStaticText;
+  SuccessHeadingLabel, SuccessDescriptionLabel, SuccessIconLabel: TNewStaticText;
   ZoneCameraCombo, ZoneTypeCombo: TNewComboBox;
   ZoneNameEdit: TNewEdit;
   ZoneImage: TBitmapImage;
@@ -124,20 +154,14 @@ var
   ZoneLoadedFramePath: String;
   ZoneMouseTimerId: LongWord;
   ZoneList: TNewListBox;
+  ZoneRowPanel: array[0..7] of TPanel;
+  ZoneRowLabel: array[0..7] of TNewStaticText;
+  ZoneRowEditButton, ZoneRowDeleteButton: array[0..7] of TNewButton;
   ZoneCameraLabel, ZoneNameLabel, ZoneTypeLabel, SavedZonesLabel: TNewStaticText;
   RefreshFrameButton, NewZoneButton, UndoPointButton,
-    ClearPointsButton, SaveZoneButton, EditZoneButton,
-    DeleteZoneButton: TNewButton;
+    ClearPointsButton, SaveZoneButton: TNewButton;
   ZoneStatusLabel, PointCountLabel: TNewStaticText;
-  AddRtspButton, AddOnvifButton, AddVideoButton: TNewButton;
-  RtspRemoveButtons: array[0..7] of TNewButton;
-  OnvifRemoveButtons: array[0..4] of TNewButton;
-  VideoRemoveButtons: array[0..7] of TNewButton;
-  RtspActive: array[0..7] of Boolean;
-  OnvifActive: array[0..4] of Boolean;
-  VideoActive: array[0..7] of Boolean;
-  RtspCount, OnvifCount, VideoCount: Integer;
-  SourceSetupSkipped, NavigatingFromSourceChoice: Boolean;
+  SourceSetupSkipped: Boolean;
   ZoneFrameReady: Boolean;
   ZoneDragging: Boolean;
   ZoneDragStartX, ZoneDragStartY, ZoneDragCurrentX, ZoneDragCurrentY: Integer;
@@ -147,8 +171,11 @@ var
   SavedZonePointCount: array[0..31] of Integer;
   SavedZonePointX, SavedZonePointY: array[0..1023] of Integer;
   SavedZoneName, SavedZoneType, SavedZonePolygon: array[0..31] of String;
+  VisibleZoneIndex: array[0..31] of Integer;
+  VisibleZoneCount: Integer;
   SavedZoneCount, EditingZoneIndex: Integer;
   ExistingInstall: Boolean;
+  OldWizardWndProc: Longint;
   PreviousConfigFound, PairedStateFound, OrphanedRepair,
     PreserveExistingConfig, FreshInstallCleanup, UpdateMode: Boolean;
   InstalledVersion: String;
@@ -331,7 +358,7 @@ begin
       'A previous onetix configuration was found, but the application is not installed.' +
       Chr(13) + Chr(10) + Chr(13) + Chr(10) +
       'Setup will remove the incomplete data and start a new configuration. ' +
-      'You will enter the setup code, connector name, and camera sources again.',
+      'You will enter the setup code and camera sources again.',
       mbInformation, MB_OK);
   end;
   Result := True;
@@ -350,8 +377,8 @@ end;
 
 function OpenDashboardAfterFirstInstall(): Boolean;
 begin
-  Result := (not UpdateMode) and (not PreserveExistingConfig) and
-    (not SourceSetupSkipped);
+  // Open local admin UI after first-time install (not /UPDATE / preserve-only).
+  Result := (not UpdateMode) and (not PreserveExistingConfig);
 end;
 
 // --- FIX: robustly ensure NOTHING is holding onevo-connector.exe /
@@ -430,242 +457,312 @@ begin
     DeleteFile(LockPath);
 end;
 
-function CurrentSourceHasValue: Boolean;
-var
-  I, Base: Integer;
+
+
+procedure ClearSourceForm;
 begin
-  Result := False;
-  if WizardForm.CurPageID = RtspPage.ID then begin
-    for I := 0 to RtspCount - 1 do
-      if RtspActive[I] and (Trim(RtspPage.Values[I]) <> '') then begin
-        Result := True;
-        Exit;
-      end;
-  end else if WizardForm.CurPageID = OnvifPage.ID then begin
-    for I := 0 to OnvifCount - 1 do begin
-      Base := I * 4;
-      if OnvifActive[I] and (Trim(OnvifPage.Values[Base]) <> '') then begin
-        Result := True;
-        Exit;
+  RtspUrlEdit.Text := '';
+  OnvifHostEdit.Text := '';
+  OnvifPortEdit.Text := '80';
+  OnvifUserEdit.Text := 'admin';
+  OnvifPassEdit.Text := '';
+  Mp4PathEdit.Text := '';
+  EditingSourceIndex := -1;
+  AddSourceButton.Caption := '+ Add';
+end;
+
+function SourceDisplayLine(Index: Integer): String;
+begin
+  if AddedSourceKind[Index] = 0 then
+    Result := IntToStr(Index + 1) + '. [RTSP] ' + AddedSourceRtsp[Index] + '  - Valid'
+  else if AddedSourceKind[Index] = 1 then
+    Result := IntToStr(Index + 1) + '. [ONVIF] ' + AddedSourceHost[Index] + ':' +
+      AddedSourcePort[Index] + ' (' + AddedSourceUser[Index] + ')  - Connected'
+  else
+    Result := IntToStr(Index + 1) + '. [MP4] ' + ExtractFileName(AddedSourceMp4[Index]);
+end;
+
+procedure RefreshSourceList;
+var
+  I: Integer;
+  ShowList: Boolean;
+begin
+  SourceList.Items.Clear;
+  for I := 0 to AddedSourceCount - 1 do
+    SourceList.Items.Add(SourceDisplayLine(I));
+  ShowList := AddedSourceCount > 0;
+  AddedSourcesLabel.Visible := ShowList;
+  SourceList.Visible := False;
+  for I := 0 to 15 do begin
+    SourceRowLabel[I].Visible := I < AddedSourceCount;
+    SourceRowTypeLabel[I].Visible := I < AddedSourceCount;
+    SourceRowPathLabel[I].Visible := I < AddedSourceCount;
+    SourceRowStatusLabel[I].Visible := I < AddedSourceCount;
+    SourceRowEditButton[I].Visible := I < AddedSourceCount;
+    SourceRowDeleteButton[I].Visible := I < AddedSourceCount;
+    if I < AddedSourceCount then begin
+      SourceRowLabel[I].Caption := 'Source ' + IntToStr(I + 1);
+      if AddedSourceKind[I] = 0 then begin
+        SourceRowTypeLabel[I].Caption := 'RTSP';
+        SourceRowPathLabel[I].Caption := AddedSourceRtsp[I];
+        SourceRowStatusLabel[I].Caption := 'Ready';
+      end else if AddedSourceKind[I] = 1 then begin
+        SourceRowTypeLabel[I].Caption := 'ONVIF';
+        SourceRowPathLabel[I].Caption := AddedSourceHost[I] + ':' + AddedSourcePort[I];
+        SourceRowStatusLabel[I].Caption := 'Ready';
+      end else begin
+        SourceRowLabel[I].Caption := 'Store Video ' + IntToStr(I + 1);
+        SourceRowTypeLabel[I].Caption := 'Video File';
+        SourceRowPathLabel[I].Caption := ExtractFileName(AddedSourceMp4[I]);
+        SourceRowStatusLabel[I].Caption := 'Ready';
       end;
     end;
-  end else if WizardForm.CurPageID = FilePage.ID then begin
-    for I := 0 to VideoCount - 1 do
-      if VideoActive[I] and (Trim(FilePage.Values[I]) <> '') then begin
-        Result := True;
-        Exit;
-      end;
+  end;
+  SourceHeaderName.Visible := ShowList;
+  SourceHeaderType.Visible := ShowList;
+  SourceHeaderPath.Visible := ShowList;
+  SourceHeaderStatus.Visible := ShowList;
+  SourceHeaderActions.Visible := ShowList;
+  ClearAllSourcesButton.Visible := ShowList;
+  AddedSourcesLabel.Caption := 'Added Sources (' + IntToStr(AddedSourceCount) + ')';
+  if AddedSourceCount > 0 then begin
+    SourceSetupSkipped := False;
+    WizardForm.NextButton.Caption := 'Next';
+  end else
+    WizardForm.NextButton.Caption := 'Skip';
+end;
+
+procedure SetSourcePanelVisible;
+var
+  ShowForm: Boolean;
+begin
+  ShowForm := SelectedSourceType >= 0;
+
+  RtspUrlLabel.Visible := SelectedSourceType = 0;
+  RtspUrlEdit.Visible := SelectedSourceType = 0;
+  RtspHintLabel.Visible := SelectedSourceType = 0;
+
+  OnvifHostLabel.Visible := SelectedSourceType = 1;
+  OnvifHostEdit.Visible := SelectedSourceType = 1;
+  OnvifPortLabel.Visible := SelectedSourceType = 1;
+  OnvifPortEdit.Visible := SelectedSourceType = 1;
+  OnvifUserLabel.Visible := SelectedSourceType = 1;
+  OnvifUserEdit.Visible := SelectedSourceType = 1;
+  OnvifPassLabel.Visible := SelectedSourceType = 1;
+  OnvifPassEdit.Visible := SelectedSourceType = 1;
+
+  Mp4PathLabel.Visible := SelectedSourceType = 2;
+  Mp4PathEdit.Visible := SelectedSourceType = 2;
+  Mp4BrowseButton.Visible := SelectedSourceType = 2;
+  Mp4HintLabel.Visible := SelectedSourceType = 2;
+  Mp4DropPanel.Visible := SelectedSourceType = 2;
+
+  AddSourceButton.Visible := ShowForm;
+
+  if SelectedSourceType = 0 then begin
+    RtspBtn.Caption := Chr(149) + ' RTSP Camera';
+  end else
+    RtspBtn.Caption := 'RTSP Camera';
+  if SelectedSourceType = 1 then begin
+    OnvifBtn.Caption := Chr(149) + ' ONVIF Camera';
+  end else
+    OnvifBtn.Caption := 'ONVIF Camera';
+  if SelectedSourceType = 2 then begin
+    Mp4Btn.Caption := Chr(149) + ' Local MP4';
+  end else
+    Mp4Btn.Caption := 'Local MP4';
+
+  RefreshSourceList;
+end;
+
+procedure SelectSourceType(TypeIndex: Integer);
+begin
+  SelectedSourceType := TypeIndex;
+  ClearSourceForm;
+  SetSourcePanelVisible;
+end;
+
+procedure RtspTypeClicked(Sender: TObject);
+begin
+  SelectSourceType(0);
+end;
+
+procedure OnvifTypeClicked(Sender: TObject);
+begin
+  SelectSourceType(1);
+end;
+
+procedure Mp4TypeClicked(Sender: TObject);
+begin
+  SelectSourceType(2);
+end;
+
+procedure AddMp4File(FileName: String); forward;
+
+procedure BrowseMp4Clicked(Sender: TObject);
+var
+  FileNames: TStringList;
+  I: Integer;
+begin
+  FileNames := TStringList.Create;
+  try
+    if GetOpenFileNameMulti('Select MP4 videos', FileNames,
+       ExpandConstant('{userdocs}'), 'MP4 video (*.mp4)|*.mp4', 'mp4') then begin
+      for I := 0 to FileNames.Count - 1 do
+        AddMp4File(FileNames[I]);
+      RefreshSourceList;
+    end;
+  finally
+    FileNames.Free;
   end;
 end;
 
-procedure UpdateSourceNextCaption;
-begin
-  if (WizardForm.CurPageID = RtspPage.ID) or
-     (WizardForm.CurPageID = OnvifPage.ID) or
-     (WizardForm.CurPageID = FilePage.ID) then
-    WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
-end;
-
-procedure SourceValueChanged(Sender: TObject);
-begin
-  UpdateSourceNextCaption;
-end;
-
-procedure RemoveRtspField(Sender: TObject);
+procedure AddMp4File(FileName: String);
 var
-  I: Integer;
+  I, Index: Integer;
 begin
-  for I := 0 to RtspCount - 1 do
-    if Sender = RtspRemoveButtons[I] then begin
-      RtspActive[I] := False;
-      RtspPage.Values[I] := '';
-      RtspPage.Edits[I].Visible := False;
-      RtspPage.PromptLabels[I].Visible := False;
-      RtspRemoveButtons[I].Visible := False;
-      UpdateSourceNextCaption;
-      Exit;
-    end;
-end;
-
-procedure ConfigureRtspRow(Index: Integer);
-begin
-  RtspPage.Edits[Index].Width := ScaleX(330);
-  RtspRemoveButtons[Index] := TNewButton.Create(WizardForm);
-  RtspRemoveButtons[Index].Parent := RtspPage.Surface;
-  RtspRemoveButtons[Index].Caption := 'Remove';
-  RtspRemoveButtons[Index].Left := ScaleX(340);
-  RtspRemoveButtons[Index].Top := RtspPage.Edits[Index].Top - ScaleY(1);
-  RtspRemoveButtons[Index].Width := ScaleX(75);
-  RtspRemoveButtons[Index].Height := ScaleY(24);
-  RtspRemoveButtons[Index].OnClick := @RemoveRtspField;
-  RtspRemoveButtons[Index].Visible := Index > 0;
-  RtspPage.Edits[Index].OnChange := @SourceValueChanged;
-  RtspActive[Index] := True;
-end;
-
-procedure AddRtspField(Sender: TObject);
-var
-  I: Integer;
-begin
-  for I := 0 to RtspCount - 1 do
-    if not RtspActive[I] then begin
-      RtspActive[I] := True;
-      RtspPage.Edits[I].Visible := True;
-      RtspPage.PromptLabels[I].Visible := True;
-      RtspRemoveButtons[I].Visible := True;
-      UpdateSourceNextCaption;
-      Exit;
-    end;
-  if RtspCount >= 8 then begin
-    MsgBox('Add further cameras later at http://localhost:8099/.', mbInformation, MB_OK);
-    Exit;
-  end;
-  RtspCount := RtspCount + 1;
-  RtspPage.Add('RTSP URL ' + IntToStr(RtspCount) + ':', False);
-  ConfigureRtspRow(RtspCount - 1);
-  AddRtspButton.Top := RtspPage.Edits[RtspCount - 1].Top + ScaleY(32);
-  UpdateSourceNextCaption;
-end;
-
-procedure RemoveOnvifFields(Sender: TObject);
-var
-  I, Base, J: Integer;
-begin
-  for I := 0 to OnvifCount - 1 do
-    if Sender = OnvifRemoveButtons[I] then begin
-      OnvifActive[I] := False;
-      Base := I * 4;
-      for J := 0 to 3 do begin
-        OnvifPage.Values[Base + J] := '';
-        OnvifPage.Edits[Base + J].Visible := False;
-        OnvifPage.PromptLabels[Base + J].Visible := False;
-      end;
-      OnvifRemoveButtons[I].Visible := False;
-      UpdateSourceNextCaption;
-      Exit;
-    end;
-end;
-
-procedure ConfigureOnvifRow(Index: Integer);
-var
-  Base: Integer;
-begin
-  Base := Index * 4;
-  OnvifRemoveButtons[Index] := TNewButton.Create(WizardForm);
-  OnvifRemoveButtons[Index].Parent := OnvifPage.Surface;
-  OnvifRemoveButtons[Index].Caption := 'Remove camera';
-  OnvifRemoveButtons[Index].Left := ScaleX(300);
-  OnvifRemoveButtons[Index].Top := OnvifPage.Edits[Base + 3].Top + ScaleY(28);
-  OnvifRemoveButtons[Index].Width := ScaleX(115);
-  OnvifRemoveButtons[Index].Height := ScaleY(24);
-  OnvifRemoveButtons[Index].OnClick := @RemoveOnvifFields;
-  OnvifRemoveButtons[Index].Visible := Index > 0;
-  OnvifPage.Edits[Base].OnChange := @SourceValueChanged;
-  OnvifActive[Index] := True;
-end;
-
-procedure AddOnvifFields(Sender: TObject);
-var
-  I, Base, J: Integer;
-begin
-  for I := 0 to OnvifCount - 1 do
-    if not OnvifActive[I] then begin
-      OnvifActive[I] := True;
-      Base := I * 4;
-      for J := 0 to 3 do begin
-        OnvifPage.Edits[Base + J].Visible := True;
-        OnvifPage.PromptLabels[Base + J].Visible := True;
-      end;
-      OnvifPage.Values[Base + 1] := '80';
-      OnvifPage.Values[Base + 2] := 'admin';
-      OnvifRemoveButtons[I].Visible := True;
-      UpdateSourceNextCaption;
-      Exit;
-    end;
-  if OnvifCount >= 5 then begin
-    MsgBox('Add further cameras later at http://localhost:8099/.', mbInformation, MB_OK);
-    Exit;
-  end;
-  OnvifCount := OnvifCount + 1;
-  OnvifPage.Add('Camera ' + IntToStr(OnvifCount) + ' host / IP:', False);
-  OnvifPage.Add('Camera ' + IntToStr(OnvifCount) + ' port:', False);
-  OnvifPage.Add('Camera ' + IntToStr(OnvifCount) + ' username:', False);
-  OnvifPage.Add('Camera ' + IntToStr(OnvifCount) + ' password:', True);
-  Base := (OnvifCount - 1) * 4;
-  OnvifPage.Values[Base + 1] := '80';
-  OnvifPage.Values[Base + 2] := 'admin';
-  ConfigureOnvifRow(OnvifCount - 1);
-  AddOnvifButton.Top := OnvifRemoveButtons[OnvifCount - 1].Top + ScaleY(30);
-  UpdateSourceNextCaption;
-end;
-
-procedure RemoveVideoField(Sender: TObject);
-var
-  I: Integer;
-begin
-  for I := 0 to VideoCount - 1 do
-    if Sender = VideoRemoveButtons[I] then begin
-      VideoActive[I] := False;
-      FilePage.Values[I] := '';
-      FilePage.Edits[I].Visible := False;
-      FilePage.Buttons[I].Visible := False;
-      FilePage.PromptLabels[I].Visible := False;
-      VideoRemoveButtons[I].Visible := False;
-      UpdateSourceNextCaption;
-      Exit;
-    end;
-end;
-
-procedure ConfigureVideoRow(Index: Integer);
-begin
-  FilePage.Edits[Index].Width := ScaleX(280);
-  FilePage.Buttons[Index].Left := ScaleX(290);
-  VideoRemoveButtons[Index] := TNewButton.Create(WizardForm);
-  VideoRemoveButtons[Index].Parent := FilePage.Surface;
-  VideoRemoveButtons[Index].Caption := 'Remove';
-  VideoRemoveButtons[Index].Left := ScaleX(385);
-  VideoRemoveButtons[Index].Top := FilePage.Edits[Index].Top - ScaleY(1);
-  VideoRemoveButtons[Index].Width := ScaleX(75);
-  VideoRemoveButtons[Index].Height := ScaleY(24);
-  VideoRemoveButtons[Index].OnClick := @RemoveVideoField;
-  VideoRemoveButtons[Index].Visible := Index > 0;
-  FilePage.Edits[Index].OnChange := @SourceValueChanged;
-  VideoActive[Index] := True;
-end;
-
-procedure AddVideoField(Sender: TObject);
-var
-  I: Integer;
-begin
-  for I := 0 to VideoCount - 1 do
-    if not VideoActive[I] then begin
-      VideoActive[I] := True;
-      FilePage.Edits[I].Visible := True;
-      FilePage.Buttons[I].Visible := True;
-      FilePage.PromptLabels[I].Visible := True;
-      VideoRemoveButtons[I].Visible := True;
-      UpdateSourceNextCaption;
-      Exit;
-    end;
-  if VideoCount >= 8 then begin
-    MsgBox('Add further videos later at http://localhost:8099/.', mbInformation, MB_OK);
-    Exit;
-  end;
-  VideoCount := VideoCount + 1;
-  FilePage.Add('MP4 video ' + IntToStr(VideoCount) + ':', 'MP4 video (*.mp4)|*.mp4', '.mp4');
-  ConfigureVideoRow(VideoCount - 1);
-  AddVideoButton.Top := FilePage.Edits[VideoCount - 1].Top + ScaleY(32);
-  UpdateSourceNextCaption;
-end;
-
-procedure SourceTypeClicked(Sender: TObject);
-begin
-  if (WizardForm.CurPageID <> SourcePage.ID) or
-     (SourcePage.SelectedValueIndex < 0) then Exit;
+  if (not FileExists(FileName)) or
+     (Lowercase(ExtractFileExt(FileName)) <> '.mp4') then Exit;
+  for I := 0 to AddedSourceCount - 1 do
+    if (AddedSourceKind[I] = 2) and
+       (CompareText(AddedSourceMp4[I], FileName) = 0) then Exit;
+  if AddedSourceCount >= 16 then Exit;
+  Index := AddedSourceCount;
+  AddedSourceCount := AddedSourceCount + 1;
+  AddedSourceKind[Index] := 2;
+  AddedSourceMp4[Index] := FileName;
+  AddedSourceRtsp[Index] := '';
+  AddedSourceHost[Index] := '';
+  AddedSourcePort[Index] := '';
+  AddedSourceUser[Index] := '';
+  AddedSourcePass[Index] := '';
   SourceSetupSkipped := False;
-  NavigatingFromSourceChoice := True;
-  WizardForm.NextButton.OnClick(WizardForm.NextButton);
-  NavigatingFromSourceChoice := False;
+end;
+
+procedure ClearAllSourcesClicked(Sender: TObject);
+begin
+  AddedSourceCount := 0;
+  ClearSourceForm;
+  RefreshSourceList;
+end;
+
+procedure AddSourceClicked(Sender: TObject);
+var
+  Index, Port: Integer;
+  Url, Host: String;
+begin
+  if SelectedSourceType < 0 then begin
+    MsgBox('Select RTSP, ONVIF, or Local MP4 first.', mbInformation, MB_OK);
+    Exit;
+  end;
+
+  if SelectedSourceType = 0 then begin
+    Url := Trim(RtspUrlEdit.Text);
+    if Url = '' then begin
+      MsgBox('Enter an RTSP URL.', mbError, MB_OK);
+      Exit;
+    end;
+    if Pos('rtsp://', Lowercase(Url)) <> 1 then begin
+      MsgBox('RTSP URL must start with rtsp://.', mbError, MB_OK);
+      Exit;
+    end;
+  end else if SelectedSourceType = 1 then begin
+    Host := Trim(OnvifHostEdit.Text);
+    Port := StrToIntDef(Trim(OnvifPortEdit.Text), 0);
+    if Host = '' then begin
+      MsgBox('Enter an ONVIF host / IP.', mbError, MB_OK);
+      Exit;
+    end;
+    if (Port < 1) or (Port > 65535) then begin
+      MsgBox('Enter a valid ONVIF port.', mbError, MB_OK);
+      Exit;
+    end;
+  end else begin
+    if (Trim(Mp4PathEdit.Text) = '') or (not FileExists(Mp4PathEdit.Text)) then begin
+      MsgBox('Select an existing MP4 video file.', mbError, MB_OK);
+      Exit;
+    end;
+  end;
+
+  if EditingSourceIndex >= 0 then
+    Index := EditingSourceIndex
+  else begin
+    if AddedSourceCount >= 16 then begin
+      MsgBox('You can add up to 16 sources here. Add more later from the dashboard.',
+        mbInformation, MB_OK);
+      Exit;
+    end;
+    Index := AddedSourceCount;
+    AddedSourceCount := AddedSourceCount + 1;
+  end;
+
+  AddedSourceKind[Index] := SelectedSourceType;
+  AddedSourceRtsp[Index] := '';
+  AddedSourceHost[Index] := '';
+  AddedSourcePort[Index] := '';
+  AddedSourceUser[Index] := '';
+  AddedSourcePass[Index] := '';
+  AddedSourceMp4[Index] := '';
+
+  if SelectedSourceType = 0 then
+    AddedSourceRtsp[Index] := Trim(RtspUrlEdit.Text)
+  else if SelectedSourceType = 1 then begin
+    AddedSourceHost[Index] := Trim(OnvifHostEdit.Text);
+    AddedSourcePort[Index] := Trim(OnvifPortEdit.Text);
+    AddedSourceUser[Index] := Trim(OnvifUserEdit.Text);
+    AddedSourcePass[Index] := OnvifPassEdit.Text;
+  end else
+    AddedSourceMp4[Index] := Trim(Mp4PathEdit.Text);
+
+  ClearSourceForm;
+  RefreshSourceList;
+end;
+
+procedure EditSourceClicked(Sender: TObject);
+var
+  Index: Integer;
+begin
+  Index := TNewButton(Sender).Tag;
+  if Index < 0 then begin
+    MsgBox('Select a source in the list to edit.', mbInformation, MB_OK);
+    Exit;
+  end;
+  EditingSourceIndex := Index;
+  SelectedSourceType := AddedSourceKind[Index];
+  SetSourcePanelVisible;
+  if SelectedSourceType = 0 then
+    RtspUrlEdit.Text := AddedSourceRtsp[Index]
+  else if SelectedSourceType = 1 then begin
+    OnvifHostEdit.Text := AddedSourceHost[Index];
+    OnvifPortEdit.Text := AddedSourcePort[Index];
+    OnvifUserEdit.Text := AddedSourceUser[Index];
+    OnvifPassEdit.Text := AddedSourcePass[Index];
+  end else
+    Mp4PathEdit.Text := AddedSourceMp4[Index];
+  AddSourceButton.Caption := 'Update Source';
+end;
+
+procedure DeleteSourceClicked(Sender: TObject);
+var
+  Index, I: Integer;
+begin
+  Index := TNewButton(Sender).Tag;
+  if Index < 0 then begin
+    MsgBox('Select a source in the list to delete.', mbInformation, MB_OK);
+    Exit;
+  end;
+  for I := Index to AddedSourceCount - 2 do begin
+    AddedSourceKind[I] := AddedSourceKind[I + 1];
+    AddedSourceRtsp[I] := AddedSourceRtsp[I + 1];
+    AddedSourceHost[I] := AddedSourceHost[I + 1];
+    AddedSourcePort[I] := AddedSourcePort[I + 1];
+    AddedSourceUser[I] := AddedSourceUser[I + 1];
+    AddedSourcePass[I] := AddedSourcePass[I + 1];
+    AddedSourceMp4[I] := AddedSourceMp4[I + 1];
+  end;
+  AddedSourceCount := AddedSourceCount - 1;
+  ClearSourceForm;
+  RefreshSourceList;
 end;
 
 type
@@ -706,75 +803,54 @@ begin
   else ZoneTypeCombo.ItemIndex := 5;
 end;
 
+
 function ActiveSourceCount: Integer;
-var
-  I: Integer;
 begin
-  Result := 0;
-  if SourcePage.SelectedValueIndex = 0 then
-    for I := 0 to RtspCount - 1 do
-      if RtspActive[I] and (Trim(RtspPage.Values[I]) <> '') then Result := Result + 1
-  else if SourcePage.SelectedValueIndex = 1 then
-    for I := 0 to OnvifCount - 1 do
-      if OnvifActive[I] and (Trim(OnvifPage.Values[I * 4]) <> '') then Result := Result + 1
-  else if SourcePage.SelectedValueIndex = 2 then
-    for I := 0 to VideoCount - 1 do
-      if VideoActive[I] and (Trim(FilePage.Values[I]) <> '') then Result := Result + 1;
+  Result := AddedSourceCount;
 end;
 
 procedure PopulateZoneCameras;
 var
-  I, N: Integer;
+  I: Integer;
 begin
   ZoneCameraCombo.Items.Clear;
-  N := 0;
-  if SourcePage.SelectedValueIndex = 0 then begin
-    for I := 0 to RtspCount - 1 do
-      if RtspActive[I] and (Trim(RtspPage.Values[I]) <> '') then begin
-        N := N + 1;
-        ZoneCameraCombo.Items.Add('Camera ' + IntToStr(N));
-      end;
-  end else if SourcePage.SelectedValueIndex = 1 then begin
-    for I := 0 to OnvifCount - 1 do
-      if OnvifActive[I] and (Trim(OnvifPage.Values[I * 4]) <> '') then begin
-        N := N + 1;
-        ZoneCameraCombo.Items.Add('ONVIF Camera ' + IntToStr(N));
-      end;
-  end else if SourcePage.SelectedValueIndex = 2 then begin
-    for I := 0 to VideoCount - 1 do
-      if VideoActive[I] and (Trim(FilePage.Values[I]) <> '') then begin
-        N := N + 1;
-        ZoneCameraCombo.Items.Add('Local Video ' + IntToStr(N));
-      end;
+  for I := 0 to AddedSourceCount - 1 do begin
+    if AddedSourceKind[I] = 0 then
+      ZoneCameraCombo.Items.Add('Camera ' + IntToStr(I + 1))
+    else if AddedSourceKind[I] = 1 then
+      ZoneCameraCombo.Items.Add('ONVIF Camera ' + IntToStr(I + 1))
+    else
+      ZoneCameraCombo.Items.Add('Local Video ' + IntToStr(I + 1));
   end;
   if ZoneCameraCombo.Items.Count > 0 then ZoneCameraCombo.ItemIndex := 0;
 end;
 
 function SourceOriginalIndex(CompactIndex: Integer): Integer;
-var
-  I, Seen: Integer;
 begin
-  Result := -1;
-  Seen := -1;
-  if SourcePage.SelectedValueIndex = 0 then begin
-    for I := 0 to RtspCount - 1 do
-      if RtspActive[I] and (Trim(RtspPage.Values[I]) <> '') then begin
-        Seen := Seen + 1;
-        if Seen = CompactIndex then begin Result := I; Exit; end;
-      end;
-  end else if SourcePage.SelectedValueIndex = 1 then begin
-    for I := 0 to OnvifCount - 1 do
-      if OnvifActive[I] and (Trim(OnvifPage.Values[I * 4]) <> '') then begin
-        Seen := Seen + 1;
-        if Seen = CompactIndex then begin Result := I; Exit; end;
-      end;
-  end else if SourcePage.SelectedValueIndex = 2 then begin
-    for I := 0 to VideoCount - 1 do
-      if VideoActive[I] and (Trim(FilePage.Values[I]) <> '') then begin
-        Seen := Seen + 1;
-        if Seen = CompactIndex then begin Result := I; Exit; end;
-      end;
-  end;
+  if (CompactIndex >= 0) and (CompactIndex < AddedSourceCount) then
+    Result := CompactIndex
+  else
+    Result := -1;
+end;
+
+function WriteCaptureRequest(Path: String): Boolean;
+var
+  SourceIndex: Integer;
+  Json: String;
+begin
+  Result := False;
+  SourceIndex := SourceOriginalIndex(ZoneCameraCombo.ItemIndex);
+  if SourceIndex < 0 then Exit;
+  if AddedSourceKind[SourceIndex] = 0 then
+    Json := '{"rtsp_url":"' + JsonEscape(Trim(AddedSourceRtsp[SourceIndex])) + '"}'
+  else if AddedSourceKind[SourceIndex] = 1 then
+    Json := '{"onvif_host":"' + JsonEscape(Trim(AddedSourceHost[SourceIndex])) +
+      '","onvif_port":' + IntToStr(StrToIntDef(Trim(AddedSourcePort[SourceIndex]), 80)) +
+      ',"onvif_user":"' + JsonEscape(Trim(AddedSourceUser[SourceIndex])) +
+      '","onvif_pass":"' + JsonEscape(AddedSourcePass[SourceIndex]) + '"}'
+  else
+    Json := '{"source_file":"' + JsonEscape(AddedSourceMp4[SourceIndex]) + '"}';
+  Result := SaveStringToFile(Path, Json, False);
 end;
 
 function ZoneBaseFramePath: String;
@@ -813,27 +889,6 @@ begin
     ' point(s) - click and drag to draw a monitoring box';
 end;
 
-function WriteCaptureRequest(Path: String): Boolean;
-var
-  SourceIndex, Base: Integer;
-  Json: String;
-begin
-  Result := False;
-  SourceIndex := SourceOriginalIndex(ZoneCameraCombo.ItemIndex);
-  if SourceIndex < 0 then Exit;
-  if SourcePage.SelectedValueIndex = 0 then
-    Json := '{"rtsp_url":"' + JsonEscape(Trim(RtspPage.Values[SourceIndex])) + '"}'
-  else if SourcePage.SelectedValueIndex = 1 then begin
-    Base := SourceIndex * 4;
-    Json := '{"onvif_host":"' + JsonEscape(Trim(OnvifPage.Values[Base])) +
-      '","onvif_port":' + IntToStr(StrToIntDef(Trim(OnvifPage.Values[Base + 1]), 80)) +
-      ',"onvif_user":"' + JsonEscape(Trim(OnvifPage.Values[Base + 2])) +
-      '","onvif_pass":"' + JsonEscape(OnvifPage.Values[Base + 3]) + '"}';
-  end else
-    Json := '{"source_file":"' + JsonEscape(FilePage.Values[SourceIndex]) + '"}';
-  Result := SaveStringToFile(Path, Json, False);
-end;
-
 procedure RefreshZoneFrame(Sender: TObject);
 var
   RequestPath, FramePath, HelperPath: String;
@@ -870,6 +925,8 @@ begin
   RenderZoneDrawing;
 end;
 
+procedure RebuildZoneList; forward;
+
 procedure ZoneCameraChanged(Sender: TObject);
 begin
   ZoneFrameReady := FileExists(ZoneBaseFramePath);
@@ -882,6 +939,7 @@ begin
     ZoneImage.Visible := False;
     ZoneStatusLabel.Caption := 'Click Refresh Frame to capture this camera.';
   end;
+  RebuildZoneList;
 end;
 
 function GetZonePointer(var DisplayX, DisplayY: Integer; ClampToImage: Boolean): Boolean;
@@ -935,7 +993,6 @@ begin
       ZoneDragCurrentX := DisplayX; ZoneDragCurrentY := DisplayY;
       SetZoneRectangle(DisplayX, DisplayY, DisplayX, DisplayY);
       ZoneStatusLabel.Caption := 'Drawing zone. Release the mouse to set the box.';
-      RenderZoneDrawing;
     end;
     Exit;
   end;
@@ -945,7 +1002,6 @@ begin
        ((DisplayX <> ZoneDragCurrentX) or (DisplayY <> ZoneDragCurrentY)) then begin
       ZoneDragCurrentX := DisplayX; ZoneDragCurrentY := DisplayY;
       SetZoneRectangle(ZoneDragStartX, ZoneDragStartY, DisplayX, DisplayY);
-      RenderZoneDrawing;
     end;
     Exit;
   end;
@@ -1014,16 +1070,39 @@ end;
 
 procedure RebuildZoneList;
 var
-  I: Integer;
+  I, Row: Integer;
 begin
   ZoneList.Items.Clear;
+  for Row := 0 to 7 do begin
+    ZoneRowPanel[Row].Visible := False;
+    ZoneRowLabel[Row].Visible := False;
+    ZoneRowEditButton[Row].Visible := False;
+    ZoneRowDeleteButton[Row].Visible := False;
+  end;
+  VisibleZoneCount := 0;
   for I := 0 to SavedZoneCount - 1 do begin
-    if (SavedZoneSource[I] >= 0) and
-       (SavedZoneSource[I] < ZoneCameraCombo.Items.Count) then
-      ZoneList.Items.Add(ZoneCameraCombo.Items[SavedZoneSource[I]] +
-        ' - ' + SavedZoneName[I])
-    else
-      ZoneList.Items.Add('Unavailable camera - ' + SavedZoneName[I]);
+    if SavedZoneSource[I] = ZoneCameraCombo.ItemIndex then begin
+      VisibleZoneIndex[VisibleZoneCount] := I;
+      Row := VisibleZoneCount;
+      VisibleZoneCount := VisibleZoneCount + 1;
+      ZoneList.Items.Add(SavedZoneName[I] + '  -  ' + SavedZoneType[I]);
+      if Row <= 7 then begin
+        ZoneRowPanel[Row].Visible := True;
+        ZoneRowLabel[Row].Visible := True;
+        ZoneRowEditButton[Row].Visible := True;
+        ZoneRowDeleteButton[Row].Visible := True;
+        ZoneRowLabel[Row].Caption := SavedZoneName[I] + '  -  ' + SavedZoneType[I];
+        ZoneRowEditButton[Row].Tag := I;
+        ZoneRowDeleteButton[Row].Tag := I;
+        if EditingZoneIndex = I then begin
+          ZoneRowPanel[Row].Color := $00D96A10;
+          ZoneRowLabel[Row].Font.Color := clWhite;
+        end else begin
+          ZoneRowPanel[Row].Color := clWhite;
+          ZoneRowLabel[Row].Font.Color := clBlack;
+        end;
+      end;
+    end;
   end;
 end;
 
@@ -1060,6 +1139,10 @@ begin
   end;
   EditingZoneIndex := -1;
   RebuildZoneList;
+  if SavedZoneCount > 0 then
+    WizardForm.NextButton.Caption := 'Install'
+  else
+    WizardForm.NextButton.Caption := 'Skip';
   ZoneStatusLabel.Caption := 'Zone saved. It will sync to the dashboard and tray after pairing.';
   NewZoneClicked(Sender);
 end;
@@ -1068,8 +1151,11 @@ procedure EditZoneClicked(Sender: TObject);
 var
   I: Integer;
 begin
-  if ZoneList.ItemIndex < 0 then Exit;
-  EditingZoneIndex := ZoneList.ItemIndex;
+  if Sender = ZoneList then begin
+    if ZoneList.ItemIndex < 0 then Exit;
+    EditingZoneIndex := VisibleZoneIndex[ZoneList.ItemIndex];
+  end else
+    EditingZoneIndex := TNewButton(Sender).Tag;
   if (SavedZoneSource[EditingZoneIndex] < 0) or
      (SavedZoneSource[EditingZoneIndex] >= ZoneCameraCombo.Items.Count) then begin
     MsgBox('This zone belongs to a camera that was removed. Delete the zone or add the camera again.',
@@ -1092,13 +1178,18 @@ begin
   end else
     RefreshZoneFrame(RefreshFrameButton);
   ZoneStatusLabel.Caption := 'Editing saved zone. Change it and click Save Zone.';
+  RebuildZoneList;
 end;
 
 procedure DeleteZoneClicked(Sender: TObject);
 var
   I, J, Index: Integer;
 begin
-  Index := ZoneList.ItemIndex;
+  if Sender = ZoneList then begin
+    if ZoneList.ItemIndex < 0 then Exit;
+    Index := VisibleZoneIndex[ZoneList.ItemIndex];
+  end else
+    Index := TNewButton(Sender).Tag;
   if Index < 0 then Exit;
   for I := Index to SavedZoneCount - 2 do begin
     SavedZoneSource[I] := SavedZoneSource[I + 1];
@@ -1114,21 +1205,97 @@ begin
   SavedZoneCount := SavedZoneCount - 1;
   EditingZoneIndex := -1;
   RebuildZoneList;
+  if SavedZoneCount > 0 then
+    WizardForm.NextButton.Caption := 'Install'
+  else
+    WizardForm.NextButton.Caption := 'Skip';
+end;
+
+
+procedure SetupCodeChanged(Sender: TObject);
+begin
+  if WizardForm.CurPageID = IdentityPage.ID then
+    WizardForm.NextButton.Enabled := Trim(IdentityPage.Values[0]) <> '';
+end;
+
+function DragQueryFileW(hDrop, FileIndex: LongWord; FileName: String;
+  FileNameSize: LongWord): LongWord;
+  external 'DragQueryFileW@shell32.dll stdcall';
+procedure DragFinish(hDrop: LongWord);
+  external 'DragFinish@shell32.dll stdcall';
+procedure DragAcceptFiles(hWnd: LongWord; Accept: Boolean);
+  external 'DragAcceptFiles@shell32.dll stdcall';
+function ChangeWindowMessageFilterEx(hWnd, Msg, Action: LongWord;
+  ChangeInfo: LongWord): Boolean;
+  external 'ChangeWindowMessageFilterEx@user32.dll stdcall';
+function SetWindowLongW(hWnd: LongWord; Index, NewLong: Longint): Longint;
+  external 'SetWindowLongW@user32.dll stdcall';
+function CallWindowProcW(PrevWndFunc: Longint; hWnd, Msg, wParam,
+  lParam: LongWord): Longint;
+  external 'CallWindowProcW@user32.dll stdcall';
+
+function WizardDropWndProc(hWnd, Msg, wParam, lParam: LongWord): Longint;
+var
+  FileName: String;
+  FileLength, FileCount, I: LongWord;
+begin
+  if Msg = $0233 then begin { WM_DROPFILES }
+    if (WizardForm.CurPageID = SourcePage.ID) and (SelectedSourceType = 2) then begin
+      FileCount := DragQueryFileW(wParam, $FFFFFFFF, '', 0);
+      if FileCount > 0 then
+        for I := 0 to FileCount - 1 do begin
+          FileLength := DragQueryFileW(wParam, I, '', 0);
+          SetLength(FileName, FileLength + 1);
+          DragQueryFileW(wParam, I, FileName, FileLength + 1);
+          SetLength(FileName, FileLength);
+          AddMp4File(FileName);
+        end;
+      Mp4DropTitle.Caption := IntToStr(FileCount) + ' file(s) processed';
+      RefreshSourceList;
+    end;
+    DragFinish(wParam);
+    Result := 0;
+    Exit;
+  end;
+  Result := CallWindowProcW(OldWizardWndProc, hWnd, Msg, wParam, lParam);
 end;
 
 procedure InitializeWizard;
+var
+  CardW, CardGap, TopY, ContentW: Integer;
+  I: Integer;
 begin
-  WizardForm.ClientWidth := ScaleX(900);
-  WizardForm.ClientHeight := ScaleY(650);
+  { Wide, DPI-aware shell matching the ONETIX setup references. }
+  { Compact desktop installer size; intentionally not maximized. }
+  WizardForm.ClientWidth := ScaleX(800);
+  WizardForm.ClientHeight := ScaleY(570);
+  WizardForm.Color := clWhite;
+  WizardForm.Font.Name := 'Segoe UI';
+  WizardForm.Font.Size := 10;
   SourceSetupSkipped := False;
+  SelectedSourceType := -1;
+  EditingSourceIndex := -1;
+  AddedSourceCount := 0;
   SavedZoneCount := 0;
   EditingZoneIndex := -1;
-  NavigatingFromSourceChoice := False;
   ZoneBaseBitmap := TBitmap.Create;
   ZoneRenderBitmap := TBitmap.Create;
   ZoneLoadedFramePath := '';
+  { Keep the native Windows close/minimise controls and the installer cancel path
+    operational.  Hiding Cancel also made the title-bar close action appear dead. }
   WizardForm.CancelButton.Visible := False;
   ApplyWizardBrandFonts;
+
+  ExtractTemporaryFile('wizard-sidebar.bmp');
+  GlobalSidebar := TBitmapImage.Create(WizardForm);
+  GlobalSidebar.Parent := WizardForm.InnerNotebook;
+  GlobalSidebar.Left := 0;
+  GlobalSidebar.Top := 0;
+  GlobalSidebar.Width := ScaleX(200);
+  GlobalSidebar.Height := WizardForm.InnerNotebook.Height;
+  GlobalSidebar.Stretch := True;
+  GlobalSidebar.Bitmap.LoadFromFile(ExpandConstant('{tmp}\wizard-sidebar.bmp'));
+  GlobalSidebar.Visible := False;
 
   IdentityPage := CreateInputQueryPage(wpSelectDir,
     'Connect to onetix', 'Enter the connector identity',
@@ -1214,37 +1381,37 @@ begin
   ZoneCameraCombo.Parent := ZonePage.Surface;
   ZoneCameraCombo.Left := 0;
   ZoneCameraCombo.Top := ScaleY(18);
-  ZoneCameraCombo.Width := ScaleX(260);
+  ZoneCameraCombo.Width := ScaleX(300);
   ZoneCameraCombo.Style := csDropDownList;
   ZoneCameraCombo.OnChange := @ZoneCameraChanged;
   RefreshFrameButton := TNewButton.Create(ZonePage);
   RefreshFrameButton.Parent := ZonePage.Surface;
   RefreshFrameButton.Caption := 'Refresh Frame';
-  RefreshFrameButton.Left := ScaleX(275);
+  RefreshFrameButton.Left := ScaleX(310);
   RefreshFrameButton.Top := ScaleY(18);
-  RefreshFrameButton.Width := ScaleX(110);
+  RefreshFrameButton.Width := ScaleX(170);
   RefreshFrameButton.OnClick := @RefreshZoneFrame;
   ZoneNameLabel := TNewStaticText.Create(ZonePage);
   ZoneNameLabel.Parent := ZonePage.Surface;
-  ZoneNameLabel.Left := ScaleX(400);
-  ZoneNameLabel.Top := 0;
+  ZoneNameLabel.Left := 0;
+  ZoneNameLabel.Top := ScaleY(46);
   ZoneNameLabel.Caption := 'Zone name:';
   ZoneNameEdit := TNewEdit.Create(ZonePage);
   ZoneNameEdit.Parent := ZonePage.Surface;
-  ZoneNameEdit.Left := ScaleX(400);
-  ZoneNameEdit.Top := ScaleY(18);
-  ZoneNameEdit.Width := ScaleX(190);
+  ZoneNameEdit.Left := 0;
+  ZoneNameEdit.Top := ScaleY(64);
+  ZoneNameEdit.Width := ScaleX(260);
   ZoneNameEdit.Text := '';
   ZoneTypeLabel := TNewStaticText.Create(ZonePage);
   ZoneTypeLabel.Parent := ZonePage.Surface;
-  ZoneTypeLabel.Left := ScaleX(600);
-  ZoneTypeLabel.Top := 0;
+  ZoneTypeLabel.Left := ScaleX(270);
+  ZoneTypeLabel.Top := ScaleY(46);
   ZoneTypeLabel.Caption := 'Zone type:';
   ZoneTypeCombo := TNewComboBox.Create(ZonePage);
   ZoneTypeCombo.Parent := ZonePage.Surface;
-  ZoneTypeCombo.Left := ScaleX(600);
-  ZoneTypeCombo.Top := ScaleY(18);
-  ZoneTypeCombo.Width := ScaleX(150);
+  ZoneTypeCombo.Left := ScaleX(270);
+  ZoneTypeCombo.Top := ScaleY(64);
+  ZoneTypeCombo.Width := ScaleX(270);
   ZoneTypeCombo.Style := csDropDownList;
   ZoneTypeCombo.Items.Add('High-value shelf');
   ZoneTypeCombo.Items.Add('Shelf');
@@ -1257,82 +1424,98 @@ begin
   ZoneImage := TBitmapImage.Create(ZonePage);
   ZoneImage.Parent := ZonePage.Surface;
   ZoneImage.Left := 0;
-  ZoneImage.Top := ScaleY(56);
-  ZoneImage.Width := ScaleX(600);
-  ZoneImage.Height := ScaleY(338);
+  ZoneImage.Top := ScaleY(94);
+  { Product reference requires a stable 480 x 362 frame viewport. }
+  { Keep the visible frame at the requested physical pixel dimensions even
+    when Windows display scaling is 125% or 150%. }
+  ZoneImage.Width := 480;
+  ZoneImage.Height := 362;
   ZoneImage.Stretch := True;
   ZoneImage.Cursor := crCross;
   ZoneImage.Visible := False;
-  ZoneMouseTimerId := SetTimer(0, 0, 33, CreateCallback(@ZoneMouseTimerTick));
+  ZoneMouseTimerId := SetTimer(0, 0, 50, CreateCallback(@ZoneMouseTimerTick));
   ZoneList := TNewListBox.Create(ZonePage);
   SavedZonesLabel := TNewStaticText.Create(ZonePage);
   SavedZonesLabel.Parent := ZonePage.Surface;
-  SavedZonesLabel.Left := ScaleX(615);
-  SavedZonesLabel.Top := ScaleY(56);
-  SavedZonesLabel.Caption := 'Saved zones:';
+  SavedZonesLabel.Left := ScaleX(380);
+  SavedZonesLabel.Top := ScaleY(94);
+  SavedZonesLabel.Caption := 'Zones';
+  SavedZonesLabel.Font.Style := [fsBold];
   ZoneList.Parent := ZonePage.Surface;
-  ZoneList.Left := ScaleX(615);
-  ZoneList.Top := ScaleY(76);
-  ZoneList.Width := ScaleX(235);
-  ZoneList.Height := ScaleY(192);
-  // A saved-zone row is the edit action: selecting it must immediately load
-  // its camera, captured frame, name, and rectangle for inspection.
+  ZoneList.Left := ScaleX(380);
+  ZoneList.Top := ScaleY(118);
+  ZoneList.Width := ScaleX(130);
+  ZoneList.Height := ScaleY(170);
   ZoneList.OnClick := @EditZoneClicked;
+  ZoneList.Visible := False;
 
-  NewZoneButton := TNewButton.Create(ZonePage);
-  NewZoneButton.Parent := ZonePage.Surface;
-  NewZoneButton.Caption := '+ New Zone';
-  NewZoneButton.Left := ScaleX(615);
-  NewZoneButton.Top := ScaleY(278);
-  NewZoneButton.Width := ScaleX(110);
-  NewZoneButton.OnClick := @NewZoneClicked;
-  EditZoneButton := TNewButton.Create(ZonePage);
-  EditZoneButton.Parent := ZonePage.Surface;
-  EditZoneButton.Caption := 'Edit';
-  EditZoneButton.Left := ScaleX(735);
-  EditZoneButton.Top := ScaleY(278);
-  EditZoneButton.Width := ScaleX(55);
-  EditZoneButton.OnClick := @EditZoneClicked;
-  DeleteZoneButton := TNewButton.Create(ZonePage);
-  DeleteZoneButton.Parent := ZonePage.Surface;
-  DeleteZoneButton.Caption := 'Delete';
-  DeleteZoneButton.Left := ScaleX(795);
-  DeleteZoneButton.Top := ScaleY(278);
-  DeleteZoneButton.Width := ScaleX(55);
-  DeleteZoneButton.OnClick := @DeleteZoneClicked;
+  for I := 0 to 7 do begin
+    ZoneRowPanel[I] := TPanel.Create(ZonePage);
+    ZoneRowPanel[I].Parent := ZonePage.Surface;
+    ZoneRowPanel[I].SetBounds(ScaleX(380), ScaleY(118 + (I * 24)),
+      ScaleX(172), ScaleY(22));
+    ZoneRowPanel[I].BevelOuter := bvNone;
+    ZoneRowPanel[I].Color := clWhite;
+    ZoneRowPanel[I].Visible := False;
+    ZoneRowLabel[I] := TNewStaticText.Create(ZonePage);
+    ZoneRowLabel[I].Parent := ZoneRowPanel[I];
+    ZoneRowLabel[I].SetBounds(ScaleX(6), ScaleY(3), ScaleX(118), ScaleY(16));
+    ZoneRowLabel[I].AutoSize := False;
+    ZoneRowLabel[I].Visible := False;
+    ZoneRowEditButton[I] := TNewButton.Create(ZonePage);
+    ZoneRowEditButton[I].Parent := ZoneRowPanel[I];
+    ZoneRowEditButton[I].SetBounds(ScaleX(126), ScaleY(1), ScaleX(21), ScaleY(20));
+    ZoneRowEditButton[I].Caption := Chr($E70F);
+    ZoneRowEditButton[I].Font.Name := 'Segoe MDL2 Assets';
+    ZoneRowEditButton[I].OnClick := @EditZoneClicked;
+    ZoneRowEditButton[I].Visible := False;
+    ZoneRowDeleteButton[I] := TNewButton.Create(ZonePage);
+    ZoneRowDeleteButton[I].Parent := ZoneRowPanel[I];
+    ZoneRowDeleteButton[I].SetBounds(ScaleX(149), ScaleY(1), ScaleX(21), ScaleY(20));
+    ZoneRowDeleteButton[I].Caption := Chr($E74D);
+    ZoneRowDeleteButton[I].Font.Name := 'Segoe MDL2 Assets';
+    ZoneRowDeleteButton[I].OnClick := @DeleteZoneClicked;
+    ZoneRowDeleteButton[I].Visible := False;
+  end;
+
   UndoPointButton := TNewButton.Create(ZonePage);
   UndoPointButton.Parent := ZonePage.Surface;
   UndoPointButton.Caption := 'Undo Point';
-  UndoPointButton.Left := ScaleX(615);
-  UndoPointButton.Top := ScaleY(316);
-  UndoPointButton.Width := ScaleX(110);
+  UndoPointButton.Left := 0;
+  UndoPointButton.Top := ScaleY(464);
+  UndoPointButton.Width := ScaleX(195);
+  UndoPointButton.Height := ScaleY(24);
   UndoPointButton.OnClick := @UndoZonePoint;
   ClearPointsButton := TNewButton.Create(ZonePage);
   ClearPointsButton.Parent := ZonePage.Surface;
   ClearPointsButton.Caption := 'Clear Points';
-  ClearPointsButton.Left := ScaleX(735);
-  ClearPointsButton.Top := ScaleY(316);
-  ClearPointsButton.Width := ScaleX(115);
+  ClearPointsButton.Left := ScaleX(215);
+  ClearPointsButton.Top := ScaleY(464);
+  ClearPointsButton.Width := ScaleX(195);
+  ClearPointsButton.Height := ScaleY(24);
   ClearPointsButton.OnClick := @ClearZonePoints;
   SaveZoneButton := TNewButton.Create(ZonePage);
   SaveZoneButton.Parent := ZonePage.Surface;
   SaveZoneButton.Caption := 'Save Zone';
-  SaveZoneButton.Left := ScaleX(615);
-  SaveZoneButton.Top := ScaleY(354);
-  SaveZoneButton.Width := ScaleX(235);
+  SaveZoneButton.Left := 0;
+  SaveZoneButton.Left := ScaleX(380);
+  SaveZoneButton.Top := ScaleY(298);
+  SaveZoneButton.Width := ScaleX(172);
+  SaveZoneButton.Height := ScaleY(26);
   SaveZoneButton.OnClick := @SaveZoneClicked;
 
   PointCountLabel := TNewStaticText.Create(ZonePage);
   PointCountLabel.Parent := ZonePage.Surface;
   PointCountLabel.Left := 0;
-  PointCountLabel.Top := ScaleY(404);
-  PointCountLabel.Width := ScaleX(600);
-  PointCountLabel.Caption := '0 point(s) - click and drag to draw a monitoring box';
+  PointCountLabel.Top := ScaleY(430);
+  PointCountLabel.Width := ScaleX(480);
+  PointCountLabel.Caption := 'Tip: Drag points to create or edit a zone.';
+  PointCountLabel.Font.Color := $00666666;
   ZoneStatusLabel := TNewStaticText.Create(ZonePage);
   ZoneStatusLabel.Parent := ZonePage.Surface;
   ZoneStatusLabel.Left := 0;
-  ZoneStatusLabel.Top := ScaleY(428);
-  ZoneStatusLabel.Width := ScaleX(600);
+  ZoneStatusLabel.Top := ScaleY(500);
+  ZoneStatusLabel.Width := ScaleX(700);
   ZoneStatusLabel.Caption := 'Select a camera and click Refresh Frame.';
 
   StyleFont(ZoneCameraLabel.Font, 8, False);
@@ -1363,176 +1546,148 @@ begin
   Result := False;
   if UpdateMode and
      ((PageID = IdentityPage.ID) or (PageID = SourcePage.ID) or
-      (PageID = RtspPage.ID) or (PageID = OnvifPage.ID) or
-      (PageID = FilePage.ID) or (PageID = ZonePage.ID)) then begin
+      (PageID = ZonePage.ID)) then begin
     Result := True;
     Exit;
   end;
   if PreserveExistingConfig and
      ((PageID = IdentityPage.ID) or (PageID = SourcePage.ID) or
-      (PageID = RtspPage.ID) or (PageID = OnvifPage.ID) or
-      (PageID = FilePage.ID) or (PageID = ZonePage.ID)) then begin
+      (PageID = ZonePage.ID)) then begin
     Result := True;
     Exit;
   end;
-  if SourceSetupSkipped and
-     ((PageID = RtspPage.ID) or (PageID = OnvifPage.ID) or
-      (PageID = FilePage.ID) or (PageID = ZonePage.ID)) then begin
-    Result := True;
-    Exit;
-  end;
-  if (PageID = RtspPage.ID) and (SourcePage.SelectedValueIndex <> 0) then Result := True;
-  if (PageID = OnvifPage.ID) and (SourcePage.SelectedValueIndex <> 1) then Result := True;
-  if (PageID = FilePage.ID) and (SourcePage.SelectedValueIndex <> 2) then Result := True;
-  { Source detail pages already prevent Next when no valid source is present.
-    Do not use ActiveSourceCount here: Inno can evaluate ShouldSkipPage while a
-    file-picker edit is still committing its value, which incorrectly skipped
-    the native zone editor for a valid MP4 selection. }
   if (PageID = ZonePage.ID) and
-     (SourceSetupSkipped or (SourcePage.SelectedValueIndex < 0)) then
+     (SourceSetupSkipped or (AddedSourceCount = 0)) then
     Result := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  I, Base, Port, ValidCount: Integer;
 begin
   Result := True;
   if CurPageID = IdentityPage.ID then begin
-    if (Trim(IdentityPage.Values[0]) = '') or (Trim(IdentityPage.Values[1]) = '') then begin
-      MsgBox('Setup code and connector name are required.', mbError, MB_OK);
+    if Trim(IdentityPage.Values[0]) = '' then begin
+      MsgBox('Setup code is required.', mbError, MB_OK);
       Result := False;
     end;
   end;
   if CurPageID = SourcePage.ID then begin
-    if not NavigatingFromSourceChoice then begin
+    if AddedSourceCount = 0 then begin
+      { Nothing saved yet - Skip moves straight on, no source is forced. }
       SourceSetupSkipped := True;
-      SourcePage.SelectedValueIndex := -1;
-    end;
-  end;
-  if CurPageID = RtspPage.ID then begin
-    ValidCount := 0;
-    for I := 0 to RtspCount - 1 do begin
-      if RtspActive[I] and (Trim(RtspPage.Values[I]) <> '') then begin
-        ValidCount := ValidCount + 1;
-        if Pos('rtsp://', Lowercase(Trim(RtspPage.Values[I]))) <> 1 then begin
-        MsgBox('RTSP URL ' + IntToStr(I + 1) + ' must start with rtsp://.', mbError, MB_OK);
-        Result := False;
-        Exit;
-        end;
-      end;
-    end;
-    if ValidCount = 0 then begin
-      MsgBox('Enter at least one RTSP URL, or go Back and choose Skip camera setup.',
-        mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-  end;
-  if CurPageID = OnvifPage.ID then begin
-    ValidCount := 0;
-    for I := 0 to OnvifCount - 1 do begin
-      Base := I * 4;
-      if OnvifActive[I] and (Trim(OnvifPage.Values[Base]) <> '') then begin
-        ValidCount := ValidCount + 1;
-        Port := StrToIntDef(Trim(OnvifPage.Values[Base + 1]), 0);
-        if (Port < 1) or (Port > 65535) then begin
-          MsgBox('Enter a valid port for ONVIF camera ' + IntToStr(I + 1) + '.', mbError, MB_OK);
-          Result := False;
-          Exit;
-        end;
-      end;
-    end;
-    if ValidCount = 0 then begin
-      MsgBox('Enter at least one ONVIF camera, or go Back and choose Skip camera setup.',
-        mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-  end;
-  if CurPageID = FilePage.ID then begin
-    ValidCount := 0;
-    for I := 0 to VideoCount - 1 do begin
-      if VideoActive[I] and (Trim(FilePage.Values[I]) <> '') then begin
-        ValidCount := ValidCount + 1;
-        if not FileExists(FilePage.Values[I]) then begin
-        MsgBox('Select an existing MP4 video for entry ' + IntToStr(I + 1) + '.', mbError, MB_OK);
-        Result := False;
-        Exit;
-        end;
-      end;
-    end;
-    if ValidCount = 0 then begin
-      MsgBox('Select at least one MP4 video, or go Back and choose Skip camera setup.',
-        mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
+      SelectedSourceType := -1;
+    end else
+      SourceSetupSkipped := False;
   end;
   if CurPageID = ZonePage.ID then begin
-    // The dashboard keeps a draft zone until Save is pressed. In the native
-    // installer, make Next forgiving: a valid named drawing is saved first so
-    // the user never loses a completed box/polygon by clicking Next.
     if (ZonePointCount >= 3) and (Trim(ZoneNameEdit.Text) <> '') then
       SaveZoneClicked(SaveZoneButton);
-    if SavedZoneCount = 0 then begin
-      MsgBox('Draw a zone and enter its name, then click Save Zone.',
-        mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-    for I := 0 to ZoneCameraCombo.Items.Count - 1 do begin
-      ValidCount := 0;
-      for Base := 0 to SavedZoneCount - 1 do
-        if SavedZoneSource[Base] = I then ValidCount := ValidCount + 1;
-      if ValidCount = 0 then begin
-        MsgBox('Save at least one zone for ' + ZoneCameraCombo.Items[I] + '.',
-          mbError, MB_OK);
-        Result := False;
-        Exit;
-      end;
-    end;
   end;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
+var
+  SrcCount: Integer;
+  ServiceNote: String;
 begin
-  if CurPageID = SourcePage.ID then begin
+  SuccessSummaryLabel.Visible := False;
+  SuccessHeadingLabel.Visible := False;
+  SuccessDescriptionLabel.Visible := False;
+  SuccessIconLabel.Visible := False;
+  GlobalSidebar.Visible := CurPageID = wpFinished;
+  WizardForm.WizardSmallBitmapImage.Visible := not GlobalSidebar.Visible;
+  if GlobalSidebar.Visible then GlobalSidebar.BringToFront;
+  { Footer Cancel is intentionally omitted in the approved wizard.  Native
+    title-bar Close remains functional. }
+  WizardForm.CancelButton.Visible := False;
+  WizardForm.BackButton.Caption := 'Back';
+
+  if CurPageID = IdentityPage.ID then begin
+    IdentitySidebar.BringToFront;
+    WizardForm.PageNameLabel.Visible := False;
+    WizardForm.PageDescriptionLabel.Visible := False;
+    WizardForm.NextButton.Caption := 'Next';
+    WizardForm.NextButton.Enabled := Trim(IdentityPage.Values[0]) <> ''
+  end else if CurPageID = SourcePage.ID then begin
+    SourceSidebar.BringToFront;
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.PageNameLabel.Visible := True;
+    WizardForm.PageDescriptionLabel.Visible := True;
     if PreserveExistingConfig then
       WizardForm.NextButton.Caption := 'Keep existing'
-    else
-      WizardForm.NextButton.Caption := 'Skip';
-    SourcePage.SelectedValueIndex := -1;
-  end else if (CurPageID = RtspPage.ID) or
-              (CurPageID = OnvifPage.ID) or
-              (CurPageID = FilePage.ID) then
-    UpdateSourceNextCaption
-  else if CurPageID = ZonePage.ID then begin
-    PopulateZoneCameras;
-    ZoneCameraChanged(ZoneCameraCombo);
+    else begin
+      // Keep prior selection state when navigating Back; never force a type.
+      SetSourcePanelVisible;
+    end;
+  end else if CurPageID = ZonePage.ID then begin
+    ZoneSidebar.BringToFront;
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.PageNameLabel.Visible := True;
+    WizardForm.PageDescriptionLabel.Visible := True;
+    if ZoneCameraCombo.Items.Count <> AddedSourceCount then begin
+      PopulateZoneCameras;
+      ZoneCameraChanged(ZoneCameraCombo);
+    end else
+      RebuildZoneList;
     if (ZoneCameraCombo.ItemIndex >= 0) and (not ZoneFrameReady) then
       RefreshZoneFrame(RefreshFrameButton);
-    WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
-  end
-  else if CurPageID = wpFinished then
-    WizardForm.NextButton.Caption := SetupMessage(msgButtonFinish)
-  else if CurPageID = wpReady then
-    WizardForm.NextButton.Caption := SetupMessage(msgButtonInstall)
-  else
-    WizardForm.NextButton.Caption := SetupMessage(msgButtonNext);
+    if SavedZoneCount > 0 then
+      WizardForm.NextButton.Caption := 'Install'
+    else
+      WizardForm.NextButton.Caption := 'Skip';
+  end else if CurPageID = wpReady then begin
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.NextButton.Caption := 'Install';
+    WizardForm.ReadyLabel.Caption :=
+      'Click Install to install ONETIX Local Connector with the settings you entered.';
+  end else if CurPageID = wpFinished then begin
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.NextButton.Caption := 'Finish';
+    WizardForm.PageNameLabel.Visible := False;
+    WizardForm.PageDescriptionLabel.Visible := False;
+    WizardForm.FinishedHeadingLabel.Visible := False;
+    WizardForm.FinishedLabel.Visible := False;
+    SrcCount := ActiveSourceCount;
+    if ExistingService then
+      ServiceNote := 'Connector service is running'
+    else
+      ServiceNote := 'Connector service installed';
+    SuccessSummaryLabel.Caption :=
+      'Summary' + #13#10#13#10 +
+      Chr(10003) + '   Setup Code                         Success' + #13#10#13#10 +
+      Chr(10003) + '   Sources                              ' + IntToStr(SrcCount) +
+        ' source(s) added' + #13#10#13#10 +
+      Chr(10003) + '   Detection Zones                 ' + IntToStr(SavedZoneCount) +
+        ' zone(s) configured' + #13#10#13#10 +
+      Chr(10003) + '   Connector Service              ' + ServiceNote + #13#10#13#10 +
+      'Click Finish to exit Setup.';
+    SuccessSummaryLabel.Visible := True;
+    SuccessHeadingLabel.Visible := True;
+    SuccessDescriptionLabel.Visible := True;
+    SuccessIconLabel.Visible := True;
+    GlobalSidebar.BringToFront;
+    SuccessSummaryLabel.BringToFront;
+    SuccessHeadingLabel.BringToFront;
+    SuccessDescriptionLabel.BringToFront;
+    SuccessIconLabel.BringToFront;
+  end else begin
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.PageNameLabel.Visible := True;
+    WizardForm.PageDescriptionLabel.Visible := True;
+    WizardForm.NextButton.Caption := 'Next';
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ConfigPath, UpdatePath, MediaPath, Json, SourcesJson, ItemJson,
     PendingZonesJson, ReferencePath: String;
-  I, Base: Integer;
+  I: Integer;
 begin
   if CurStep <> ssInstall then Exit;
   if UpdateMode then Exit;
-    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector'));
-    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\data'));
-    ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\media'));
+  ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector'));
+  ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\data'));
+  ForceDirectories(ExpandConstant('{commonappdata}\ONEVO\Connector\media'));
 
   if FreshInstallCleanup then
     DelTree(ExpandConstant('{commonappdata}\ONEVO\Connector'), True, True, True);
@@ -1547,41 +1702,26 @@ begin
   SourcesJson := '';
   PendingZonesJson := '';
   if not SourceSetupSkipped then begin
-    if SourcePage.SelectedValueIndex = 0 then begin
-      for I := 0 to RtspCount - 1 do begin
-        if RtspActive[I] and (Trim(RtspPage.Values[I]) <> '') then begin
-          ItemJson := '{"name":"Camera ' + IntToStr(I + 1) +
-            '","rtsp_url":"' + JsonEscape(Trim(RtspPage.Values[I])) + '"}';
-          if SourcesJson <> '' then SourcesJson := SourcesJson + ',';
-          SourcesJson := SourcesJson + ItemJson;
-        end;
+    for I := 0 to AddedSourceCount - 1 do begin
+      if AddedSourceKind[I] = 0 then
+        ItemJson := '{"name":"Camera ' + IntToStr(I + 1) +
+          '","rtsp_url":"' + JsonEscape(Trim(AddedSourceRtsp[I])) + '"}'
+      else if AddedSourceKind[I] = 1 then
+        ItemJson := '{"name":"ONVIF Camera ' + IntToStr(I + 1) +
+          '","onvif_host":"' + JsonEscape(Trim(AddedSourceHost[I])) +
+          '","onvif_port":' + IntToStr(StrToIntDef(Trim(AddedSourcePort[I]), 80)) +
+          ',"onvif_user":"' + JsonEscape(Trim(AddedSourceUser[I])) +
+          '","onvif_pass":"' + JsonEscape(AddedSourcePass[I]) + '"}'
+      else begin
+        MediaPath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\installer-video-' +
+          IntToStr(I + 1) + '.mp4');
+        if not CopyFile(AddedSourceMp4[I], MediaPath, False) then
+          RaiseException('Could not copy MP4 video ' + IntToStr(I + 1) + '.');
+        ItemJson := '{"name":"Local Video ' + IntToStr(I + 1) +
+          '","source_file":"' + JsonEscape(MediaPath) + '","loop":true}';
       end;
-    end else if SourcePage.SelectedValueIndex = 1 then begin
-      for I := 0 to OnvifCount - 1 do begin
-        Base := I * 4;
-        if OnvifActive[I] and (Trim(OnvifPage.Values[Base]) <> '') then begin
-          ItemJson := '{"name":"ONVIF Camera ' + IntToStr(I + 1) +
-            '","onvif_host":"' + JsonEscape(Trim(OnvifPage.Values[Base])) +
-            '","onvif_port":' + IntToStr(StrToIntDef(Trim(OnvifPage.Values[Base + 1]), 80)) +
-            ',"onvif_user":"' + JsonEscape(Trim(OnvifPage.Values[Base + 2])) +
-            '","onvif_pass":"' + JsonEscape(OnvifPage.Values[Base + 3]) + '"}';
-          if SourcesJson <> '' then SourcesJson := SourcesJson + ',';
-          SourcesJson := SourcesJson + ItemJson;
-        end;
-      end;
-    end else if SourcePage.SelectedValueIndex = 2 then begin
-      for I := 0 to VideoCount - 1 do begin
-        if VideoActive[I] and (Trim(FilePage.Values[I]) <> '') then begin
-          MediaPath := ExpandConstant('{commonappdata}\ONEVO\Connector\media\installer-video-' +
-            IntToStr(I + 1) + '.mp4');
-          if not CopyFile(FilePage.Values[I], MediaPath, False) then
-            RaiseException('Could not copy MP4 video ' + IntToStr(I + 1) + '.');
-          ItemJson := '{"name":"Local Video ' + IntToStr(I + 1) +
-            '","source_file":"' + JsonEscape(MediaPath) + '","loop":true}';
-          if SourcesJson <> '' then SourcesJson := SourcesJson + ',';
-          SourcesJson := SourcesJson + ItemJson;
-        end;
-      end;
+      if SourcesJson <> '' then SourcesJson := SourcesJson + ',';
+      SourcesJson := SourcesJson + ItemJson;
     end;
   end;
 
@@ -1603,9 +1743,6 @@ begin
   end;
 
   if PreserveExistingConfig then begin
-    // "Keep existing" means no camera mutation. If the user selected a source
-    // type, write a narrow source overlay; the service applies it while
-    // preserving connector/store identity and credentials.
     if SourceSetupSkipped or (SourcesJson = '') then Exit;
     Json := '{"sources":[' + SourcesJson + ']}' + #13#10;
     SaveStringToFile(UpdatePath, Json, False);
@@ -1615,7 +1752,7 @@ begin
   Json := '{' + #13#10 +
     '  "setup_complete": false,' + #13#10 +
     '  "setup_code": "' + JsonEscape(Trim(IdentityPage.Values[0])) + '",' + #13#10 +
-    '  "connector_name": "' + JsonEscape(Trim(IdentityPage.Values[1])) + '",' + #13#10 +
+    '  "connector_name": "ONETIX Store Connector",' + #13#10 +
     '  "sources": [' + SourcesJson + '],' + #13#10 +
     '  "pending_zones": [' + PendingZonesJson + ']' + #13#10 +
     '}' + #13#10;

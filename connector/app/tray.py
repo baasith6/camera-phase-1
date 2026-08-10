@@ -25,7 +25,7 @@ HEALTH_URL = "http://127.0.0.1:8099/health"
 TRAY_LOCK = "tray.lock"
 TRAY_EXIT_SIGNAL = "tray.exit"
 STARTUP_VALUE = "ONEVO Connector Tray"
-CURRENT_VERSION = "1.1.18"
+CURRENT_VERSION = "1.1.20"
 UPDATE_MANIFEST_URL = os.getenv(
     "CONNECTOR_UPDATE_MANIFEST_URL",
     f"{BAKED_BACKEND_URL.rstrip('/')}/api/connectors/updates/latest",
@@ -346,14 +346,14 @@ class TrayApplication:
                 if download_origin.scheme != "https" and not (
                     download_origin.scheme == "http" and same_backend and local_host
                 ):
-                    raise RuntimeError("The update URL is not from the ONEVO backend.")
+                    raise RuntimeError("The update URL is not from the ONETIX backend.")
                 update_dir = self.state_dir.parent / "updates"
                 update_dir.mkdir(parents=True, exist_ok=True)
                 target = update_dir / f"ONEVO-Connector-Update-{self.latest_version}.exe"
                 partial = target.with_suffix(".exe.partial")
                 digest = hashlib.sha256()
                 received = 0
-                self._notify(f"Downloading ONEVO Connector {self.latest_version}...")
+                self._notify(f"Downloading ONETIX Connector {self.latest_version}...")
                 with requests.get(
                     download_url,
                     headers=self._connector_headers(),
@@ -373,7 +373,7 @@ class TrayApplication:
                 if not expected_hash or digest.hexdigest().lower() != expected_hash:
                     raise RuntimeError("Downloaded update failed SHA-256 verification.")
                 partial.replace(target)
-                self._notify(f"Installing ONEVO Connector {self.latest_version}...")
+                self._notify(f"Installing ONETIX Connector {self.latest_version}...")
                 if os.name != "nt":
                     raise RuntimeError("Connector updates are supported on Windows only.")
                 import ctypes
@@ -420,7 +420,7 @@ class TrayApplication:
         else:
             self.status = "Error"
         if self.icon is not None:
-            self.icon.title = f"ONEVO Connector — {self.status}"
+            self.icon.title = f"ONETIX Connector — {self.status}"
             self.icon.update_menu()
 
     def _status_loop(self) -> None:
@@ -440,7 +440,7 @@ class TrayApplication:
         def worker():
             if not open_admin():
                 self._notify(
-                    "Local dashboard is not ready. Check the ONEVO Connector service."
+                    "Local dashboard is not ready. Check the ONETIX Connector service."
                 )
             self._refresh_status()
         threading.Thread(target=worker, daemon=True).start()
@@ -449,7 +449,7 @@ class TrayApplication:
         def worker():
             if not open_admin(url=f"{DEFAULT_ADMIN_URL}#zones"):
                 self._notify(
-                    "Local zone editor is not ready. Check the ONEVO Connector service."
+                    "Local zone editor is not ready. Check the ONETIX Connector service."
                 )
             self._refresh_status()
         threading.Thread(target=worker, daemon=True).start()
@@ -490,9 +490,9 @@ class TrayApplication:
             service_action("stop")
             time.sleep(1)
             if service_action("start") and wait_for_health():
-                self._notify("ONEVO Connector restarted successfully.")
+                self._notify("ONETIX Connector restarted successfully.")
             else:
-                self._notify("ONEVO Connector could not be restarted.")
+                self._notify("ONETIX Connector could not be restarted.")
             self._refresh_status()
         threading.Thread(target=worker, daemon=True).start()
 
@@ -506,7 +506,7 @@ class TrayApplication:
         if self.icon is not None and message != self._last_notice:
             self._last_notice = message
             try:
-                self.icon.notify(message, "ONEVO Connector")
+                self.icon.notify(message, "ONETIX Connector")
             except Exception:
                 pass
 
@@ -585,7 +585,7 @@ class TrayApplication:
             self.icon = pystray.Icon(
                 "ONEVOConnectorTray",
                 image,
-                "ONEVO Connector — Starting",
+                "ONETIX Connector — Starting",
                 menu,
             )
             self._refresh_status()
