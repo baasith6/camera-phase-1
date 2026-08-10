@@ -30,9 +30,9 @@ interface ChecklistStep {
         subtitle="Follow these steps to connect a store. Progress updates automatically when you refresh." />
 
     @if (auth.isAdmin() && stores.length > 1) {
-      <div class="card store-pick">
-        <label>Store</label>
-        <select [(ngModel)]="selectedStoreId" (ngModelChange)="onStoreChange()">
+      <div class="card mb-4 max-w-[360px] !px-4 !py-3">
+        <label class="mb-1 block text-[0.78rem] text-ink-muted">Store</label>
+        <select class="w-full !bg-surface-2" [(ngModel)]="selectedStoreId" (ngModelChange)="onStoreChange()">
           @for (s of stores; track s.id) {
             <option [value]="s.id">{{ s.name }}</option>
           }
@@ -41,19 +41,20 @@ interface ChecklistStep {
     }
 
     @if (selectedStoreName) {
-      <p class="store-label muted">Checklist for <strong>{{ selectedStoreName }}</strong></p>
+      <p class="muted mb-3 text-[0.9rem]">Checklist for <strong>{{ selectedStoreName }}</strong></p>
     }
 
-    <div class="progress-bar">
-      <div class="fill" [style.width.%]="progressPct"></div>
-      <span class="pct">{{ doneCount }}/{{ visibleSteps.length }} complete</span>
+    <div class="relative mb-5 h-7 max-w-[480px] overflow-hidden rounded-[6px] border border-border bg-surface-2">
+      <div class="h-full bg-accent transition-[width] duration-200" [style.width.%]="progressPct"></div>
+      <span class="absolute inset-0 flex items-center justify-center text-[0.78rem] font-semibold text-ink-muted">{{ doneCount }}/{{ visibleSteps.length }} complete</span>
     </div>
 
-    <div class="steps">
-      @for (step of steps; track step.id) {
-        @if (!step.adminOnly || auth.isAdmin()) {
-          <div class="step card" [class.done]="step.done">
-            <div class="step-head">
+    <div class="flex max-w-[720px] flex-col gap-3">
+      <!-- Iterate visibleSteps directly: same list drives progress math and the
+           rendered cards, so role filtering can never disagree between them. -->
+      @for (step of visibleSteps; track step.id) {
+          <div class="step card !mb-0" [class.done]="step.done">
+            <div class="flex items-start gap-3">
               <span class="status" [class.ok]="step.done" [attr.aria-label]="step.done ? 'Complete' : 'Incomplete'">
                 @if (step.done) {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14" aria-hidden="true">
@@ -63,10 +64,10 @@ interface ChecklistStep {
               </span>
               <div>
                 <h3>{{ step.title }}</h3>
-                <p class="muted small">{{ step.detail }}</p>
+                <p class="muted small m-0">{{ step.detail }}</p>
               </div>
             </div>
-            <div class="step-actions">
+            <div class="ml-9 mt-3 flex flex-wrap items-center gap-2">
               @if (step.inlineAction === 'download') {
                 <button (click)="downloadInstaller()" [disabled]="downloadingInstaller || !installerInfo">
                   {{ downloadingInstaller ? 'Downloading…' : 'Download installer' }}
@@ -75,15 +76,15 @@ interface ChecklistStep {
                   <span class="muted small">v{{ installerInfo.version }} · {{ installerInfo.sizeBytes / 1048576 | number:'1.1-1' }} MB</span>
                 }
                 @if (installerError) {
-                  <span class="err">{{ installerError }}</span>
+                  <span class="text-[0.82rem] text-danger">{{ installerError }}</span>
                 }
               } @else if (step.inlineAction === 'setupCode') {
                 <button (click)="generateSetupCode()" [disabled]="!selectedStoreId || generatingCode">
                   {{ generatingCode ? 'Generating…' : 'Generate setup code' }}
                 </button>
                 @if (setupCode) {
-                  <div class="code-box">
-                    <code>{{ setupCode }}</code>
+                  <div class="flex w-full flex-wrap items-center gap-2 rounded-[6px] border border-border-strong bg-surface-2 px-2.5 py-2">
+                    <code class="text-[1.1rem] tracking-[0.06em]">{{ setupCode }}</code>
                     <span class="muted small">Expires {{ setupCodeExpires }}</span>
                     <button class="ghost small" (click)="copyCode()">Copy</button>
                   </div>
@@ -95,45 +96,18 @@ interface ChecklistStep {
               }
             </div>
           </div>
-        }
       }
     </div>
 
     @if (allComplete) {
-      <div class="card complete-box">
+      <div class="card mt-4 max-w-[720px] !border-success-soft">
         <p>Store setup looks complete. You can go to <a routerLink="/app/clips">Clips</a> to review uploads or <a routerLink="/app/alerts">Alerts</a> for day-to-day review.</p>
       </div>
     }
     </app-page-container>
   `,
   styles: [`
-    .store-pick { max-width: 360px; margin-bottom: 1rem; padding: .75rem 1rem; }
-    .store-pick label { display: block; font-size: .78rem; color: var(--text-muted); margin-bottom: .25rem; }
-    .store-pick select {
-      width: 100%; padding: .45rem .55rem; border-radius: var(--radius-sm);
-      border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text);
-    }
-    .store-label { margin-bottom: .75rem; font-size: .9rem; }
-    .progress-bar {
-      position: relative; height: 28px; background: var(--surface-2);
-      border-radius: var(--radius-sm); border: 1px solid var(--border);
-      margin-bottom: 1.25rem; overflow: hidden; max-width: 480px;
-    }
-    .fill {
-      height: 100%; background: var(--accent);
-      transition: width .25s ease;
-    }
-    .pct {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      font-size: .78rem; font-weight: 600; color: var(--text-muted);
-    }
-    .steps { display: flex; flex-direction: column; gap: .75rem; max-width: 720px; }
-    .step {
-      padding: 1rem; border: 1px solid var(--border);
-      background: var(--surface); border-radius: var(--radius);
-    }
     .step.done { border-color: rgba(92, 219, 127, .35); }
-    .step-head { display: flex; gap: .75rem; align-items: flex-start; }
     .status {
       width: 1.5rem; height: 1.5rem; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
@@ -142,34 +116,10 @@ interface ChecklistStep {
     }
     .status.ok { background: var(--success-soft); border-color: var(--success); color: var(--success); }
     h3 { margin: 0 0 .25rem; font-size: .95rem; }
-    .small { font-size: .82rem; margin: 0; }
-    .muted { color: var(--text-muted); }
-    .step-actions {
-      margin-top: .75rem; margin-left: 2.25rem;
-      display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
-    }
-    button {
-      padding: .4rem .75rem; border-radius: var(--radius-sm);
-      border: 1px solid var(--accent); background: var(--accent-soft);
-      color: var(--accent-2); cursor: pointer; font-weight: 600; font-size: .85rem;
-    }
-    button.ghost { background: transparent; border-color: var(--border-strong); color: var(--text-muted); }
-    button.small { font-size: .78rem; padding: .25rem .5rem; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
     .btn-link {
       font-size: .85rem; color: var(--accent-2); text-decoration: none;
       border: 1px solid var(--border-strong); padding: .35rem .65rem; border-radius: var(--radius-sm);
     }
-    .code-box {
-      display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
-      padding: .5rem .65rem; background: var(--surface-2); border-radius: var(--radius-sm);
-      border: 1px solid var(--border-strong); width: 100%;
-    }
-    code { font-size: 1.1rem; letter-spacing: .06em; }
-    .err { color: var(--danger); font-size: .82rem; }
-    .complete-box { max-width: 720px; margin-top: 1rem; border-color: var(--success-soft); }
-    .complete-box a { color: var(--accent-2); }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
   `],
 })
 export class GetStartedComponent implements OnInit {

@@ -18,31 +18,31 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
         <app-skeleton-list [count]="4" />
       } @else if (clip) {
         <app-page-header [title]="clip.cameraName">
-          <div actions class="header-actions">
+          <div actions class="flex items-center gap-2">
             <app-status-badge [level]="clip.status" [label]="clip.status" />
             @if (auth.isManagerOrAdmin()) {
-              <button class="ghost danger" type="button" (click)="deleteClip()" [disabled]="deleting">Delete</button>
+              <button class="ghost !text-danger !border-danger/35" type="button" (click)="deleteClip()" [disabled]="deleting">Delete</button>
             }
           </div>
           <div below>
-            <a class="back" routerLink="/app/clips">Back to Clips</a>
+            <a class="text-[0.82rem] text-accent no-underline" routerLink="/app/clips">Back to Clips</a>
           </div>
         </app-page-header>
 
-        <div class="detail-layout">
-          <div class="col-main">
-            <div class="card">
+        <div class="grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]">
+          <div class="flex min-w-0 flex-col gap-4">
+            <div class="card !mb-0">
               <h3>Video</h3>
               @if (clip.clipUrl) {
-                <video class="clip" [src]="clip.clipUrl" controls width="100%"></video>
+                <video class="rounded-[6px] border border-border-strong" [src]="clip.clipUrl" controls width="100%"></video>
               } @else {
-                <div class="no-clip">
+                <div class="px-4 py-6 text-center">
                   <p class="muted">Clip not available yet — it may still be uploading or processing.</p>
                 </div>
               }
             </div>
 
-            <div class="card">
+            <div class="card !mb-0">
               <h3>AI events ({{ clip.eventCount }})</h3>
               @if (clip.aiEvents.length === 0) {
                 <p class="muted">No AI events recorded for this clip.</p>
@@ -73,10 +73,10 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
             </div>
           </div>
 
-          <div class="col-side">
-            <div class="card">
+          <div class="flex min-w-0 flex-col gap-4">
+            <div class="card !mb-0">
               <h3>Analysis</h3>
-              <div class="detail-list">
+              <div class="flex flex-col">
                 <div class="detail-item"><span class="dk">Store</span><span>{{ clip.storeName }}</span></div>
                 <div class="detail-item"><span class="dk">Trigger</span><span>{{ clip.triggerReason }}</span></div>
                 <div class="detail-item"><span class="dk">Duration</span><span>{{ clip.durationSec | number:'1.0-1' }}s</span></div>
@@ -89,7 +89,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                 }
                 <div class="detail-item">
                   <span class="dk">Risk score</span>
-                  <span class="score" [class.warn]="(clip.riskScore ?? 0) >= 40">
+                  <span class="font-semibold" [class.text-warning]="(clip.riskScore ?? 0) >= 40">
                     {{ clip.riskScore ?? '—' }}
                   </span>
                 </div>
@@ -97,18 +97,20 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
             </div>
 
             @if (clip.analysisNote) {
-              <div class="card note-card">
+              <div class="card !mb-0 !border-warning-soft">
                 <p class="muted small">{{ clip.analysisNote }}</p>
               </div>
             }
 
             @if (clip.alertId) {
-              <div class="card">
+              <div class="card !mb-0">
                 <p>An alert was created from this clip.</p>
-                <a class="btn-link" [routerLink]="['/app/alerts', clip.alertId]">View alert</a>
+                <a
+                  class="mt-2 inline-block rounded-[6px] border border-border-strong px-2.5 py-1.5 text-[0.85rem] text-accent no-underline"
+                  [routerLink]="['/app/alerts', clip.alertId]">View alert</a>
               </div>
             } @else if (clip.status === 'Analyzed' && (clip.riskScore ?? 0) < 40) {
-              <div class="card note-card">
+              <div class="card !mb-0 !border-warning-soft">
                 <h3>No alert yet</h3>
                 <p class="muted small">
                   Alerts are created when the risk score reaches 40 or higher.
@@ -124,33 +126,13 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
     </app-page-container>
   `,
   styles: [`
-    .header-actions { display: flex; align-items: center; gap: 8px; }
-    .back { font-size: 0.82rem; color: var(--accent); text-decoration: none; }
-    .detail-layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; align-items: start; }
-    @media (max-width: 980px) { .detail-layout { grid-template-columns: 1fr; } }
-    .col-main, .col-side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-    .clip { border-radius: var(--radius-sm); border: 1px solid var(--border-strong); }
-    .no-clip { text-align: center; padding: 1.5rem 1rem; }
-    .detail-list { display: flex; flex-direction: column; }
     .detail-item {
       display: flex; align-items: center; justify-content: space-between; gap: 1rem;
       padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.88rem;
     }
     .detail-item:last-child { border-bottom: none; }
     .dk { color: var(--text-muted); font-size: 0.8rem; }
-    .mono { font-family: ui-monospace, monospace; font-size: 0.8rem; }
-    .score { font-weight: 600; }
-    .score.warn { color: var(--warning); }
-    .note-card { border-color: var(--warning-soft); }
-    .btn-link {
-      display: inline-block; margin-top: 0.5rem; font-size: 0.85rem; color: var(--accent);
-      text-decoration: none; border: 1px solid var(--border-strong); padding: 0.35rem 0.65rem;
-      border-radius: var(--radius-sm);
-    }
     .table.compact th, .table.compact td { font-size: 0.82rem; padding: 0.35rem 0.5rem; }
-    .muted { color: var(--text-muted); }
-    .small { font-size: 0.82rem; }
-    button.danger { color: var(--danger); border-color: rgba(248, 113, 113, 0.35); }
   `],
 })
 export class ClipDetailComponent implements OnInit {

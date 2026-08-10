@@ -1,9 +1,10 @@
-import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
+import { BreakpointService } from '../../core/breakpoint.service';
 import { LiveAlertsService } from '../../core/live-alerts.service';
 import { StoreContextService } from '../../core/store-context.service';
 import { Alert, Store } from '../../core/models';
@@ -73,11 +74,11 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
           [total]="filteredAlerts.length"
           [selectedCount]="selectedIds.size"
           (toggleAll)="toggleSelectAll($event)">
-          <button class="ghost danger" type="button" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">
+          <button class="ghost !text-danger !border-danger/35" type="button" (click)="deleteSelected()" [disabled]="bulkDeleting || selectedIds.size === 0">
             Delete selected
           </button>
           @if (storeId) {
-            <button class="ghost danger" type="button" (click)="deleteAllInStore()" [disabled]="bulkDeleting">
+            <button class="ghost !text-danger !border-danger/35" type="button" (click)="deleteAllInStore()" [disabled]="bulkDeleting">
               Delete all in store
             </button>
           }
@@ -96,62 +97,67 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
         <app-empty-state title="No alerts — all clear" detail="When the system flags activity, it will appear here for your review." />
       } @else {
         @if (newCount > 0) {
-          <div class="new-banner" role="status" (click)="dismissNewBanner()">
+          <div
+            class="mb-3 cursor-pointer rounded-[6px] border border-border-strong bg-accent-soft px-3 py-2.5 text-[0.85rem] font-medium text-accent-2"
+            role="status"
+            (click)="dismissNewBanner()">
             {{ newCount }} new alert{{ newCount > 1 ? 's' : '' }} received — click to dismiss
           </div>
         }
 
-        <div class="inbox-layout" [class.has-detail]="isDesktop && selectedId">
-          <div class="inbox-list">
+        <div
+          class="block"
+          [class]="bp.isLgUp() && selectedId ? 'lg:grid lg:grid-cols-[minmax(280px,38%)_1fr] lg:gap-4 lg:items-start' : ''">
+          <div class="min-w-0 lg:max-h-[calc(100vh-220px)] lg:overflow-y-auto">
             <app-data-table>
-              <table desktop class="table compact">
+              <table desktop class="table">
                 <thead>
                   <tr>
-                    @if (auth.isManagerOrAdmin()) { <th class="chk-col"></th> }
+                    <!-- Column always rendered for every role — only the input is gated,
+                         so table geometry never shifts between roles. -->
+                    <th class="w-10 text-center"></th>
                     <th>Alert</th>
                     <th>Risk</th>
                     <th>Status</th>
-                    @if (!isDesktop) { <th></th> }
+                    <th class="lg:hidden"></th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (a of pagedAlerts(); track a.id) {
                     <tr
-                      [class.selected-row]="selectedIds.has(a.id) || (isDesktop && selectedId === a.id)"
+                      [class.selected-row]="selectedIds.has(a.id) || (bp.isLgUp() && selectedId === a.id)"
                       [class.new-row]="newIds.has(a.id)"
-                      [class.active-row]="isDesktop && selectedId === a.id"
+                      [class.active-row]="bp.isLgUp() && selectedId === a.id"
                       (click)="openAlert(a.id)"
                       tabindex="0"
                       (keydown.enter)="openAlert(a.id)">
-                      @if (auth.isManagerOrAdmin()) {
-                        <td class="chk-col" (click)="$event.stopPropagation()">
+                      <td class="w-10 text-center" (click)="$event.stopPropagation()">
+                        @if (auth.isManagerOrAdmin()) {
                           <input type="checkbox" [checked]="selectedIds.has(a.id)" (change)="toggleSelect(a.id, $event)" aria-label="Select alert" />
-                        </td>
-                      }
+                        }
+                      </td>
                       <td>
-                        <div class="alert-type">{{ labelType(a.alertType) }}</div>
+                        <div class="text-[0.9rem] font-semibold">{{ labelType(a.alertType) }}</div>
                         <div class="muted small">{{ relative(a.createdAt) }} · {{ a.createdAt | date:'MMM d, h:mm a' }}</div>
                       </td>
                       <td><app-status-badge [level]="a.riskLevel" /></td>
                       <td><app-status-pill [status]="a.status" /></td>
-                      @if (!isDesktop) {
-                        <td (click)="$event.stopPropagation()">
-                          <button class="ghost small" type="button" (click)="openAlert(a.id)">Review</button>
-                        </td>
-                      }
+                      <td class="lg:hidden" (click)="$event.stopPropagation()">
+                        <button class="ghost small" type="button" (click)="openAlert(a.id)">Review</button>
+                      </td>
                     </tr>
                   }
                 </tbody>
               </table>
 
-              <div mobile class="alert-cards">
+              <div mobile class="flex flex-col gap-2.5">
                 @for (a of pagedAlerts(); track a.id) {
                   <div class="alert-card-mobile" (click)="openAlert(a.id)" tabindex="0" (keydown.enter)="openAlert(a.id)">
-                    <div class="alert-card-mobile-head">
+                    <div class="mb-2 flex items-start justify-between gap-2">
                       <strong>{{ labelType(a.alertType) }}</strong>
                       <app-status-badge [level]="a.riskLevel" />
                     </div>
-                    <div class="alert-card-mobile-meta">
+                    <div class="flex flex-wrap gap-2 text-[0.82rem]">
                       <app-status-pill [status]="a.status" />
                       <span class="muted">{{ relative(a.createdAt) }}</span>
                     </div>
@@ -161,16 +167,16 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
             </app-data-table>
 
             @if (totalPages() > 1) {
-              <div class="pagination">
-                <button class="ghost pg-btn" type="button" (click)="prevPage()" [disabled]="page === 1">Prev</button>
-                <span class="pg-info muted">{{ rangeStart() }}–{{ rangeEnd() }} of {{ filteredAlerts.length }}</span>
-                <button class="ghost pg-btn" type="button" (click)="nextPage()" [disabled]="page === totalPages()">Next</button>
+              <div class="mt-4 flex items-center justify-center gap-3">
+                <button class="ghost min-h-11 px-4" type="button" (click)="prevPage()" [disabled]="page === 1">Prev</button>
+                <span class="muted">{{ rangeStart() }}–{{ rangeEnd() }} of {{ filteredAlerts.length }}</span>
+                <button class="ghost min-h-11 px-4" type="button" (click)="nextPage()" [disabled]="page === totalPages()">Next</button>
               </div>
             }
           </div>
 
-          @if (isDesktop) {
-            <div class="inbox-detail">
+          @if (bp.isLgUp()) {
+            <div class="lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)] lg:overflow-y-auto lg:border-l lg:border-border lg:pl-4">
               <app-alert-review-pane
                 [alertId]="selectedId"
                 [showNav]="true"
@@ -186,44 +192,9 @@ type QuickFilter = '' | 'pending' | 'high' | 'today';
     </app-page-container>
   `,
   styles: [`
-    .inbox-layout { display: block; }
-    @media (min-width: 1024px) {
-      .inbox-layout.has-detail {
-        display: grid;
-        grid-template-columns: minmax(280px, 38%) 1fr;
-        gap: 16px;
-        align-items: start;
-      }
-      .inbox-list { max-height: calc(100vh - 220px); overflow-y: auto; }
-      .inbox-detail {
-        position: sticky;
-        top: 0;
-        max-height: calc(100vh - 180px);
-        overflow-y: auto;
-        border-left: 1px solid var(--border);
-        padding-left: 16px;
-      }
-      .table.compact th:last-child, .table.compact td:last-child { display: none; }
-    }
     .active-row td { background: var(--accent-soft) !important; }
-    .new-banner {
-      background: var(--accent-soft);
-      color: var(--accent-2);
-      border: 1px solid var(--border-strong);
-      padding: 10px 12px;
-      border-radius: var(--radius-sm);
-      margin-bottom: 12px;
-      cursor: pointer;
-      font-size: 0.85rem;
-      font-weight: 500;
-    }
-    .chk-col { width: 40px; text-align: center; }
-    .alert-type { font-weight: 600; font-size: 0.9rem; }
     .new-row td { animation: fadeIn 0.8s ease; }
     @keyframes fadeIn { from { background: var(--accent-soft); } to { background: transparent; } }
-    .pagination { display: flex; align-items: center; gap: 12px; margin-top: 16px; justify-content: center; }
-    .pg-btn { min-height: 44px; padding: 0 16px; }
-    button.danger { color: var(--danger); border-color: rgba(248, 113, 113, 0.35); }
   `],
 })
 export class AlertsComponent implements OnInit, OnDestroy {
@@ -243,12 +214,12 @@ export class AlertsComponent implements OnInit, OnDestroy {
   selectedId = '';
   prevId = '';
   nextId = '';
-  isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 1024 : false;
   private liveSub?: { unsubscribe: () => void };
 
   constructor(
     private api: ApiService,
     public auth: AuthService,
+    public bp: BreakpointService,
     private route: ActivatedRoute,
     private router: Router,
     private live: LiveAlertsService,
@@ -273,18 +244,13 @@ export class AlertsComponent implements OnInit, OnDestroy {
     return this.filteredAlerts.length > 0 && this.filteredAlerts.every((a) => this.selectedIds.has(a.id));
   }
 
-  @HostListener('window:resize')
-  onResize(): void {
-    this.isDesktop = window.innerWidth >= 1024;
-  }
-
   ngOnInit(): void {
     this.api.listStores().subscribe((s) => (this.stores = s));
     this.route.queryParamMap.subscribe((params) => {
       const fromQuery = params.get('storeId') ?? this.storeCtx.storeId();
       if (fromQuery) this.storeId = fromQuery;
       const idParam = params.get('id') ?? '';
-      if (this.isDesktop && idParam) this.selectedId = idParam;
+      if (this.bp.isLgUp() && idParam) this.selectedId = idParam;
       this.load();
     });
     this.liveSub = this.live.newAlert$.subscribe(({ alert }) => {
@@ -317,7 +283,7 @@ export class AlertsComponent implements OnInit, OnDestroy {
   }
 
   openAlert(id: string): void {
-    if (this.isDesktop) {
+    if (this.bp.isLgUp()) {
       this.selectById(id);
       return;
     }
@@ -359,7 +325,7 @@ export class AlertsComponent implements OnInit, OnDestroy {
         this.alerts = a;
         this.loading = false;
         this.page = 1;
-        if (this.isDesktop) {
+        if (this.bp.isLgUp()) {
           const idFromRoute = this.route.snapshot.queryParamMap.get('id');
           const pending = a.find((x) => x.status === 'PendingReview');
           const pick = idFromRoute && a.some((x) => x.id === idFromRoute)

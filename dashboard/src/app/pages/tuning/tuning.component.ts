@@ -48,51 +48,44 @@ const DEFAULT_CONFIG: RiskConfig = {
         <app-error-banner [message]="error" />
       }
 
-      <div class="tuning-grid">
-        <div class="card">
+      <div class="mb-4 grid grid-cols-1 items-start gap-4 min-[980px]:grid-cols-2">
+        <div class="card !mb-0">
           <h3>Signal weights</h3>
-          <div class="kv">
-            <div class="k">High-value zone entry</div><input type="number" [(ngModel)]="cfg.weights['HighValueZoneEntry']" />
-            <div class="k">Dwell (max)</div><input type="number" [(ngModel)]="cfg.weights['Dwell']" />
-            <div class="k">Repeated handling</div><input type="number" [(ngModel)]="cfg.weights['RepeatedHandling']" />
-            <div class="k">Bag / open-bag near shelf</div><input type="number" [(ngModel)]="cfg.weights['BagOpen']" />
-            <div class="k">Concealment</div><input type="number" [(ngModel)]="cfg.weights['Concealment']" />
-            <div class="k">Exit without checkout</div><input type="number" [(ngModel)]="cfg.weights['ExitWithoutCheckout']" />
-            <div class="k">Shelf pickup, no checkout</div><input type="number" [(ngModel)]="cfg.weights['ShelfPickupNoCheckout']" />
-            <div class="k">Blind-spot movement</div><input type="number" [(ngModel)]="cfg.weights['BlindSpotMovement']" />
-            <div class="k">Group distraction</div><input type="number" [(ngModel)]="cfg.weights['GroupDistraction']" />
-            <div class="k">High-value zone activity</div><input type="number" [(ngModel)]="cfg.weights['HighValueActivity']" />
-            <div class="k">Low-staff removal</div><input type="number" [(ngModel)]="cfg.weights['LowStaffRemoval']" />
+          <div class="grid grid-cols-[1fr_110px] items-center gap-2">
+            <div class="text-[0.88rem] text-ink-muted">High-value zone entry</div><input type="number" [(ngModel)]="cfg.weights['HighValueZoneEntry']" />
+            <div class="text-[0.88rem] text-ink-muted">Dwell (max)</div><input type="number" [(ngModel)]="cfg.weights['Dwell']" />
+            <div class="text-[0.88rem] text-ink-muted">Repeated handling</div><input type="number" [(ngModel)]="cfg.weights['RepeatedHandling']" />
+            <div class="text-[0.88rem] text-ink-muted">Bag / open-bag near shelf</div><input type="number" [(ngModel)]="cfg.weights['BagOpen']" />
+            <div class="text-[0.88rem] text-ink-muted">Concealment</div><input type="number" [(ngModel)]="cfg.weights['Concealment']" />
+            <div class="text-[0.88rem] text-ink-muted">Exit without checkout</div><input type="number" [(ngModel)]="cfg.weights['ExitWithoutCheckout']" />
+            <div class="text-[0.88rem] text-ink-muted">Shelf pickup, no checkout</div><input type="number" [(ngModel)]="cfg.weights['ShelfPickupNoCheckout']" />
+            <div class="text-[0.88rem] text-ink-muted">Blind-spot movement</div><input type="number" [(ngModel)]="cfg.weights['BlindSpotMovement']" />
+            <div class="text-[0.88rem] text-ink-muted">Group distraction</div><input type="number" [(ngModel)]="cfg.weights['GroupDistraction']" />
+            <div class="text-[0.88rem] text-ink-muted">High-value zone activity</div><input type="number" [(ngModel)]="cfg.weights['HighValueActivity']" />
+            <div class="text-[0.88rem] text-ink-muted">Low-staff removal</div><input type="number" [(ngModel)]="cfg.weights['LowStaffRemoval']" />
           </div>
         </div>
 
-        <div class="card">
+        <div class="card !mb-0">
           <h3>Thresholds</h3>
-          <div class="kv">
-            <div class="k">Dwell threshold (s)</div><input type="number" [(ngModel)]="cfg.dwellThresholdSec" />
-            <div class="k">Dwell max (s)</div><input type="number" [(ngModel)]="cfg.dwellMaxSec" />
-            <div class="k">Repeated handling count</div><input type="number" [(ngModel)]="cfg.repeatedHandlingThreshold" />
-            <div class="k">Group size threshold</div><input type="number" [(ngModel)]="cfg.groupSizeThreshold" />
-            <div class="k">Low-staff start hour</div><input type="number" [(ngModel)]="cfg.lowStaffStartHour" />
-            <div class="k">Low-staff end hour</div><input type="number" [(ngModel)]="cfg.lowStaffEndHour" />
-            <div class="k">Low band</div><input type="number" [(ngModel)]="cfg.lowBand" />
-            <div class="k">Medium band</div><input type="number" [(ngModel)]="cfg.mediumBand" />
-            <div class="k">High band</div><input type="number" [(ngModel)]="cfg.highBand" />
+          <div class="grid grid-cols-[1fr_110px] items-center gap-2">
+            <div class="text-[0.88rem] text-ink-muted">Dwell threshold (s)</div><input type="number" [(ngModel)]="cfg.dwellThresholdSec" />
+            <div class="text-[0.88rem] text-ink-muted">Dwell max (s)</div><input type="number" [(ngModel)]="cfg.dwellMaxSec" />
+            <div class="text-[0.88rem] text-ink-muted">Repeated handling count</div><input type="number" [(ngModel)]="cfg.repeatedHandlingThreshold" />
+            <div class="text-[0.88rem] text-ink-muted">Group size threshold</div><input type="number" [(ngModel)]="cfg.groupSizeThreshold" />
+            <div class="text-[0.88rem] text-ink-muted">Low-staff start hour</div><input type="number" [(ngModel)]="cfg.lowStaffStartHour" />
+            <div class="text-[0.88rem] text-ink-muted">Low-staff end hour</div><input type="number" [(ngModel)]="cfg.lowStaffEndHour" />
+            <div class="text-[0.88rem] text-ink-muted">Low band</div><input type="number" [(ngModel)]="cfg.lowBand" />
+            <div class="text-[0.88rem] text-ink-muted">Medium band</div><input type="number" [(ngModel)]="cfg.mediumBand" />
+            <div class="text-[0.88rem] text-ink-muted">High band</div><input type="number" [(ngModel)]="cfg.highBand" />
           </div>
         </div>
       </div>
 
       <button type="button" (click)="save()" [disabled]="saving">Save config</button>
-      @if (saved) { <span class="ok"> Saved.</span> }
+      @if (saved) { <span class="ml-2 text-success"> Saved.</span> }
     </app-page-container>
   `,
-  styles: [`
-    .tuning-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; margin-bottom: 16px; }
-    @media (max-width: 980px) { .tuning-grid { grid-template-columns: 1fr; } }
-    .kv { display: grid; grid-template-columns: 1fr 110px; gap: 8px; align-items: center; }
-    .k { color: var(--text-muted); font-size: 0.88rem; }
-    .ok { color: var(--success); margin-left: 8px; }
-  `],
 })
 export class TuningComponent implements OnInit {
   stores: Store[] = [];

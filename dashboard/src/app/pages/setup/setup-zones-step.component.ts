@@ -7,7 +7,7 @@ import { SetupContextService } from './setup-context.service';
   standalone: true,
   imports: [FormsModule],
   template: `
-    <ul class="need-list muted small">
+    <ul class="muted small m-0 mb-3 pl-[18px]">
       <li>A camera selected from step 2</li>
       <li>Draw areas where you want extra attention (e.g. high-value shelves)</li>
     </ul>
@@ -19,8 +19,8 @@ import { SetupContextService } from './setup-context.service';
         <h3>Draw zones on your camera view</h3>
         <p class="muted small">Click on the picture to mark an area. Drag the yellow dots to adjust.</p>
 
-        <div class="draw-toolbar">
-          <input placeholder="Zone name (e.g. High-value shelf)" [(ngModel)]="ctx.draftName" style="width:200px" />
+        <div class="mb-3 flex flex-wrap items-center gap-2">
+          <input class="w-[200px]" placeholder="Zone name (e.g. High-value shelf)" [(ngModel)]="ctx.draftName" />
           <select [(ngModel)]="ctx.draftType">
             <option value="HighValue">High-value shelf</option>
             <option value="Shelf">Shelf</option>
@@ -34,17 +34,17 @@ import { SetupContextService } from './setup-context.service';
           <button class="ghost" (click)="ctx.loadSnapshot(redraw.bind(this))" [disabled]="ctx.loadingSnapshot">
             {{ ctx.loadingSnapshot ? 'Loading…' : 'Refresh picture' }}
           </button>
-          <button class="btn-primary" (click)="ctx.saveZone()" [disabled]="ctx.draftPoints.length < 3 || !ctx.draftName">
+          <button (click)="ctx.saveZone()" [disabled]="ctx.draftPoints.length < 3 || !ctx.draftName">
             Save zone
           </button>
         </div>
 
         @if (ctx.snapshotError) {
-          <p class="err-text">{{ ctx.snapshotError }} — you can still draw on the blank canvas.</p>
+          <p class="text-[0.82rem] text-danger">{{ ctx.snapshotError }} — you can still draw on the blank canvas.</p>
         }
 
-        <div class="canvas-container">
-          <canvas #zoneCanvas width="640" height="360"
+        <div>
+          <canvas class="block h-auto max-w-full cursor-crosshair rounded-ctl border border-border-strong bg-bg" #zoneCanvas width="640" height="360"
                   (mousedown)="onCanvasMouseDown($event)"
                   (mousemove)="onCanvasMouseMove($event)"
                   (mouseup)="onCanvasMouseUp()"
@@ -53,15 +53,6 @@ import { SetupContextService } from './setup-context.service';
       </div>
     }
   `,
-  styles: [`
-    .need-list { margin: 0 0 12px; padding-left: 18px; }
-    .draw-toolbar { display: flex; gap: .5rem; margin-bottom: .75rem; align-items: center; flex-wrap: wrap; }
-    .btn-primary { background: var(--accent); color: #fff; border: none; padding: .4rem .9rem; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-    .canvas-container canvas { max-width: 100%; height: auto; background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); cursor: crosshair; display: block; }
-    .err-text { color: var(--danger); font-size: .82rem; }
-    .small { font-size: .8rem; }
-  `],
 })
 export class SetupZonesStepComponent implements AfterViewInit {
   readonly ctx = inject(SetupContextService);

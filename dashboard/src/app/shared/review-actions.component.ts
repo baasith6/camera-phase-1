@@ -10,62 +10,76 @@ export type ReviewAction = 'Confirm' | 'Dismiss' | 'FalsePositive' | 'NeedsFollo
   standalone: true,
   imports: [FormsModule, ErrorBannerComponent],
   template: `
-    <div class="review-actions">
+    <div class="flex flex-col gap-2.5">
       @if (detectedPatterns.length) {
-        <div class="ai-detected">
-          <span class="ai-detected-label">AI detected</span>
-          <div class="ai-detected-chips">
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[0.72rem] font-semibold uppercase tracking-[0.05em] text-accent">AI detected</span>
+          <div class="flex flex-wrap gap-1.5">
             @for (p of detectedPatterns; track p) {
-              <span class="ai-chip" [title]="label(p)">{{ label(p) }}</span>
+              <span
+                class="inline-flex max-w-full items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-accent px-2.5 py-[3px] text-[0.78rem] text-accent"
+                [title]="label(p)">{{ label(p) }}</span>
             }
           </div>
         </div>
       }
 
       @if (patterns.length) {
-        <fieldset class="patterns">
-          <legend title="AI-detected ones are pre-selected — untick anything wrong, tick anything missed.">
+        <!-- .patterns/.chip-grid are marker classes only (e2e queries them). -->
+        <fieldset class="patterns m-0 rounded-ctl border border-border px-3 pb-3 pt-2.5">
+          <legend class="px-1 text-[0.85rem] font-semibold" title="AI-detected ones are pre-selected — untick anything wrong, tick anything missed.">
             Patterns you can see in this clip
           </legend>
-          <div class="chip-grid">
+          <div class="chip-grid flex flex-wrap gap-2">
             @for (p of patterns; track p) {
-              <label class="chip" [class.on]="selected.has(p)" [title]="label(p)">
+              <!-- .chip/.on are marker classes only (e2e verify-training.spec.ts queries them). -->
+              <label
+                class="chip inline-flex min-w-0 max-w-full cursor-pointer select-none items-center gap-1.5 rounded-full border px-3 py-1.5 text-[0.85rem] transition-colors"
+                [class.on]="selected.has(p)"
+                [class]="selected.has(p)
+                  ? 'border-accent bg-accent text-white'
+                  : 'border-border-strong hover:border-accent'"
+                [title]="label(p)">
                 <input
+                  class="sr-only"
                   type="checkbox"
                   [checked]="selected.has(p)"
                   (change)="toggle(p)" />
-                <span>{{ label(p) }}</span>
+                <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{{ label(p) }}</span>
               </label>
             }
           </div>
         </fieldset>
       }
 
-      <div class="action-row">
-        <button type="button" class="primary" (click)="submit('Confirm')" [disabled]="saving">
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="min-h-11 px-4 font-semibold" (click)="submit('Confirm')" [disabled]="saving">
           Confirm incident
         </button>
-        <button type="button" class="ghost" (click)="submit('Dismiss')" [disabled]="saving">
+        <button type="button" class="ghost min-h-11" (click)="submit('Dismiss')" [disabled]="saving">
           Not suspicious
         </button>
-        <button type="button" class="ghost" (click)="submit('FalsePositive')" [disabled]="saving">
+        <button type="button" class="ghost min-h-11" (click)="submit('FalsePositive')" [disabled]="saving">
           False alarm
         </button>
-        <button type="button" class="ghost subtle" (click)="submit('NeedsFollowUp')" [disabled]="saving">
+        <button type="button" class="ghost min-h-11 !text-ink-muted" (click)="submit('NeedsFollowUp')" [disabled]="saving">
           Needs follow-up
         </button>
       </div>
 
-      <button type="button" class="link-toggle" (click)="showDetails = !showDetails">
+      <button
+        type="button"
+        class="w-fit border-none !bg-transparent !p-0 text-left text-[0.85rem] !text-accent"
+        (click)="showDetails = !showDetails">
         {{ showDetails ? 'Hide details' : 'Add details (optional)' }}
       </button>
 
       @if (showDetails) {
-        <div class="details">
+        <div class="flex flex-col gap-2">
           <label for="reason">Reason <span class="muted small">(for not suspicious / false alarm)</span></label>
           <input id="reason" placeholder="e.g. staff restocking shelves" [(ngModel)]="reasonCode" />
           <label for="notes">Notes</label>
-          <textarea id="notes" placeholder="Anything else for the record…" [(ngModel)]="notes" rows="2"></textarea>
+          <textarea id="notes" class="w-full" placeholder="Anything else for the record…" [(ngModel)]="notes" rows="2"></textarea>
         </div>
       }
 
@@ -73,58 +87,10 @@ export type ReviewAction = 'Confirm' | 'Dismiss' | 'FalsePositive' | 'NeedsFollo
         <app-error-banner [message]="validationError || error" />
       }
       @if (saved) {
-        <p class="ok" role="status">Review saved.</p>
+        <p class="m-0 text-[0.9rem] text-success" role="status">Review saved.</p>
       }
     </div>
   `,
-  styles: [`
-    .review-actions { display: flex; flex-direction: column; gap: 10px; }
-    .ai-detected { display: flex; flex-direction: column; gap: 6px; }
-    .ai-detected-label {
-      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
-      color: var(--accent);
-    }
-    .ai-detected-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .ai-chip {
-      display: inline-flex; align-items: center; max-width: 100%;
-      padding: 3px 10px; border-radius: 999px; font-size: 0.78rem;
-      border: 1px solid var(--accent); color: var(--accent);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .patterns {
-      border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
-      border-radius: var(--radius-sm);
-      padding: 10px 12px 12px;
-      margin: 0;
-    }
-    .patterns legend { font-size: 0.85rem; font-weight: 600; padding: 0 4px; }
-    .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-    .chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 12px; border-radius: 999px; cursor: pointer;
-      border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
-      font-size: 0.85rem; user-select: none;
-      max-width: 100%; min-width: 0;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .chip input { position: absolute; opacity: 0; pointer-events: none; }
-    .chip.on { background: var(--accent); border-color: var(--accent); color: white; }
-    .chip:not(.on):hover { border-color: var(--accent); }
-    .action-row { display: flex; flex-wrap: wrap; gap: 8px; }
-    .action-row button { min-height: 44px; }
-    button.primary { background: var(--accent); color: white; border: none; border-radius: var(--radius-sm); padding: 0.5rem 1rem; font-weight: 600; cursor: pointer; }
-    button.primary:hover { background: var(--accent-2); }
-    button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
-    button.subtle { color: var(--text-muted); }
-    .link-toggle {
-      background: none; border: none; color: var(--accent); padding: 0; font-size: 0.85rem; cursor: pointer; text-align: left; width: fit-content;
-    }
-    .details { display: flex; flex-direction: column; gap: 8px; }
-    .details label { font-size: 0.85rem; color: var(--text-muted); }
-    textarea { width: 100%; }
-    .ok { color: var(--success); margin: 0; font-size: 0.9rem; }
-  `],
 })
 export class ReviewActionsComponent implements OnChanges {
   @Input() saving = false;

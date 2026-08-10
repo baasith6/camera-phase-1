@@ -1,6 +1,18 @@
 :root {
   color-scheme: light;
 
+  /* Single UI face — hierarchy via size/weight only */
+  --font-ui: 'IBM Plex Sans', sans-serif;
+  --font-code: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --fs-xs: 0.75rem;     /* 12 — badges, meta */
+  --fs-sm: 0.8125rem;   /* 13 — secondary */
+  --fs-base: 0.875rem;  /* 14 — body / tables */
+  --fs-md: 0.9375rem;   /* 15 — nav, controls */
+  --fs-lg: 1.125rem;    /* 18 — page titles */
+  --fs-xl: 1.25rem;     /* 20 — brand mark */
+  --fs-2xl: 1.5rem;     /* 24 — login title */
+
   /* Warm stone — calm, friendly, not harsh white */
   --bg: #f5f4f1;
   --surface: #fafaf9;

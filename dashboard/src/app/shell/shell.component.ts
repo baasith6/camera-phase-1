@@ -16,20 +16,22 @@ import { AppTopBarComponent } from './app-top-bar.component';
   imports: [RouterOutlet, AppTopBarComponent, AppSidebarComponent, ToastComponent, ConfirmDialogComponent],
   template: `
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <div class="layout">
+    <div class="flex flex-col h-dvh overflow-hidden">
       <app-top-bar
         #topBar
         [sidebarOpen]="sidebarOpen"
         (menuToggle)="toggleSidebar()"
         (storeChange)="onGlobalStoreChange($event)" />
-      <div class="body-row">
-        <div
-          class="sidebar-backdrop"
-          [class.open]="sidebarOpen"
-          (click)="closeSidebar()"
-          aria-hidden="true"></div>
-        <app-sidebar [open]="sidebarOpen" (navigate)="closeSidebar()" />
-        <main id="main-content" class="content" tabindex="-1">
+      <div class="flex flex-1 min-h-0 relative items-stretch">
+        @if (sidebarOpen) {
+          <!-- .sidebar-backdrop/.open are marker classes only (e2e smoke.spec.ts queries them). -->
+          <div
+            class="sidebar-backdrop open fixed inset-0 bg-black/55 z-40 lg:hidden"
+            (click)="closeSidebar()"
+            aria-hidden="true"></div>
+        }
+        <app-sidebar class="self-stretch" [open]="sidebarOpen" (navigate)="closeSidebar()" />
+        <main id="main-content" class="flex-1 min-h-0 overflow-auto bg-bg p-4 md:px-6 md:py-5" tabindex="-1">
           <router-outlet />
         </main>
       </div>
@@ -37,12 +39,6 @@ import { AppTopBarComponent } from './app-top-bar.component';
     <app-toast [message]="live.toastMessage()" (dismiss)="live.clearToast()" />
     <app-confirm-dialog />
   `,
-  styles: [`
-    .layout { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-    .body-row { display: flex; flex: 1; min-height: 0; position: relative; }
-    .content { flex: 1; padding: 20px 24px; overflow: auto; min-height: 0; background: var(--bg); }
-    @media (max-width: 768px) { .content { padding: 16px; } }
-  `],
 })
 export class ShellComponent implements OnInit, OnDestroy {
   sidebarOpen = false;

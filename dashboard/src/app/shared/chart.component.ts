@@ -15,7 +15,7 @@ type ChartModule = typeof import('chart.js');
 @Component({
   selector: 'app-chart',
   standalone: true,
-  template: `<div class="chart-wrap"><canvas #canvas></canvas></div>`,
+  template: `<div class="relative h-[260px]"><canvas #canvas></canvas></div>`,
 })
 export class ChartComponent implements AfterViewInit, OnChanges, OnDestroy {
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;

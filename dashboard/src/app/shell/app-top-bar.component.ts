@@ -4,16 +4,17 @@ import { Router } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { LiveAlertsService } from '../core/live-alerts.service';
 import { StoreContextService } from '../core/store-context.service';
+import { BrandLogoComponent } from '../shared/brand-logo.component';
 
 @Component({
   selector: 'app-top-bar',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, BrandLogoComponent],
   template: `
-    <header class="topbar">
-      <div class="left">
+    <header class="h-14 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-border bg-surface">
+      <div class="flex items-center gap-3">
         <button
-          class="ghost menu-btn"
+          class="ghost hidden max-lg:inline-flex items-center justify-center !p-2 min-w-11 min-h-11"
           type="button"
           aria-label="Toggle menu"
           [attr.aria-expanded]="sidebarOpen"
@@ -22,12 +23,13 @@ import { StoreContextService } from '../core/store-context.service';
             <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
         </button>
-        <div class="brand">onetix</div>
+        <app-brand-logo size="sm" />
       </div>
-      <div class="center">
-        <label class="store-label muted small" for="store-select">Store:</label>
+      <div class="flex flex-1 items-center gap-3 max-lg:justify-start lg:justify-center">
+        <label class="muted small whitespace-nowrap" for="store-select">Store:</label>
         <select
           id="store-select"
+          class="min-w-[140px] max-w-[220px] max-sm:max-w-[120px]"
           [ngModel]="storeCtx.storeId()"
           (ngModelChange)="onStoreChange($event)"
           aria-label="Store filter">
@@ -36,68 +38,35 @@ import { StoreContextService } from '../core/store-context.service';
             <option [value]="s.id">{{ s.name }}</option>
           }
         </select>
-        <span class="live-badge" [class.connected]="live.connected()" aria-live="polite">
-          <span class="dot"></span>{{ live.connected() ? 'Live' : 'Offline' }}
+        <span
+          class="live-badge inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border"
+          [class.connected]="live.connected()"
+          [class]="live.connected()
+            ? 'bg-success-soft text-success border-success/30'
+            : 'bg-surface-2 text-ink-muted border-border-strong'"
+          aria-live="polite">
+          <span class="dot w-[7px] h-[7px] rounded-full bg-current"></span>{{ live.connected() ? 'Live' : 'Offline' }}
         </span>
       </div>
-      <div class="right">
-        <span class="role-mobile">{{ auth.role() }}</span>
-        <div class="user-block">
-          <span class="email muted">{{ auth.email() }}</span>
-          <span class="role">{{ auth.role() }}</span>
+      <div class="flex items-center gap-3">
+        <span class="lg:hidden text-ink-muted uppercase text-[0.65rem] tracking-[0.08em] font-semibold">{{ auth.role() }}</span>
+        <div class="max-lg:hidden flex flex-col items-end leading-tight">
+          <span class="muted text-[0.78rem] max-w-40 overflow-hidden text-ellipsis whitespace-nowrap">{{ auth.email() }}</span>
+          <span class="text-ink-muted uppercase text-[0.65rem] tracking-[0.08em] font-semibold">{{ auth.role() }}</span>
         </div>
         <button class="ghost" type="button" (click)="logout()">Sign out</button>
       </div>
     </header>
   `,
   styles: [`
-    .topbar {
-      height: 56px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 0 16px;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface);
-      flex-shrink: 0;
+    /* Pulse animation for the live dot — keyframes stay as component CSS. */
+    .live-badge.connected .dot {
+      animation: pulse 1.8s infinite;
+      box-shadow: 0 0 6px currentColor;
     }
-    .left, .center, .right { display: flex; align-items: center; gap: 12px; }
-    .center { flex: 1; justify-content: center; }
-    .menu-btn { display: none; padding: 8px; min-width: 44px; min-height: 44px; }
-    .brand {
-      font-weight: 700;
-      font-size: 1.15rem;
-      letter-spacing: -0.02em;
-      color: var(--text);
-    }
-    .store-label { white-space: nowrap; }
-    .user-block { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
-    .email { font-size: 0.78rem; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .role {
-      color: var(--text-muted);
-      text-transform: uppercase;
-      font-size: 0.65rem;
-      letter-spacing: 0.08em;
-      font-weight: 600;
-    }
-    select { min-width: 140px; max-width: 220px; }
-    .role-mobile {
-      display: none;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      font-size: 0.65rem;
-      letter-spacing: 0.08em;
-      font-weight: 600;
-    }
-    @media (max-width: 991px) {
-      .menu-btn { display: inline-flex; align-items: center; justify-content: center; }
-      .center { justify-content: flex-start; }
-      .user-block { display: none; }
-      .role-mobile { display: inline-block; }
-    }
-    @media (max-width: 600px) {
-      .center select { max-width: 120px; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
     }
   `],
 })
