@@ -16,11 +16,24 @@ class BackendClient:
         r.raise_for_status()
         return r.json()
 
-    def post_ai_events(self, clip_id: str, model_version: str, events: list[dict]) -> dict:
+    def post_ai_events(
+        self,
+        clip_id: str,
+        model_version: str,
+        events: list[dict],
+        track_overlay: dict | None = None,
+    ) -> dict:
+        payload: dict = {
+            "clipId": clip_id,
+            "modelVersion": model_version,
+            "events": events,
+        }
+        if track_overlay is not None:
+            payload["trackOverlay"] = track_overlay
         r = requests.post(
             f"{self.base}/api/ai-events",
             headers=self.headers,
-            json={"clipId": clip_id, "modelVersion": model_version, "events": events},
+            json=payload,
             timeout=30,
         )
         r.raise_for_status()

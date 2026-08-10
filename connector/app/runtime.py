@@ -42,7 +42,8 @@ class RuntimeState:
 
         # Last captured frame (JPEG bytes) per camera ID for the dashboard
         self.last_frames: dict[str, bytes] = {}
-        self.reference_frames: dict[str, bytes] = {}
+        # Latest live person tracks (normalized boxes + ByteTrack IDs) per camera
+        self.last_tracks: dict[str, dict[str, Any]] = {}
         self.camera_states: dict[str, dict[str, Any]] = {}
         self.zone_revisions: dict[str, int] = {}
 
@@ -105,11 +106,27 @@ class RuntimeState:
             if status == "Reconnecting":
                 current["reconnectCount"] = int(current.get("reconnectCount", 0)) + 1
 
-    def remove_camera(self, camera_id: str, *, preserve_frame: bool = False) -> None:
+    def publish_tracks(self, camera_id: str, tracks: list[dict[str, Any]]) -> None:
         with self._lock:
-            if not preserve_frame:
-                self.last_frames.pop(camera_id, None)
-                self.camera_states.pop(camera_id, None)
+            seq = int(self.camera_states.get(camera_id, {}).get("frameSequence", 0))
+            self.last_tracks[camera_id] = {
+                "cameraId": camera_id,
+                "frameSequence": seq,
+                "tracks": list(tracks),
+            }
+
+    def get_tracks(self, camera_id: str) -> dict[str, Any]:
+        with self._lock:
+            current = self.last_tracks.get(camera_id)
+            if current is None:
+                return {"cameraId": camera_id, "frameSequence": 0, "tracks": []}
+            return dict(current)
+
+    def remove_camera(self, camera_id: str) -> None:
+        with self._lock:
+            self.last_frames.pop(camera_id, None)
+            self.last_tracks.pop(camera_id, None)
+            self.camera_states.pop(camera_id, None)
             self.pipelines.pop(camera_id, None)
             self.zone_revisions.pop(camera_id, None)
 
@@ -241,10 +258,8 @@ class RuntimeState:
             else:
                 self._monitoring_active.set()
             if paused:
-                # Keep the last frame per camera so the zone editor remains
-                # usable while capture, motion detection, uploads, and
-                # heartbeat are stopped. A paused frame is intentionally
-                # immutable until an explicit Refresh Frame action.
+                self.last_frames.clear()
+                self.last_tracks.clear()
                 for current in self.camera_states.values():
                     current["status"] = "Paused"
                     current["lastError"] = None

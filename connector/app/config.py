@@ -30,6 +30,11 @@ class Config:
     motion_area_frac: float   # fraction of frame that must change to count as motion
     use_person_filter: bool
     processing_max_width: int
+    # Live person boxes + ByteTrack IDs on the local admin MJPEG preview.
+    live_track: bool
+    live_track_model: str
+    live_track_device: str
+    live_track_stride: int
 
     # Reliability
     disk_warn_pct: float
@@ -145,6 +150,10 @@ def load_config(argv: list[str] | None = None) -> Config:
         motion_area_frac=float(os.getenv("CONNECTOR_MOTION_AREA_FRAC", "0.02")),
         use_person_filter=os.getenv("CONNECTOR_PERSON_FILTER", "false").lower() == "true",
         processing_max_width=max(320, int(os.getenv("CONNECTOR_PROCESSING_MAX_WIDTH", "640"))),
+        live_track=os.getenv("CONNECTOR_LIVE_TRACK", "true").lower() == "true",
+        live_track_model=os.getenv("CONNECTOR_LIVE_TRACK_MODEL", "yolov8n.pt").strip() or "yolov8n.pt",
+        live_track_device=os.getenv("CONNECTOR_LIVE_TRACK_DEVICE", "cpu").strip() or "cpu",
+        live_track_stride=max(1, int(os.getenv("CONNECTOR_LIVE_TRACK_STRIDE", "2"))),
         disk_warn_pct=float(os.getenv("CONNECTOR_DISK_WARN_PCT", "20")),
         disk_critical_pct=float(os.getenv("CONNECTOR_DISK_CRITICAL_PCT", "10")),
         max_upload_retries=int(os.getenv("CONNECTOR_MAX_RETRIES", "5")),
