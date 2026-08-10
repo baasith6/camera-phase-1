@@ -24,11 +24,12 @@ ACCENT = "#3d9cf0"
 class TrayDashboard:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("ONEVO Local Connector")
+        self.root.title("ONETIX Local Connector")
         self.root.geometry("1120x720")
         self.root.minsize(900, 620)
         self.root.configure(bg=BACKGROUND)
         self._refresh_after: str | None = None
+        self.capture_paused = False
         self._build()
         self.refresh()
 
@@ -58,7 +59,7 @@ class TrayDashboard:
     def _build(self) -> None:
         header = tk.Frame(self.root, bg=PANEL_ALT, padx=22, pady=16)
         header.pack(fill="x")
-        self._label(header, "ONEVO", 18, True, ACCENT).pack(side="left")
+        self._label(header, "ONETIX", 18, True, ACCENT).pack(side="left")
         self._label(header, "Local Connector", 18, True).pack(side="left", padx=(8, 0))
         self.running = self._label(header, "● Checking…", 11, True, YELLOW)
         self.running.pack(side="right")
@@ -106,7 +107,10 @@ class TrayDashboard:
         actions_inner = tk.Frame(actions, bg=PANEL, padx=16, pady=13)
         actions_inner.pack(fill="x")
         self._label(actions_inner, "Quick Actions", 10, True, MUTED).pack(side="left", padx=(0, 12))
-        self._button(actions_inner, "Pause Monitoring", self.pause_monitoring).pack(side="left", padx=3)
+        self.monitor_button = self._button(
+            actions_inner, "Stop push", self.toggle_monitoring, primary=True
+        )
+        self.monitor_button.pack(side="left", padx=3)
         self._button(actions_inner, "Cut Clip Now", self.cut_clip).pack(side="left", padx=3)
         self._button(actions_inner, "Edit Zones", self.edit_zones, primary=True).pack(side="left", padx=3)
         self._button(actions_inner, "Refresh", self.refresh).pack(side="left", padx=3)
@@ -116,7 +120,7 @@ class TrayDashboard:
 
     def refresh(self) -> None:
         try:
-            status = _json("/setup/wizard/status")
+            status = _json("/status")
             source_data = _json("/sources")
             wizard = _json("/setup/wizard/status")
             cameras = wizard.get("cameras") or []
@@ -131,6 +135,14 @@ class TrayDashboard:
                 text="● Running" if status.get("capturing") else "● Connected",
                 fg="#4ade80",
             )
+            self.capture_paused = bool(status.get("capturePaused"))
+            self.monitor_button.configure(
+                text="Start push" if self.capture_paused else "Stop push"
+            )
+            if not status.get("backendAvailable", True):
+                self.running.configure(text="Backend unavailable", fg=RED)
+            elif self.capture_paused:
+                self.running.configure(text="Push stopped", fg=YELLOW)
             self.card_values["sources"].configure(text=str(len(sources)))
             self.card_values["zones"].configure(text=str(len(zone_rows)))
             self.card_values["clips"].configure(text=str(status.get("clipsCreated", 0)))
@@ -159,10 +171,13 @@ class TrayDashboard:
             self.storage.configure(text=success, fg=GREEN)
             self.refresh()
         except Exception as exc:
-            messagebox.showerror("ONEVO Connector", str(exc), parent=self.root)
+            messagebox.showerror("ONETIX Connector", str(exc), parent=self.root)
 
-    def pause_monitoring(self) -> None:
-        self._action("/capture/pause", "Monitoring paused")
+    def toggle_monitoring(self) -> None:
+        if self.capture_paused:
+            self._action("/capture/resume", "Push started")
+        else:
+            self._action("/capture/pause", "Push stopped")
 
     def cut_clip(self) -> None:
         self._action("/capture/trigger-now", "Capture requested")

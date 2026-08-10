@@ -182,7 +182,7 @@ class NativeProvisioningTests(unittest.TestCase):
         self.assertEqual(wizard.sources, [])
         self.assertEqual(stored["connector_id"], "connector-id")
 
-    def test_selected_mp4_waits_for_browser_zone_setup(self):
+    def test_selected_mp4_starts_when_optional_zones_are_skipped(self):
         with tempfile.TemporaryDirectory() as temp:
             video = Path(temp) / "selected.mp4"
             video.write_bytes(b"video")
@@ -215,7 +215,7 @@ class NativeProvisioningTests(unittest.TestCase):
                 ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
             self.assertTrue(ok)
-            self.assertFalse(wizard.setup_complete)
+            self.assertTrue(wizard.setup_complete)
             self.assertEqual(created[0]["rtspUrl"], f"file://{video}")
             self.assertEqual(finalized, [[wizard.sources[0].source_key]])
             self.assertEqual(stored["connector_id"], "connector-id")
@@ -322,7 +322,7 @@ class NativeProvisioningTests(unittest.TestCase):
             ok = _provision_native_installer(runtime_cfg, wizard, client, store, state)
 
         self.assertTrue(ok)
-        self.assertFalse(wizard.setup_complete)
+        self.assertTrue(wizard.setup_complete)
         self.assertEqual(credentials["used_connector_id"], "connector-id")
 
     def test_retry_reuses_backend_camera_after_partial_failure(self):

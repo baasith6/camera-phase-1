@@ -26,6 +26,12 @@ from .runtime import RuntimeState
 
 # OpenCV environment hints for lower-latency RTSP (set before any VideoCapture).
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+# Avoid nested oversubscription: connector-level analysis workers own CPU
+# parallelism, while each OpenCV operation stays single-threaded.
+try:
+    cv2.setNumThreads(max(1, int(os.getenv("CONNECTOR_OPENCV_THREADS", "1"))))
+except (TypeError, ValueError):
+    cv2.setNumThreads(1)
 
 # Initial RTSP connect: up to 10 attempts (~2 min total with default max backoff).
 RTSP_INITIAL_MAX_ATTEMPTS = 10
@@ -250,7 +256,7 @@ class CapturePipeline:
                     finally:
                         self._reference_frame_inflight = False
 
-                threading.Thread(target=publish, daemon=True).start()
+                self.state.submit_event(publish)
 
     def _processing_frame(self, frame):
         """Bound per-camera RAM while retaining enough detail for cloud analysis."""
@@ -362,6 +368,13 @@ class CapturePipeline:
         nonzero = int(np.count_nonzero(masked))
         frac = nonzero / float(zone_pixels)
         return frac >= self.cfg.motion_area_frac
+
+    def _analyze_candidate(self, background, frame) -> tuple[bool, bool]:
+        """CPU candidate analysis executed by RuntimeState's bounded pool."""
+        fgmask = background.apply(frame)
+        motion = self._has_motion(fgmask)
+        person = self._has_person(frame) if motion else False
+        return motion, person
 
     def _has_person(self, frame) -> bool:
         if self._person_hog is None:
@@ -507,7 +520,6 @@ class CapturePipeline:
             frame = self._processing_frame(frame)
             rolling.append(frame.copy())
             self._refresh_zones(frame.shape[:2])
-            fgmask = bg.apply(frame)
             now = time.time()
 
             # Live-apply pre/post window changes from admin settings.
@@ -521,12 +533,16 @@ class CapturePipeline:
             self._publish_preview(frame, now, self._source_fps)
 
             manual_trigger = self._consume_trigger()
-            motion = self._has_motion(fgmask)
+            analysis = self.state.run_analysis(self._analyze_candidate, bg, frame)
+            if analysis is None:
+                motion, person = False, False
+            else:
+                motion, person = analysis
             should_cut = manual_trigger or (
                 motion and (now - last_trigger) >= self.cfg.cooldown_seconds
             )
             if should_cut:
-                if not manual_trigger and not self._has_person(frame):
+                if not manual_trigger and not person:
                     continue
                 last_trigger = now
                 reason = "manual-trigger" if manual_trigger else "motion"
@@ -561,10 +577,24 @@ class CapturePipeline:
 
                 clip_frames = list(rolling) + post_frames
                 duration = len(clip_frames) / fps
-                path = self._write_clip(clip_frames, fps)
-                if path:
-                    self.state.clips_created += 1
-                    on_clip(path, duration, reason)
+                def clip_finished(future, _duration=duration, _reason=reason):
+                    try:
+                        path = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        self.state.log(f"ERROR: clip worker failed: {exc}")
+                        return
+                    if path:
+                        self.state.clips_created += 1
+                        on_clip(path, _duration, _reason)
+
+                queued = self.state.submit_clip_job(
+                    self._write_clip,
+                    clip_frames,
+                    fps,
+                    on_complete=clip_finished,
+                )
+                if not queued:
+                    self.state.log("WARNING: clip queue full; event dropped by backpressure")
                 rolling.clear()
 
         if cap is not None:

@@ -14,6 +14,7 @@ Installer modes:
   --service  Windows service: load ProgramData config and monitor continuously
 """
 import sys
+import atexit
 import threading
 import time
 import webbrowser
@@ -342,16 +343,11 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
                 save_wizard_config(wizard)
             client.finalize_setup([source.source_key for source in created])
             wizard.sources = created
-            if native_zones_configured:
-                # The installer page requires at least one zone per selected
-                # camera. Zones have now been persisted in the backend, so a
-                # browser wizard is not required to start monitoring.
-                complete_setup(wizard, created)
-            else:
-                # Browser/local source additions still use the dashboard zone
-                # page and must not start monitoring before it finishes.
-                wizard.setup_complete = False
-                save_wizard_config(wizard)
+            # Detection zones are optional. A source configured by the native
+            # installer must start monitoring whether the operator saved zones
+            # or explicitly skipped that page. Zones can be added later from
+            # the local dashboard without blocking the capture pipeline.
+            complete_setup(wizard, created)
         else:
             # Installer may skip camera setup; pair connector and add sources later.
             created = []
@@ -361,7 +357,7 @@ def _provision_native_installer(cfg, wizard, client: BackendClient, store: Local
         if created:
             state.log(
                 f"Native installer provisioned {len(created)} camera source(s); "
-                "waiting for zone setup"
+                f"zones={'configured' if native_zones_configured else 'skipped'}"
             )
         else:
             state.log("Native installer completed without camera sources")
@@ -400,6 +396,12 @@ def main() -> int:
     clip_tuning.apply_to_config(cfg)
 
     state = RuntimeState()
+    atexit.register(state.shutdown_workers)
+    state.log(
+        "Worker pools configured "
+        f"cpu={state.logical_cpus} analysis={state.analysis_workers} "
+        f"ffmpeg={state.ffmpeg_workers} event=2"
+    )
     state.source = cfg.source
     state.camera_id = cfg.camera_id
 

@@ -134,7 +134,7 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit $LASTEXITCODE)" }
 
 $verLine = Select-String -Path $IssFile -Pattern '#define AppVersion "([^"]+)"' | Select-Object -First 1
 $version = if ($verLine) { $verLine.Matches.Groups[1].Value } else { "1.0.0" }
-$setup = Join-Path $DistDir "ONEVO-Connector-Setup-$version.exe"
+$setup = Join-Path $DistDir "ONETIX-Connector-Setup-$version-rev18.exe"
 if (-not (Test-Path $setup)) { throw "Expected installer not found: $setup" }
 
 Write-Host ""

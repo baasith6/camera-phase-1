@@ -21,6 +21,10 @@ Place the two binaries here (not in git — must be added manually):
 ```
 connector/installer/tools/ffmpeg.exe
 connector/installer/tools/WinSW-x64.exe
+
+For local Docker development, do not populate these files manually. Run
+`dev-up.cmd`; it downloads/caches both tools, installs the pinned Python
+packages, rebuilds a missing or stale installer, and then starts Docker Compose.
 ```
 
 Missing either file = build fails immediately. See `tools/README.md`.

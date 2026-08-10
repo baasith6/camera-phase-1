@@ -3,11 +3,12 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { shareReplay } from 'rxjs/operators';
 import { API_BASE } from './api.config';
+import { AuthService } from './auth.service';
 import { Alert, Camera, ClipDetail, ClipListItem, Connector, InstallerInfo, PipelineHealth, RiskConfig, SetupCodeResponse, Store, StoreOverview, UserAccount, Zone, AnalyticsSummary, SystemLogs, TrainingSampleItem, TrainingSampleDetail, TrainingStats } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private auth: AuthService) {}
 
   private patterns$?: Observable<string[]>;
 
@@ -235,9 +236,23 @@ export class ApiService {
     return this.http.get<InstallerInfo>(`${API_BASE}/api/connectors/installer`);
   }
 
-  downloadInstaller(path: string): Observable<Blob> {
-    const url = path.startsWith('/') ? `${API_BASE}${path}` : path;
-    return this.http.get(url, { responseType: 'blob' });
+  /**
+   * Start installer download in the browser (not HttpClient blob).
+   * Buffering a ~130MB EXE through XHR/proxy often ends as net::ERR_FAILED.
+   * Remote HTTPS URLs open directly; API paths use ?access_token= (same as SSE).
+   */
+  startInstallerDownload(path: string): void {
+    if (/^https?:\/\//i.test(path)) {
+      window.location.assign(path);
+      return;
+    }
+    const token = this.auth.token;
+    if (!token) {
+      throw new Error('Not signed in');
+    }
+    const base = path.startsWith('/') ? `${API_BASE}${path}` : path;
+    const sep = base.includes('?') ? '&' : '?';
+    window.location.assign(`${base}${sep}access_token=${encodeURIComponent(token)}`);
   }
 
   createSetupCode(storeId: string): Observable<SetupCodeResponse> {

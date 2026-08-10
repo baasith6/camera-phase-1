@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 namespace Onevo.Api.Services;
 
 /// <summary>
-/// Serves the Windows connector installer from disk.
+/// Serves the Windows connector installer directly from connector/dist.
 /// Re-checks file metadata on each request (no restart needed after replacing the .exe).
 /// </summary>
 public class ConnectorInstallerService
@@ -23,10 +23,10 @@ public class ConnectorInstallerService
     }
 
     public string Version =>
-        _cfg["ConnectorInstaller:Version"] ?? "1.0.0";
+        _cfg["ConnectorInstaller:Version"] ?? "1.1.20";
 
     public string FileName =>
-        $"ONEVO-Connector-Setup-{Version}.exe";
+        $"ONETIX-Connector-Setup-{Version}-rev18.exe";
 
     public string? ResolvePath()
     {
@@ -77,11 +77,19 @@ public class ConnectorInstallerService
         }
     }
 
+    /// <summary>
+    /// Local EXE metadata. Remote installer redirects are intentionally unsupported.
+    /// </summary>
     public bool TryGetPublishedInfo(
+        out string version,
+        out string fileName,
         out long size,
         out string sha256,
         out string downloadUrl)
     {
+        version = Version;
+        fileName = FileName;
+
         if (TryGetInfo(out _, out size, out sha256))
         {
             downloadUrl = "/api/connectors/installer/download";

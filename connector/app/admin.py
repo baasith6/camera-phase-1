@@ -89,7 +89,7 @@ def build_app(
     enable_setup_wizard: bool = False,
     on_wizard_configured: Callable | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="ONEVO Connector Admin")
+    app = FastAPI(title="ONETIX Connector Admin")
 
     admin_token = (cfg.admin_token or "").strip()
 
@@ -120,11 +120,24 @@ def build_app(
 
     @app.get("/status")
     def status():
-        return state.snapshot()
+        payload = state.snapshot()
+        wizard = load_wizard_config() or WizardConfig()
+        cameras = state.camera_statuses()
+        payload["configuredCameraCount"] = len(
+            [source for source in wizard.sources if source.camera_id]
+        )
+        payload["runningCameraCount"] = len(
+            [camera for camera in cameras if camera.get("status") == "Live"]
+        )
+        return payload
 
     @app.get("/health")
     def health():
         return {"ok": True}
+
+    @app.delete("/logs")
+    def clear_logs():
+        return {"deleted": state.clear_logs(), "clearedAt": time.time()}
 
     @app.get("/sources")
     def sources():
@@ -630,9 +643,15 @@ def build_app(
 
     @app.get("/snapshot")
     @app.get("/setup/snapshot")
-    def snapshot(camera_id: str):
-        """Return a live snapshot from the CapturePipeline's recent frames."""
-        frame = state.last_frames.get(camera_id)
+    def snapshot(camera_id: str, refresh: bool = Query(default=False)):
+        """Return an immutable zone reference; replace it only on refresh."""
+        reference_path = media_dir() / f"zone-reference-{camera_id}.jpg"
+        frame = None if refresh else state.get_reference_frame(camera_id)
+        if not frame and not refresh and reference_path.exists():
+            frame = reference_path.read_bytes()
+            state.cache_reference_frame(camera_id, frame)
+        if not frame:
+            frame = state.get_frame(camera_id)
         if not frame and len(state.last_frames) == 1:
             # Keep the legacy single-camera compatibility fallback, but never
             # use one camera's preview as another camera's zone-edit frame.
@@ -687,6 +706,9 @@ def build_app(
                     state.log(f"Setup snapshot unavailable for {camera_id}: {exc}")
         if not frame:
             raise HTTPException(status_code=404, detail="No snapshot available yet")
+        state.cache_reference_frame(camera_id, frame)
+        reference_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_path.write_bytes(frame)
         return Response(content=frame, media_type="image/jpeg")
 
     @app.get("/live/cameras")
@@ -771,7 +793,7 @@ def build_app(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ONEVO Connector Admin</title>
+  <title>ONETIX Connector</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
@@ -826,6 +848,12 @@ def build_app(
     .local-nav a{{color:#aeb8c9;text-decoration:none;font-size:.8rem;padding:.6rem .7rem;border-radius:6px}}
     .local-nav a:hover,.local-nav a.active{{background:#35235e;color:#d5c4ff}}
     .view-hidden{{display:none!important}}
+    body[data-active-view]:not([data-active-view="dashboard"]) > [data-view="dashboard"],
+    body[data-active-view]:not([data-active-view="sources"]) > [data-view="sources"],
+    body[data-active-view]:not([data-active-view="live"]) > [data-view="live"],
+    body[data-active-view]:not([data-active-view="zones"]) > [data-view="zones"],
+    body[data-active-view]:not([data-active-view="logs"]) > [data-view="logs"],
+    body[data-active-view]:not([data-active-view="settings"]) > [data-view="settings"]{{display:none!important}}
     @media(max-width:720px){{body{{padding:5rem 1rem 1rem}}.local-nav{{width:100%;height:4rem;flex-direction:row;
       overflow:auto;align-items:center;padding:.5rem;white-space:nowrap}}.local-nav:before{{display:none}}}}
     .hidden{{display:none!important}}
@@ -839,8 +867,8 @@ def build_app(
       cursor:pointer;transition:border-color .15s,transform .15s}}
     .camera-tile:hover{{border-color:#8ab4f8;transform:translateY(-1px)}}
     .camera-visual{{position:relative;aspect-ratio:16/9;background:#090b0e}}
-    .camera-tile img{{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#090b0e}}
-    .zone-overlay,.track-overlay{{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}}
+    .camera-tile img{{display:block;width:100%;height:100%;aspect-ratio:16/9;object-fit:contain;background:#090b0e}}
+    .zone-overlay{{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none}}
     .camera-tile .meta{{display:flex;justify-content:space-between;gap:.5rem;padding:.55rem .65rem;
       font-size:.78rem}}
     .camera-focus{{position:fixed;inset:0;background:rgba(4,6,9,.96);z-index:50;padding:2rem;
@@ -860,48 +888,137 @@ def build_app(
     .zone-list{{display:flex;flex-direction:column;gap:.35rem;max-height:180px;overflow:auto;margin:.6rem 0}}
     .zone-list button{{text-align:left}}
     @media(max-width:820px){{.zone-workbench{{grid-template-columns:1fr}}}}
+    /* ONETIX local console — dark navy product shell. */
+    body{{background:radial-gradient(circle at 70% -20%,#142139 0,#09111f 42%,#07101c 100%);
+      color:#dce8fb;padding:1.5rem 1.75rem 1.5rem 13.5rem;max-width:none;min-height:100vh}}
+    h1{{font-size:1.05rem;color:#8dbdff;font-weight:700}}
+    h2{{color:#f4f7fc;text-transform:none;letter-spacing:0;font-size:1rem}}
+    .section{{background:linear-gradient(135deg,rgba(19,32,51,.96),rgba(12,23,39,.98));
+      border:1px solid #1d304a;border-radius:9px;box-shadow:0 12px 35px rgba(0,0,0,.16)}}
+    .local-nav{{width:11.75rem;background:linear-gradient(180deg,#0c1728,#091321);
+      border-right:1px solid #1b2d45;padding:1.2rem .9rem}}
+    .local-nav:before{{content:'◉  ONETIX\\A     CONNECTOR';color:#f2f6fc;font-size:.78rem;
+      letter-spacing:.05em;padding:.45rem .55rem 1.35rem}}
+    .local-nav a{{padding:.72rem .75rem;color:#b6c7dd;border:1px solid transparent}}
+    .local-nav a:hover,.local-nav a.active{{background:linear-gradient(90deg,#2457cf,#4432b8);
+      color:white;border-color:#405bd0}}
+    .dashboard-title{{font-size:1.25rem;margin-bottom:.15rem}}
+    .page-subtitle{{font-size:.78rem;color:#9eb0c7;margin-bottom:1.1rem}}
+    .metric-strip{{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));padding:0}}
+    .metric{{padding:1rem;border-right:1px solid #263850;display:grid;grid-template-columns:38px 1fr;
+      gap:.7rem;align-items:center}}
+    .metric:last-child{{border-right:0}}.metric-icon{{width:36px;height:36px;border-radius:50%;display:grid;
+      place-items:center;background:#263d78;color:#7db5ff}}.metric.good .metric-icon{{background:#164b3c;color:#39e38b}}
+    .metric.bad .metric-icon{{background:#582e38;color:#ff7c88}}.metric-label{{font-size:.64rem;color:#91a2b8;
+      text-transform:uppercase}}.metric-value{{font-size:1.2rem;font-weight:650;color:white}}
+    .runtime-grid{{grid-template-columns:repeat(4,minmax(150px,1fr));gap:.7rem 1.5rem}}
+    .log-toolbar{{display:flex;gap:.6rem;justify-content:space-between;margin:.7rem 0}}
+    .log-toolbar input,.log-toolbar select{{background:#0d1929;border:1px solid #29405d;color:#dbe8fa;
+      border-radius:7px;padding:.58rem .7rem;min-width:180px}}
+    .logs-console{{background:#0b1523;border:1px solid #20344f;border-radius:7px;max-height:520px;
+      min-height:310px;color:#bcd0e8;line-height:1.75;padding:1rem}}
+    .log-table{{width:100%;border-collapse:collapse;font-size:.78rem;text-align:left}}
+    .log-table th{{color:#8fa8c7;text-transform:uppercase;font-size:.66rem;letter-spacing:.04em;
+      padding:.65rem;border-bottom:1px solid #253a55}}
+    .log-table td{{padding:.72rem .65rem;border-bottom:1px solid #182b43;color:#c7d7eb}}
+    .log-table th:first-child,.log-table td:first-child{{width:92px}}.log-table th:nth-child(2){{width:85px}}
+    .log-level{{display:inline-block;border-radius:999px;padding:.05rem .45rem;background:#123d72;color:#6db3ff;
+      font-size:.65rem;font-weight:700}}.log-level.error{{background:#56252e;color:#ff7c88}}
+    .log-level.warn{{background:#563d18;color:#ffc062}}.log-level.success{{background:#134b35;color:#48df91}}
+    .log-footer{{display:flex;justify-content:space-between;align-items:center;color:#91a5bf;
+      font-size:.72rem;padding:.8rem .25rem 0}}
+    @media(max-width:1050px){{.metric-strip{{grid-template-columns:repeat(2,1fr)}}.metric{{border-bottom:1px solid #263850}}
+      .runtime-grid{{grid-template-columns:repeat(2,1fr)}}}}
+    /* One navigation item = one viewport. The page itself never stacks or scrolls
+       through another view; only data-heavy tables/lists may scroll internally. */
+    html,body{{height:100%;overflow:hidden}}
+    body{{height:100vh;padding-top:1rem;padding-bottom:1rem}}
+    body > .hdr{{height:2.25rem;margin-bottom:.55rem}}
+    body > [data-view]{{max-width:100%;min-width:0}}
+    #logs{{height:calc(100vh - 3.8rem);display:flex;flex-direction:column;margin-bottom:0}}
+    #logs .logs-console{{flex:1;min-height:0;max-height:none;overflow:auto}}
+    #sources{{max-height:calc(100vh - 3.8rem);overflow:auto;margin-bottom:0}}
+    #live-cameras-section{{height:calc(100vh - 3.8rem);overflow:hidden;margin-bottom:0}}
+    #live-cameras-section .camera-grid{{height:calc(100% - 2.5rem);overflow:auto;align-content:start}}
+    #zone-editor-section{{height:calc(100vh - 3.8rem);overflow:hidden;margin-bottom:0}}
+    #zone-editor-section .zone-workbench{{height:calc(100% - 5.25rem)}}
+    #zone-editor-section .zone-canvas-wrap{{min-height:0;height:100%;display:grid;place-items:center}}
+    #zoneCanvas{{width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain}}
+    #settings{{margin-bottom:.65rem}}
+    .local-nav:before{{display:none!important;content:none!important}}
+    .brand{{display:flex;align-items:center;gap:.65rem;padding:.35rem .45rem 1.35rem}}
+    .brand-mark{{width:34px;height:34px;border:3px solid #79adff;border-radius:50%;position:relative}}
+    .brand-mark:after{{content:'';position:absolute;inset:7px;border:2px solid #9bc5ff;border-radius:50%}}
+    .brand-name{{font-size:.78rem;font-weight:800;letter-spacing:.04em;color:#f5f8ff;line-height:1.12}}
+    .brand-name small{{display:block;font-size:.55rem;color:#5799ff;margin-top:.2rem}}
+    .nav-icon{{width:18px;display:inline-block;color:#9ab2ce;font-size:.92rem;margin-right:.35rem}}
+    .service-card{{margin-top:auto;border:1px solid #1d304a;border-radius:8px;padding:.75rem;background:#0b1626;color:#b7c7dc;font-size:.7rem;line-height:1.65}}
+    .service-dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:#42dc75;margin-right:.4rem}}
+    .service-running{{display:block;color:#43dc78;font-size:.66rem;font-weight:700}}
+    .nav-footer{{border-top:1px solid #172a42;margin-top:.8rem;padding:.85rem .4rem 0;color:#8294ab;font-size:.62rem;line-height:1.7}}
+    .top-clock{{display:flex;align-items:center;gap:1rem;color:#91a4bc;font-size:.72rem}}
+    .section-title-row{{display:flex;align-items:center;gap:.55rem}}
+    .title-icon{{color:#58a0ff;font-size:1.15rem}}
+    .quick-actions{{display:flex;gap:.65rem;flex-wrap:wrap}}
+    .quick-actions .btn{{min-width:125px;background:#101e31}}
+    body[data-active-view="dashboard"] > .section{{padding:.8rem 1rem;margin-bottom:.65rem}}
+    body[data-active-view="dashboard"] .runtime-grid{{grid-template-columns:repeat(4,minmax(140px,1fr));gap:.55rem 1.25rem}}
   </style>
 </head>
 <body>
   <div class="hdr">
-    <h1>🎥 ONEVO Local Connector</h1>
-    <span id="tick">—</span>
+    <h1>ONETIX Local Connector</h1>
+    <div class="top-clock"><span id="top-time">--:--:--</span><span id="tick">Waiting for status</span></div>
   </div>
   <nav class="local-nav" aria-label="Connector navigation">
-    <a href="#dashboard" data-view="dashboard">Dashboard</a>
-    <a href="#sources" data-view="sources">Sources</a>
-    <a href="#live" data-view="live">Live view</a>
-    <a href="#zones" data-view="zones">Zones</a>
-    <a href="#logs" data-view="logs">Logs</a>
-    <a href="#settings" data-view="settings">Settings</a>
-    <a href="#about" data-view="about">About</a>
+    <div class="brand"><span class="brand-mark"></span><span class="brand-name">ONETIX<small>CONNECTOR</small></span></div>
+    <a href="#dashboard" data-view="dashboard"><span class="nav-icon">⌂</span>Dashboard</a>
+    <a href="#sources" data-view="sources"><span class="nav-icon">⌘</span>Sources</a>
+    <a href="#live" data-view="live"><span class="nav-icon">▣</span>Live View</a>
+    <a href="#zones" data-view="zones"><span class="nav-icon">⌗</span>Zones</a>
+    <a href="#logs" data-view="logs"><span class="nav-icon">▤</span>Logs</a>
+    <a href="#settings" data-view="settings"><span class="nav-icon">⚙</span>Settings</a>
+    <div class="service-card"><span class="service-dot"></span>Connector Service
+      <span class="service-running" id="service-running">RUNNING</span>
+      <span id="service-uptime">Uptime: —</span>
+    </div>
+    <div class="nav-footer">ONETIX Connector v1.1.20<br>© 2026 ONETIX</div>
   </nav>
 
-  <div class="section hidden" id="alert-banner">
+  <div class="section hidden" id="alert-banner" data-view="dashboard">
     <h2 id="alert-title" style="color:#f07070"></h2>
     <p id="alert-text" style="font-size:.85rem;line-height:1.45;margin-bottom:.75rem"></p>
   </div>
 
-  <div class="section" id="dashboard" data-view="dashboard">
-    <h2>Runtime</h2>
-    <div class="grid" id="runtime-grid"></div>
+  <div id="dashboard" data-view="dashboard">
+    <h2 class="dashboard-title">Dashboard</h2>
+    <p class="page-subtitle">Monitor and manage your ONETIX Local Connector</p>
+  </div>
+  <div class="section metric-strip" data-view="dashboard">
+    <div class="metric"><span class="metric-icon">▣</span><div><div class="metric-label">Configured cameras</div><div class="metric-value" id="metric-configured">0</div></div></div>
+    <div class="metric"><span class="metric-icon">▶</span><div><div class="metric-label">Running cameras</div><div class="metric-value" id="metric-running">0</div></div></div>
+    <div class="metric good"><span class="metric-icon">▰</span><div><div class="metric-label">Clips created</div><div class="metric-value" id="metric-clips">0</div></div></div>
+    <div class="metric good"><span class="metric-icon">↥</span><div><div class="metric-label">Uploads OK</div><div class="metric-value" id="metric-uploads-ok">0</div></div></div>
+    <div class="metric bad"><span class="metric-icon">×</span><div><div class="metric-label">Uploads failed</div><div class="metric-value" id="metric-uploads-failed">0</div></div></div>
+  </div>
+  <div class="section" data-view="dashboard">
+    <h2>Runtime overview</h2>
+    <div class="grid runtime-grid" id="runtime-grid"></div>
   </div>
 
   <div class="section" data-view="dashboard">
-    <h2>Actions</h2>
-    <p class="hint">Stop monitoring pauses camera processing but keeps this local page available. Start monitoring resumes the same configured cameras.</p>
-    <div class="row">
-      <button class="btn" id="btn-pause" onclick="pauseCapture()">Stop monitoring</button>
-      <button class="btn" id="btn-resume" onclick="resumeCapture()">Start monitoring</button>
+    <h2>Quick Actions</h2>
+    <div class="row quick-actions">
+      <button class="btn primary" id="btn-monitor" onclick="toggleCapture()">Stop push</button>
       <button class="btn" id="btn-trigger" onclick="triggerNow()">Cut clip now</button>
-      <button class="btn primary" id="btn-upload-source" onclick="uploadFullSource()">Upload full source file</button>
-      <button class="btn" type="button" onclick="openZoneEditor()">Edit camera zones</button>
+      <button class="btn" id="btn-upload-source" onclick="navigateToView('sources')">Upload / Edit Sources</button>
+      <button class="btn" id="btn-edit-zones" onclick="navigateToView('zones')">Edit Camera Zones</button>
     </div>
     <div id="action-msg"></div>
     <div id="action-err"></div>
   </div>
 
-  <div class="section hidden" id="zone-editor-section" data-view="zones">
+  <div class="section" id="zone-editor-section" data-view="zones">
     <div class="hdr">
       <div>
         <h2>Camera Zones</h2>
@@ -1004,22 +1121,22 @@ def build_app(
   </div>
 
   <div class="section" id="logs" data-view="logs">
-    <h2>Logs</h2>
-    <pre id="logs"></pre>
+    <div class="section-title-row"><span class="title-icon">&#128196;</span><div><h2 class="dashboard-title">Logs</h2>
+    <p class="page-subtitle">Real-time activity and system logs</p></div></div>
+    <div class="log-toolbar"><div><select aria-label="Log time range"><option>All Time</option></select>
+      <input id="log-search" type="search" placeholder="Search logs..." oninput="filterLogView()"></div>
+      <div><button class="btn" type="button" onclick="clearLogView()">Clear Logs</button>
+      <button class="btn primary" type="button" onclick="exportLogs()">Export Logs</button></div></div>
+    <div class="logs-console"><table class="log-table"><thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Message</th></tr></thead>
+      <tbody id="log-rows"></tbody></table></div>
+    <div class="log-footer"><span id="log-count">0 rows</span><span>Rows per page: <b>50</b>&nbsp;&nbsp; 1</span></div>
   </div>
-  <div class="section" id="about" data-view="about">
-    <h2>About ONEVO Connector</h2>
-    <div class="grid" id="about-grid"></div>
-  </div>
-
   <script>
     const RUNTIME_FIELDS = [
-      ['connectorId','Connector ID'],['cameraId','Camera ID'],['source','Source'],
-      ['capturing','Capturing'],['capturePaused','Paused'],['clipsCreated','Clips created'],
-      ['uploadsOk','Uploads OK'],['uploadsFailed','Uploads failed'],
-      ['queueDepth','Queue depth'],['diskFreePct','Disk free %'],
-      ['rtspReconnects','RTSP reconnects'],['degradedReason','Degraded'],
-      ['uptimeSec','Uptime (s)'],
+      ['monitoringState','Monitoring'],['diskFreePct','Disk free %'],
+      ['queueDepth','Queue depth'],['uptimeSec','Uptime (s)'],
+      ['rtspReconnects','RTSP reconnects'],['clipQueueDepth','Clips in queue'],
+      ['degradedReason','Degraded'],['lastClipAt','Last clip'],
     ];
     const ONVIF_FIELDS = [
       ['cameraManufacturer','Manufacturer'],['cameraModel','Model'],
@@ -1030,22 +1147,38 @@ def build_app(
       ? null : new BroadcastChannel('onevo-local-page');
     let ownsLivePreview = document.hasFocus();
     function showView(view) {{
-      const selected = view || 'dashboard';
-      document.querySelectorAll('.section[data-view]').forEach(section =>
-        section.classList.toggle('view-hidden', section.dataset.view !== selected)
-      );
+      const validViews = new Set(['dashboard', 'sources', 'live', 'zones', 'logs', 'settings']);
+      const selected = validViews.has(view) ? view : 'dashboard';
+      document.body.dataset.activeView = selected;
+      document.querySelectorAll('body > [data-view]').forEach(section => {{
+        const isSelected = section.dataset.view === selected;
+        section.classList.toggle('view-hidden', !isSelected);
+        section.hidden = !isSelected;
+        section.style.display = isSelected ? '' : 'none';
+      }});
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
       document.querySelectorAll('.local-nav a[data-view]').forEach(link =>
         link.classList.toggle('active', link.dataset.view === selected)
       );
-      if (selected === 'zones') openZoneEditor();
+      if (selected === 'zones') loadNativeZoneEditor();
       if (selected === 'live') loadSources();
-      if (selected === 'about') loadAbout();
+      else closeCameraFocus();
+    }}
+    function navigateToView(view) {{
+      window.location.hash = view;
+      showView(view);
     }}
     function loadAbout() {{
-      fetch('/setup/wizard/status').then(response => response.json()).then(data => {{
+      Promise.all([
+        fetch('/status').then(r => r.json()).catch(() => ({{}})),
+        fetch('/setup/wizard/status').then(r => r.json()).catch(() => ({{}})),
+      ]).then(([runtime, wizard]) => {{
         const entries = [
-          ['Version', data.version || '—'], ['Connector ID', data.connectorId || '—'],
-          ['Backend', data.backendUrl || '—'], ['Paired', data.claimed ? 'Yes' : 'No'],
+          ['Version', wizard.version || '—'],
+          ['Connector ID', runtime.connectorId || wizard.connectorId || '—'],
+          ['Backend', wizard.backendUrl || '—'],
+          ['Paired', (runtime.paired || wizard.claimed) ? 'Yes' : 'No'],
         ];
         document.getElementById('about-grid').innerHTML = entries.map(([key, value]) =>
           `<div class="k">${{key}}</div><div class="v">${{value}}</div>`
@@ -1155,14 +1288,19 @@ def build_app(
       const sourceTypes = document.getElementById('source-types');
       const notice = document.getElementById('source-setup-notice');
       try {{
-        const response = await fetch('/sources');
+        const [response, runtimeResponse] = await Promise.all([
+          fetch('/sources'), fetch('/live/cameras', {{cache:'no-store'}})
+        ]);
         const data = await response.json().catch(() => ({{}}));
+        const runtimeData = runtimeResponse.ok
+          ? await runtimeResponse.json().catch(() => ({{cameras:[]}}))
+          : {{cameras:[]}};
         if (!response.ok) throw new Error(data.detail || data.error || 'Could not load configured sources');
         sourceTypes.classList.toggle('hidden', !data.managementReady);
         notice.classList.toggle('hidden', data.managementReady);
         document.getElementById('source-form').classList.toggle(
           'hidden', !data.managementReady);
-        renderCameraGrid(data.sources);
+        renderCameraGrid(data.sources, runtimeData.cameras || []);
         if (!data.sources.length) {{
           toolbar.classList.add('hidden');
           el.innerHTML = data.managementReady
@@ -1226,7 +1364,7 @@ def build_app(
         loadSources();
       }} catch (error) {{ showActionMsg(error.message, true); }}
     }}
-    function renderCameraGrid(sources) {{
+    function renderCameraGrid(sources, runtimeCameras) {{
       const grid = document.getElementById('camera-grid');
       grid.innerHTML = '';
       if (!ownsLivePreview) {{
@@ -1237,11 +1375,21 @@ def build_app(
         grid.textContent = 'Single camera view is open.';
         return;
       }}
+      const runtimeByCamera = new Map(
+        runtimeCameras.map(camera => [camera.cameraId, camera])
+      );
       const seenCameraIds = new Set();
-      const active = sources.filter(source => source.cameraId && !seenCameraIds.has(source.cameraId) &&
-        (seenCameraIds.add(source.cameraId) || true));
+      const active = sources.filter(source => {{
+        if (!source.cameraId || seenCameraIds.has(source.cameraId)) return false;
+        const runtime = runtimeByCamera.get(source.cameraId);
+        if (!runtime || !['Live', 'Waiting for zones'].includes(runtime.status)) return false;
+        seenCameraIds.add(source.cameraId);
+        return true;
+      }});
       if (!active.length) {{
-        grid.textContent = 'No active camera feeds yet.';
+        grid.textContent = sources.some(source => source.cameraId)
+          ? 'Camera feeds are starting. If setup was just completed, wait a few seconds.'
+          : 'No active camera feeds yet.';
         return;
       }}
       active.forEach(source => {{
@@ -1306,18 +1454,53 @@ def build_app(
         ).filter(point => Number.isFinite(point[0]) && Number.isFinite(point[1]));
       }} catch (_) {{ return []; }}
     }}
-    function sizeOverlayCanvas(canvas) {{
-      const rect = canvas.getBoundingClientRect();
-      const width = Math.max(1, Math.round(rect.width));
-      const height = Math.max(1, Math.round(rect.height));
-      if (canvas.width !== width || canvas.height !== height) {{
-        canvas.width = width; canvas.height = height;
+    function overlayImageFor(canvas) {{
+      if (canvas.id === 'focus-zone-overlay') return document.getElementById('focus-stream');
+      const image = canvas.previousElementSibling;
+      return image && image.tagName === 'IMG' ? image : null;
+    }}
+    function fitOverlayToRenderedImage(canvas) {{
+      const image = overlayImageFor(canvas);
+      const parent = canvas.parentElement;
+      if (!image || !parent || !image.naturalWidth || !image.naturalHeight) return null;
+      const imageRect = image.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      if (!imageRect.width || !imageRect.height || !parentRect.width || !parentRect.height)
+        return null;
+      // The IMG element fills its visual container, but object-fit:contain can
+      // letterbox the actual video. Bind the canvas to that rendered video
+      // rectangle so normalized zone points survive grid, focus and resize.
+      const scale = Math.min(
+        imageRect.width / image.naturalWidth,
+        imageRect.height / image.naturalHeight
+      );
+      const width = Math.max(1, image.naturalWidth * scale);
+      const height = Math.max(1, image.naturalHeight * scale);
+      const left = imageRect.left - parentRect.left + (imageRect.width - width) / 2;
+      const top = imageRect.top - parentRect.top + (imageRect.height - height) / 2;
+      canvas.style.left = `${{left}}px`;
+      canvas.style.top = `${{top}}px`;
+      canvas.style.width = `${{width}}px`;
+      canvas.style.height = `${{height}}px`;
+      return {{width, height}};
+    }}
+    function drawZoneOverlay(canvas, zones) {{
+      const fitted = fitOverlayToRenderedImage(canvas);
+      if (!fitted) return;
+      const width = fitted.width;
+      const height = fitted.height;
+      const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
+      const backingWidth = Math.round(width * pixelRatio);
+      const backingHeight = Math.round(height * pixelRatio);
+      if (canvas.width !== backingWidth || canvas.height !== backingHeight) {{
+        canvas.width = backingWidth; canvas.height = backingHeight;
       }}
       return {{ width, height }};
     }}
     function drawZoneOverlay(canvas, zones) {{
       const {{ width, height }} = sizeOverlayCanvas(canvas);
       const ctx = canvas.getContext('2d');
+      ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       ctx.clearRect(0, 0, width, height);
       zones.forEach(zone => {{
         const points = zonePoints(zone);
@@ -1325,7 +1508,10 @@ def build_app(
         const [fill, stroke] = zoneColor(zone);
         ctx.beginPath();
         ctx.moveTo(points[0][0] * width, points[0][1] * height);
-        points.slice(1).forEach(point => ctx.lineTo(point[0] * width, point[1] * height));
+        points.slice(1).forEach(point => ctx.lineTo(
+          point[0] * width,
+          point[1] * height
+        ));
         ctx.closePath();
         ctx.fillStyle = fill; ctx.strokeStyle = stroke; ctx.lineWidth = 2;
         ctx.fill(); ctx.stroke();
@@ -1370,7 +1556,11 @@ def build_app(
         const response = await fetch(`/live/cameras/${{encodeURIComponent(cameraId)}}/zones`);
         if (!response.ok) return;
         const zones = await response.json();
-        zoneOverlayCache.set(cameraId, Array.isArray(zones) ? zones : []);
+        const cameraZones = Array.isArray(zones) ? zones.filter(zone => {{
+          const zoneCameraId = zone.cameraId || zone.CameraId;
+          return !zoneCameraId || zoneCameraId === cameraId;
+        }}) : [];
+        zoneOverlayCache.set(cameraId, cameraZones);
         redrawZoneOverlay(cameraId, canvas);
       }} catch (_) {{}}
     }}
@@ -1494,21 +1684,15 @@ def build_app(
       }}
     }};
     function openZoneEditor() {{
-      const section = document.getElementById('zone-editor-section');
-      section.classList.remove('hidden');
-      // Zone editing uses a single snapshot for the selected camera. Keep all
-      // normal live tiles running so operators can monitor other cameras.
-      loadNativeZoneEditor();
       if (window.location.hash !== '#zones') history.replaceState(null, '', '#zones');
-      section.scrollIntoView({{behavior:'smooth', block:'start'}});
+      showView('zones');
     }}
     function refreshZoneEditor() {{
-      loadNativeZoneFrame();
+      loadNativeZoneFrame(true);
     }}
     function closeZoneEditor() {{
-      const section = document.getElementById('zone-editor-section');
-      section.classList.add('hidden');
-      loadSources();
+      history.replaceState(null, '', '#dashboard');
+      showView('dashboard');
       document.getElementById('live-cameras-section').scrollIntoView({{behavior:'smooth', block:'start'}});
     }}
     let nativeZoneCameras=[], nativeZones=[], nativePoints=[], nativeSelected=null, nativeFrame=null;
@@ -1585,15 +1769,20 @@ def build_app(
     async function loadNativeZoneCamera() {{
       const id=document.getElementById('zoneCamera').value;if(!id)return;
       nativeResetZone();
-      try {{ nativeZones=await (await fetch(`/setup/wizard/cameras/${{encodeURIComponent(id)}}/zones`)).json();renderNativeZoneList();loadNativeZoneFrame(); }}
-      catch(error) {{ document.getElementById('zoneMsg').textContent=error.message; }}
+      try {{
+        const raw=await (await fetch(`/setup/wizard/cameras/${{encodeURIComponent(id)}}/zones`)).json();
+        nativeZones=Array.isArray(raw)?raw:(Array.isArray(raw&&raw.zones)?raw.zones:[]);
+        if(!Array.isArray(nativeZones))nativeZones=[];
+        renderNativeZoneList();loadNativeZoneFrame();
+      }}
+      catch(error) {{ nativeZones=[];document.getElementById('zoneMsg').textContent=error.message; }}
     }}
-    function loadNativeZoneFrame() {{
+    function loadNativeZoneFrame(refresh=false) {{
       const id=document.getElementById('zoneCamera').value;if(!id)return;
       const image=new Image();
       image.onload=()=>{{nativeFrame=image;drawNativeZones();document.getElementById('zoneMsg').textContent='Frame ready. Drag on the frame to draw; drag a point to refine.';}};
       image.onerror=()=>document.getElementById('zoneMsg').textContent='Could not load a camera frame.';
-      image.src=`/setup/snapshot?camera_id=${{encodeURIComponent(id)}}&t=${{Date.now()}}`;
+      image.src=`/setup/snapshot?camera_id=${{encodeURIComponent(id)}}${{refresh ? `&refresh=true&v=${{Date.now()}}` : ''}}`;
     }}
     async function loadNativeZoneEditor() {{
       const sourceData=await (await fetch('/sources')).json();
@@ -1676,6 +1865,11 @@ def build_app(
         }};
       }}
       if (reason) {{
+        if (/HTTPConnectionPool|NewConnectionError|WinError 10061|connection refused/i.test(reason)) {{
+          return {{ title: 'Backend unavailable',
+            text: 'The connector cannot reach the local backend. Start the backend service and retry setup.',
+            setup: false, style: 'border-color:#5a4030;background:#2a2218' }};
+        }}
         return {{ title: 'Connector degraded', text: reason, setup: false,
           style: 'border-color:#5a4030;background:#2a2218' }};
       }}
@@ -1694,10 +1888,15 @@ def build_app(
       return data;
     }}
 
+    let capturePaused = false;
+    async function toggleCapture() {{
+      if (capturePaused) await resumeCapture();
+      else await pauseCapture();
+    }}
     async function pauseCapture() {{
       try {{
         const result = await postJson('/capture/pause');
-        showActionMsg(result.message || 'Monitoring stopped');
+        showActionMsg(result.message || 'Push stopped');
         setCaptureButtons(true);
       }}
       catch(e) {{ showActionMsg(e.message, true); }}
@@ -1705,17 +1904,23 @@ def build_app(
     async function resumeCapture() {{
       try {{
         await postJson('/capture/resume');
-        showActionMsg('Monitoring started');
+        showActionMsg('Push started');
         setCaptureButtons(false);
         tick();
       }}
       catch(e) {{ showActionMsg(e.message, true); }}
     }}
     function setCaptureButtons(paused) {{
-      document.getElementById('btn-pause').disabled = paused;
-      document.getElementById('btn-resume').disabled = !paused;
-      document.getElementById('btn-trigger').disabled = paused;
-      document.getElementById('btn-upload-source').disabled = paused;
+      capturePaused = paused;
+      const monitor = document.getElementById('btn-monitor');
+      if (monitor) {{
+        monitor.textContent = paused ? 'Start push' : 'Stop push';
+        monitor.setAttribute('aria-pressed', paused ? 'true' : 'false');
+      }}
+      const trigger = document.getElementById('btn-trigger');
+      const upload = document.getElementById('btn-upload-source');
+      if (trigger) trigger.disabled = paused;
+      if (upload) upload.disabled = paused;
     }}
     async function triggerNow() {{
       try {{ await postJson('/capture/trigger-now'); showActionMsg('Manual clip trigger sent'); }}
@@ -1774,20 +1979,86 @@ def build_app(
       }} catch(e) {{}}
     }}
 
+    let latestLogLines = [];
+    async function clearLogView() {{
+      const response = await fetch('/logs', {{method:'DELETE'}});
+      if (!response.ok) throw new Error('Could not clear logs');
+      latestLogLines = [];
+      filterLogView();
+    }}
+    function exportLogs() {{
+      const sanitized = latestLogLines.map(line => line
+        .replace(/(rtsp:\\/\\/[^:]+:)[^@]+@/ig, '$1***@')
+        .replace(/(setup[_ -]?code[=: ]+)[^\\s,;]+/ig, '$1***')
+        .replace(/([?&](?:token|signature|x-amz-signature)=)[^&\\s]+/ig, '$1***'));
+      const text = ['Time,Level,Source,Message'].concat(sanitized.map(line => `"${{line.replaceAll('"','""')}}"`)).join('\\n');
+      const url = URL.createObjectURL(new Blob([text], {{type:'text/csv;charset=utf-8'}}));
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/T/,'-').slice(0,15);
+      link.href = url; link.download = `onetix-connector-logs-${{stamp}}.csv`;
+      link.click(); URL.revokeObjectURL(url);
+    }}
+    function inferLogSource(message) {{
+      if (/upload|clip uploaded/i.test(message)) return 'Uploader';
+      if (/zone|reference frame/i.test(message)) return 'Zone Manager';
+      if (/orchestrator|pipeline|capture/i.test(message)) return 'Orchestrator';
+      if (/setup|provision|credential/i.test(message)) return 'Setup';
+      if (/admin ui|installer/i.test(message)) return 'Installer';
+      return 'Connector';
+    }}
+    function inferLogLevel(explicitLevel, message) {{
+      if (explicitLevel) return explicitLevel.toUpperCase().replace('WARNING','WARN');
+      if (/\\berror\\b|failed|failure/i.test(message)) return 'ERROR';
+      if (/\\bwarn(?:ing)?\\b|degraded|low disk/i.test(message)) return 'WARN';
+      if (/completed|successful|uploaded/i.test(message)) return 'SUCCESS';
+      return 'INFO';
+    }}
+    function filterLogView() {{
+      const input = document.getElementById('log-search');
+      const query = (input ? input.value : '').trim().toLowerCase();
+      const logs = document.getElementById('log-rows');
+      if (!logs) return;
+      const hiddenTransportError = /HTTPConnectionPool|NewConnectionError|WinError 10061|Max retries exceeded/i;
+      const visible = latestLogLines.filter(line => !hiddenTransportError.test(line))
+        .filter(line => !query || line.toLowerCase().includes(query));
+      logs.innerHTML = visible.map(line => {{
+        const match = line.match(/^(\\d{{2}}:\\d{{2}}:\\d{{2}})\\s+(?:(INFO|WARN|WARNING|ERROR|SUCCESS)[: ]+)?(?:\\[([^\\]]+)\\]\\s*)?(.*)$/i);
+        const time = match ? match[1] : '--';
+        const message = match ? match[4] : line;
+        const level = inferLogLevel(match && match[2], message);
+        const source = match && match[3] ? match[3] : inferLogSource(message);
+        return `<tr><td>${{time}}</td><td><span class="log-level ${{level.toLowerCase()}}">${{level}}</span></td><td>${{source}}</td><td>${{message}}<span style="float:right;color:#70849f">&#8964;</span></td></tr>`;
+      }}).join('');
+      const count = document.getElementById('log-count');
+      if (count) count.textContent = `${{visible.length}} row${{visible.length === 1 ? '' : 's'}}`;
+    }}
+
     async function tick() {{
       try {{
-        const s = await (await fetch('/setup/wizard/status')).json();
+        const s = await (await fetch('/status')).json();
         setCaptureButtons(Boolean(s.capturePaused));
         const rg = document.getElementById('runtime-grid');
         if (rg) rg.innerHTML = RUNTIME_FIELDS.map(([k,l]) =>
           `<div class="k">${{l}}</div><div class="v">${{badge(s[k])}}</div>`).join('');
+        const metrics = {{
+          'metric-configured': s.configuredCameraCount,
+          'metric-running': s.runningCameraCount,
+          'metric-clips': s.clipsCreated,
+          'metric-uploads-ok': s.uploadsOk,
+          'metric-uploads-failed': s.uploadsFailed,
+        }};
+        Object.entries(metrics).forEach(([id, value]) => {{
+          const element = document.getElementById(id);
+          if (element) element.textContent = value ?? 0;
+        }});
 
         const og = document.getElementById('onvif-grid');
         if (og) og.innerHTML = ONVIF_FIELDS.map(([k,l]) =>
           `<div class="k">${{l}}</div><div class="v">${{badge(s[k])}}</div>`).join('');
 
-        const logs = document.getElementById('logs');
-        if (logs) {{ logs.textContent = (s.logs||[]).join('\\n'); logs.scrollTop = logs.scrollHeight; }}
+        const logs = document.getElementById('log-rows');
+        latestLogLines = s.logs || [];
+        if (logs) {{ filterLogView(); logs.scrollTop = logs.scrollHeight; }}
         const banner = document.getElementById('alert-banner');
         const alertTitle = document.getElementById('alert-title');
         const alertText = document.getElementById('alert-text');
@@ -1802,18 +2073,29 @@ def build_app(
             banner.classList.add('hidden');
           }}
         }}
-        if (
-          /^Camera setup is ready\\./.test(s.degradedReason || '') &&
-          window.location.hash !== '#zones' &&
-          !window.onevoAutoOpenedZones
-        ) {{
-          window.onevoAutoOpenedZones = true;
-          history.replaceState(null, '', '#zones');
-          showView('zones');
+        const nowText = new Date().toLocaleTimeString();
+        document.getElementById('top-time').textContent = nowText;
+        document.getElementById('tick').textContent = 'Last updated: ' + nowText;
+        const uptime = document.getElementById('service-uptime');
+        if (uptime) uptime.textContent = `Uptime: ${{Math.max(0, Number(s.uptimeSec || 0)).toFixed(0)}}s`;
+        const running = document.getElementById('service-running');
+        if (running) {{
+          running.textContent = s.capturePaused ? 'PAUSED' : 'RUNNING';
+          running.style.color = s.capturePaused ? '#f3b64c' : '#43dc78';
         }}
-        document.getElementById('tick').textContent = 'updated ' + new Date().toLocaleTimeString();
         refreshLocalClips();
-      }} catch(e) {{ document.getElementById('tick').textContent = 'fetch error'; }}
+      }} catch(e) {{
+        console.error('Connector status refresh failed', e);
+        document.getElementById('tick').textContent = 'Connector unavailable';
+      }}
+    }}
+    async function refreshLogRows() {{
+      if (document.body.dataset.activeView !== 'logs') return;
+      try {{
+        const status = await (await fetch('/status', {{cache:'no-store'}})).json();
+        latestLogLines = status.logs || [];
+        filterLogView();
+      }} catch (error) {{ console.error('Log refresh failed', error); }}
     }}
     loadClipSettings();
     window.addEventListener('resize', () => {{
@@ -1825,7 +2107,11 @@ def build_app(
       }});
     }});
     setInterval(tick, 1500);
-    setInterval(loadSources, 5000);
+    setInterval(refreshLogRows, 1500);
+    setInterval(() => {{
+      const active = document.body.dataset.activeView;
+      if (active === 'sources' || active === 'live') loadSources();
+    }}, 5000);
     setInterval(() => {{
       document.querySelectorAll('.zone-overlay[data-camera-id]').forEach(overlay =>
         loadZoneOverlay(overlay.dataset.cameraId, overlay)

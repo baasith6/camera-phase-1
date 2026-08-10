@@ -54,7 +54,7 @@ def _json(path: str, method: str = "GET", body: dict | None = None):
 class ZoneEditor:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("ONEVO Local Connector — Edit Zones")
+        self.root.title("ONETIX Local Connector — Edit Zones")
         self.root.geometry("1120x760")
         self.root.minsize(980, 680)
         self.cameras: list[dict] = []
@@ -139,7 +139,7 @@ class ZoneEditor:
                 self.root.after(
                     0,
                     lambda message=message: messagebox.showerror(
-                        "ONEVO", message, parent=self.root
+                        "ONETIX", message, parent=self.root
                     ),
                 )
             finally:
@@ -167,7 +167,7 @@ class ZoneEditor:
             else:
                 self.status.configure(text="No configured cameras")
                 messagebox.showinfo(
-                    "ONEVO", "No configured cameras. Add a source from the local dashboard first.",
+                    "ONETIX", "No configured cameras. Add a source from the local dashboard first.",
                     parent=self.root,
                 )
 
@@ -286,7 +286,7 @@ class ZoneEditor:
         name = self.name.get().strip()
         if not name or len(self.points) < 3:
             messagebox.showerror(
-                "ONEVO", "Enter a zone name and draw at least 3 points", parent=self.root
+                "ONETIX", "Enter a zone name and draw at least 3 points", parent=self.root
             )
             return
         camera_id = self._current_camera_id()
@@ -307,10 +307,10 @@ class ZoneEditor:
 
     def _delete_zone_async(self) -> None:
         if not self.selected_zone:
-            messagebox.showerror("ONEVO", "Select a zone to delete", parent=self.root)
+            messagebox.showerror("ONETIX", "Select a zone to delete", parent=self.root)
             return
         zone_id = self.selected_zone.get("id") or self.selected_zone.get("Id")
-        if not messagebox.askyesno("ONEVO", "Delete the selected zone?", parent=self.root):
+        if not messagebox.askyesno("ONETIX", "Delete the selected zone?", parent=self.root):
             return
         camera_id = self._current_camera_id()
         self._async(lambda: self._delete_zone(camera_id, zone_id))
