@@ -13,8 +13,8 @@ import { SetupContextService } from './setup-context.service';
     <div class="card connector-card">
       <div class="conn-header">
         <div>
-          <h3>Connect your shop PC</h3>
-          <p class="muted small">Download the installer, run it on the shop computer, and enter the setup code when prompted.</p>
+          <h3>Local connector</h3>
+          <p class="muted small">Install the connector on the camera network, then manage motion uploads from the tray.</p>
         </div>
         <div class="conn-status" [class.on]="ctx.storeConnectorOnline" [class.off]="!ctx.storeConnectorOnline">
           <span class="dot"></span>
@@ -31,7 +31,6 @@ import { SetupContextService } from './setup-context.service';
             {{ ctx.generatingCode ? 'Generating…' : 'Get setup code' }}
           </button>
         } @else {
-          <button disabled>Connected</button>
           @if (ctx.connectorUpdateAvailable) {
             <span class="update-note">Update v{{ ctx.installerInfo?.version }} available in the shop PC tray</span>
           } @else {

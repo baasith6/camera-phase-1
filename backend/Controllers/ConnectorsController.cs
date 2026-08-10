@@ -529,30 +529,35 @@ public class ConnectorsController : ControllerBase
         return PhysicalFile(path, "application/octet-stream", _installer.FileName);
     }
 
-    /// <summary>Installer metadata (version / size / sha256). File must exist on disk.</summary>
+    /// <summary>Installer metadata (version / size / sha256) from connector/dist.</summary>
     [Authorize(Roles = "Admin,Manager,Installer")]
     [HttpGet("installer")]
     public ActionResult<InstallerInfoResponse> InstallerInfo()
     {
-        if (!_installer.TryGetPublishedInfo(out var size, out var sha, out var downloadUrl))
-            return NotFound(new { error = "Installer is not published." });
+        if (!_installer.TryGetPublishedInfo(out var version, out var fileName, out var size, out var sha, out var downloadUrl))
+            return NotFound(new {
+                error = "installer_not_built",
+                message = "Run .\\scripts\\dev-up.ps1 to build the Windows installer before starting the stack."
+            });
 
         return new InstallerInfoResponse(
-            _installer.Version,
-            _installer.FileName,
+            version,
+            fileName,
             size,
             sha,
             downloadUrl);
     }
 
-    /// <summary>Download the Windows setup EXE.</summary>
+    /// <summary>Download the locally built Windows setup EXE.</summary>
     [Authorize(Roles = "Admin,Manager,Installer")]
     [HttpGet("installer/download")]
     public IActionResult DownloadInstaller()
     {
         if (!_installer.TryGetInfo(out var path, out _, out _))
-            return NotFound(new { error = "Installer not found" });
-
+            return NotFound(new {
+                error = "installer_not_built",
+                message = "Run .\\scripts\\dev-up.ps1 to build the Windows installer."
+            });
         return PhysicalFile(path, "application/octet-stream", _installer.FileName);
     }
 }

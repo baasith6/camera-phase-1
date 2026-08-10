@@ -22,6 +22,7 @@ class StoreOrchestrator:
         self.threads: Dict[str, threading.Thread] = {}
         self.source_fingerprints: Dict[str, tuple] = {}
         self.stop_event = threading.Event()
+        self.backend_failures = 0
 
     def run(self):
         self.state.log("Orchestrator starting. Polling for cameras...")
@@ -35,8 +36,15 @@ class StoreOrchestrator:
                 cams = self.client.get_cameras()
             except Exception as e:
                 self.state.log(f"Error fetching cameras: {e}")
+                self.backend_failures += 1
+                if self.backend_failures >= 3:
+                    self.state.set_backend_available(False)
+                    self._stop_for_backend_outage()
                 time.sleep(10)
                 continue
+
+            self.backend_failures = 0
+            self.state.set_backend_available(True)
 
             active_cam_ids = {c["id"] for c in cams}
             capture_cams = [c for c in cams if c.get("rtspUrl")]
@@ -155,3 +163,15 @@ class StoreOrchestrator:
         self.threads.pop(camera_id, None)
         self.source_fingerprints.pop(camera_id, None)
         self.state.remove_camera(camera_id)
+
+    def _stop_for_backend_outage(self) -> None:
+        """Release every source while preserving the last frame for zone editing."""
+        for camera_id, pipeline in list(self.pipelines.items()):
+            pipeline.stop()
+            thread = self.threads.get(camera_id)
+            if thread is not None:
+                thread.join(timeout=2.0)
+            self.state.remove_camera(camera_id, preserve_frame=True)
+        self.pipelines.clear()
+        self.threads.clear()
+        self.source_fingerprints.clear()

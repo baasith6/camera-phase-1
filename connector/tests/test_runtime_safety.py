@@ -28,6 +28,53 @@ class InstanceLockTests(unittest.TestCase):
 
 
 class LocalStoreConcurrencyTests(unittest.TestCase):
+    @patch("app.runtime.os.cpu_count", return_value=12)
+    def test_worker_counts_are_cpu_aware_and_capped(self, _cpu_count):
+        state = RuntimeState()
+        snapshot = state.snapshot()
+        self.assertEqual(snapshot["logicalCpus"], 12)
+        self.assertEqual(snapshot["analysisWorkers"], 4)
+        self.assertEqual(snapshot["ffmpegWorkers"], 2)
+        state.shutdown_workers()
+
+    def test_analysis_pool_returns_result(self):
+        state = RuntimeState()
+        self.assertEqual(state.run_analysis(lambda value: value * 2, 21), 42)
+        self.assertEqual(state.snapshot()["analysisQueueDepth"], 0)
+        state.shutdown_workers()
+
+    @patch("app.runtime.os.cpu_count", return_value=8)
+    def test_clip_queue_applies_backpressure(self, _cpu_count):
+        state = RuntimeState()
+        release = threading.Event()
+
+        def blocked_job():
+            release.wait(timeout=2)
+            return "clip.mp4"
+
+        accepted = [state.submit_clip_job(blocked_job) for _ in range(4)]
+        self.assertEqual(accepted, [True, True, True, True])
+        self.assertFalse(state.submit_clip_job(blocked_job))
+        self.assertEqual(state.snapshot()["clipJobsDropped"], 1)
+        release.set()
+        state.shutdown_workers()
+
+    def test_runtime_logs_clear_atomically(self):
+        state = RuntimeState()
+        state.log("first")
+        state.log("second")
+        self.assertEqual(state.clear_logs(), 2)
+        self.assertEqual(state.snapshot()["logs"], [])
+        state.shutdown_workers()
+
+    def test_reference_frame_is_separate_from_live_frame(self):
+        state = RuntimeState()
+        state.cache_reference_frame("camera-1", b"stable")
+        state.cache_frame("camera-1", b"live")
+        self.assertEqual(state.get_reference_frame("camera-1"), b"stable")
+        self.assertEqual(state.get_frame("camera-1"), b"live")
+        state.shutdown_workers()
+
     def test_managed_stop_preserves_local_control_state(self):
         state = RuntimeState()
         state.set_paused(True)

@@ -86,8 +86,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = ctx =>
             {
                 var token = ctx.Request.Query["access_token"];
+                // SSE and browser file downloads cannot set Authorization headers.
                 if (!string.IsNullOrEmpty(token) &&
-                    ctx.Request.Path.StartsWithSegments("/api/alerts/stream"))
+                    (ctx.Request.Path.StartsWithSegments("/api/alerts/stream") ||
+                     ctx.Request.Path.StartsWithSegments("/api/connectors/installer/download")))
                 {
                     ctx.Token = token;
                 }

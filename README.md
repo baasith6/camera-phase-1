@@ -94,8 +94,9 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pip install -r requirements-build.txt
-# Place ffmpeg.exe + WinSW-x64.exe in installer/tools/ first
-.\installer\build.ps1 -BackendUrl https://api.your-production-domain.example
+# One command from a fresh Windows clone: downloads FFmpeg/WinSW, installs
+# Python build packages, builds a missing/stale installer, then starts Docker.
+.\dev-up.cmd -BackendUrl http://localhost:8081
 ```
 
 Output lands in `connector/dist/`. This directory is the single installer source:
