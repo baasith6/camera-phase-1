@@ -1,13 +1,16 @@
-; Display brand is onetix; install paths / AppId / service stay ONEVO for upgrades.
-#define AppName "onetix Local Connector"
-#define AppVersion "1.1.18"
-#define AppPublisher "onetix"
+#define AppName "ONETIX Local Connector"
+; AppVersion is passed in from version.json by the build pipeline
+; (docker-entrypoint.sh / build.ps1) via ISCC's /DAppVersion=... switch, so
+; there is exactly one place a version number is ever hand-edited. The
+; literal below is only a safety-net default for compiling this file
+; directly in the Inno Setup IDE.
+#ifndef AppVersion
+  #define AppVersion "1.1.20"
+#endif
+#define AppPublisher "ONETIX"
 #define AppExeName "onevo-connector.exe"
 #define AppServiceExe "onevo-connector-service.exe"
 #define AppId "{{A7C3E91F-4B2D-4E8A-9F01-0E0C0C001100}"
-#define BrandFont "IBM Plex Sans"
-#define BrandFontMono "IBM Plex Mono"
-#define BrandFontFallback "Segoe UI"
 
 [Setup]
 AppId={#AppId}
@@ -16,15 +19,14 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\ONEVO\Connector
-DefaultGroupName=onetix
+DefaultGroupName=ONETIX
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 DisableWelcomePage=yes
 DisableReadyPage=yes
 DirExistsWarning=no
 OutputDir=..\dist
-; Filename keeps ONEVO prefix so backend ConnectorInstallerService still finds it.
-OutputBaseFilename=ONEVO-Connector-Setup-{#AppVersion}
+OutputBaseFilename=ONETIX-Connector-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -34,8 +36,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupIconFile=assets\onevo.ico
-WizardImageFile=assets\wizard-side.bmp
-WizardSmallImageFile=assets\wizard-small.bmp
 ; --- FIX: auto-detect & force-close any process locking these files
 ;     (the running service child exe, or a manually-launched/orphaned
 ;     copy) instead of failing with "file in use" and forcing a manual
@@ -56,23 +56,17 @@ Source: "tools\ffmpeg.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "tools\WinSW-x64.exe"; DestDir: "{app}"; DestName: "{#AppServiceExe}"; Flags: ignoreversion
 Source: "winsw\onevo-connector-service.xml"; DestDir: "{app}"; DestName: "onevo-connector-service.xml"; Flags: ignoreversion
 Source: "assets\onevo.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
-; Brand fonts for the wizard (OFL) — loaded at runtime via AddFontResource.
-Source: "assets\fonts\IBMPlexSans-Regular.ttf"; Flags: dontcopy
-Source: "assets\fonts\IBMPlexSans-Medium.ttf"; Flags: dontcopy
-Source: "assets\fonts\IBMPlexSans-SemiBold.ttf"; Flags: dontcopy
-Source: "assets\fonts\IBMPlexMono-Medium.ttf"; Flags: dontcopy
-Source: "assets\fonts\OFL.txt"; DestDir: "{app}\assets\fonts"; Flags: ignoreversion
+Source: "assets\wizard-sidebar.bmp"; Flags: dontcopy
 
 [Dirs]
 Name: "{commonappdata}\ONEVO\Connector\data"; Permissions: users-modify
 Name: "{commonappdata}\ONEVO\Connector\media"; Permissions: users-modify
 Name: "{app}\bin"
-Name: "{app}\assets\fonts"
 
 [Icons]
-Name: "{group}\onetix Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
+Name: "{group}\ONETIX Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\onetix Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
+Name: "{autodesktop}\ONETIX Connector Status"; Filename: "{app}\{#AppExeName}"; Parameters: "--open-admin"; WorkingDir: "{app}"; IconFilename: "{app}\assets\onevo.ico"
 
 [Run]
 ; In-place updates preserve the existing service registration. Unregistering and
@@ -81,8 +75,12 @@ Name: "{autodesktop}\onetix Connector Status"; Filename: "{app}\{#AppExeName}"; 
 Filename: "{app}\{#AppServiceExe}"; Parameters: "install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Installing Windows service..."; Check: not ExistingService
 Filename: "{sys}\sc.exe"; Parameters: "config ONEVOConnector start= demand"; Flags: runhidden waituntilterminated; Check: PausedMarkerExists
 Filename: "{app}\{#AppServiceExe}"; Parameters: "start"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Activating connector and starting monitoring..."; Check: not PausedMarkerExists
-Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; WorkingDir: "{app}"; Flags: runasoriginaluser runhidden nowait; StatusMsg: "Starting onetix system tray..."
-Filename: "http://localhost:8099/"; Flags: shellexec runasoriginaluser nowait; StatusMsg: "Opening onetix local dashboard..."; Check: OpenDashboardAfterFirstInstall
+; Do not use runasoriginaluser here. On systems where Setup was started from a
+; browser/elevated shell, Inno's original-user spawn server may not exist and
+; aborts the otherwise successful install with CallSpawnServer response $0.
+; These processes are interactive and still run in the current desktop session.
+Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; WorkingDir: "{app}"; Flags: runhidden nowait; StatusMsg: "Starting ONETIX system tray..."
+Filename: "http://localhost:8099/"; Flags: shellexec nowait; StatusMsg: "Opening ONETIX local dashboard..."; Check: OpenDashboardAfterFirstInstall
 
 [UninstallRun]
 Filename: "{app}\{#AppExeName}"; Parameters: "--tray-uninstall"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"
@@ -99,19 +97,7 @@ Filename: "{app}\{#AppServiceExe}"; Parameters: "uninstall"; WorkingDir: "{app}"
 Type: filesandordirs; Name: "{commonappdata}\ONEVO\Connector"
 
 [Code]
-const
-  WM_FONTCHANGE = $001D;
-
-function AddFontResource(lpszFilename: String): Integer;
-  external 'AddFontResourceW@gdi32.dll stdcall';
-function RemoveFontResource(lpFileName: String): Boolean;
-  external 'RemoveFontResourceW@gdi32.dll stdcall';
-function BrandSendMessage(hWnd: LongWord; Msg, wParam, lParam: LongWord): LongWord;
-  external 'SendMessageW@user32.dll stdcall';
-
 var
-  BrandFontsLoaded: Boolean;
-  ActiveBrandFont: String;
   IdentityPage: TInputQueryWizardPage;
   IdentityKeyLabel, IdentitySecureLabel, IdentityExampleLabel: TNewStaticText;
   GlobalSidebar, IdentitySidebar, SourceSidebar, ZoneSidebar: TBitmapImage;
@@ -164,7 +150,9 @@ var
   SourceSetupSkipped: Boolean;
   ZoneFrameReady: Boolean;
   ZoneDragging: Boolean;
+  ZoneDragMode, ZoneDragPointIndex: Integer;
   ZoneDragStartX, ZoneDragStartY, ZoneDragCurrentX, ZoneDragCurrentY: Integer;
+  ZoneMoveBaseX, ZoneMoveBaseY: array[0..3] of Integer;
   ZonePointX, ZonePointY: array[0..31] of Integer;
   ZonePointCount: Integer;
   SavedZoneSource: array[0..31] of Integer;
@@ -239,75 +227,10 @@ begin
     end;
 end;
 
-procedure LoadBrandFonts;
-var
-  Loaded: Integer;
-begin
-  BrandFontsLoaded := False;
-  ActiveBrandFont := '{#BrandFontFallback}';
-  try
-    ExtractTemporaryFile('IBMPlexSans-Regular.ttf');
-    ExtractTemporaryFile('IBMPlexSans-Medium.ttf');
-    ExtractTemporaryFile('IBMPlexSans-SemiBold.ttf');
-    ExtractTemporaryFile('IBMPlexMono-Medium.ttf');
-    Loaded := 0;
-    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexSans-Regular.ttf'));
-    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexSans-Medium.ttf'));
-    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexSans-SemiBold.ttf'));
-    Loaded := Loaded + AddFontResource(ExpandConstant('{tmp}\IBMPlexMono-Medium.ttf'));
-    if Loaded > 0 then begin
-      BrandFontsLoaded := True;
-      ActiveBrandFont := '{#BrandFont}';
-      BrandSendMessage(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
-    end;
-  except
-    BrandFontsLoaded := False;
-    ActiveBrandFont := '{#BrandFontFallback}';
-  end;
-end;
-
-procedure UnloadBrandFonts;
-begin
-  if not BrandFontsLoaded then Exit;
-  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexSans-Regular.ttf'));
-  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexSans-Medium.ttf'));
-  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexSans-SemiBold.ttf'));
-  RemoveFontResource(ExpandConstant('{tmp}\IBMPlexMono-Medium.ttf'));
-  BrandSendMessage(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
-  BrandFontsLoaded := False;
-end;
-
-procedure StyleFont(AFont: TFont; FontSize: Integer; Bold: Boolean);
-begin
-  AFont.Name := ActiveBrandFont;
-  AFont.Size := FontSize;
-  if Bold then AFont.Style := [fsBold] else AFont.Style := [];
-  AFont.Color := $242529; { ink #292524 in BGR }
-end;
-
-procedure ApplyWizardBrandFonts;
-begin
-  StyleFont(WizardForm.Font, 9, False);
-  StyleFont(WizardForm.PageNameLabel.Font, 12, True);
-  StyleFont(WizardForm.PageDescriptionLabel.Font, 9, False);
-  StyleFont(WizardForm.WelcomeLabel1.Font, 14, True);
-  StyleFont(WizardForm.WelcomeLabel2.Font, 9, False);
-  StyleFont(WizardForm.FinishedLabel.Font, 9, False);
-  StyleFont(WizardForm.NextButton.Font, 9, False);
-  StyleFont(WizardForm.BackButton.Font, 9, False);
-  StyleFont(WizardForm.CancelButton.Font, 9, False);
-end;
-
-procedure DeinitializeSetup();
-begin
-  UnloadBrandFonts;
-end;
-
 function InitializeSetup(): Boolean;
 var
   Choice: Integer;
 begin
-  LoadBrandFonts;
   UpdateMode := CmdLineParamExists('/UPDATE');
   ExistingInstall := ReadInstalledVersion(InstalledVersion) or
     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\ONEVOConnector');
@@ -329,7 +252,7 @@ begin
   if (InstalledVersion <> '') and
      (CompareVersions(InstalledVersion, '{#AppVersion}') > 0) then begin
     MsgBox(
-      'onetix Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
+      'ONETIX Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
       'This installer is version {#AppVersion}. Downgrading is not supported.',
       mbError, MB_OK);
     Result := False;
@@ -339,7 +262,7 @@ begin
   if ExistingInstall and not UpdateMode then begin
     if InstalledVersion = '' then InstalledVersion := 'an earlier version';
     Choice := MsgBox(
-      'onetix Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
+      'ONETIX Connector ' + InstalledVersion + ' is already installed.' + #13#10 +
       'Update it to version {#AppVersion}?' + #13#10#13#10 +
       'Your existing connector identity and camera data will be preserved.',
       mbConfirmation, MB_OKCANCEL);
@@ -349,13 +272,13 @@ begin
     end;
   end else if OrphanedRepair then begin
     MsgBox(
-      'A previous onetix connector pairing was found, but its Windows service is missing.' +
+      'A previous ONETIX connector pairing was found, but its Windows service is missing.' +
       Chr(13) + Chr(10) + Chr(13) + Chr(10) +
       'Setup will repair the local service and keep the existing store, cameras, and zones.',
       mbInformation, MB_OK);
   end else if PreviousConfigFound then begin
     MsgBox(
-      'A previous onetix configuration was found, but the application is not installed.' +
+      'A previous ONETIX configuration was found, but the application is not installed.' +
       Chr(13) + Chr(10) + Chr(13) + Chr(10) +
       'Setup will remove the incomplete data and start a new configuration. ' +
       'You will enter the setup code and camera sources again.',
@@ -871,10 +794,9 @@ begin
   // Draw into an off-screen bitmap and replace the visible image once. Loading
   // the BMP into ZoneImage on every mouse event caused a visible frame shake.
   ZoneRenderBitmap.Assign(ZoneBaseBitmap);
-  { Dashboard accent #2563EB as BGR }
-  ZoneRenderBitmap.Canvas.Pen.Color := $EB6325;
+  ZoneRenderBitmap.Canvas.Pen.Color := $00D2FF;
   ZoneRenderBitmap.Canvas.Pen.Width := 3;
-  ZoneRenderBitmap.Canvas.Brush.Color := $EB6325;
+  ZoneRenderBitmap.Canvas.Brush.Color := $00D2FF;
   for I := 0 to ZonePointCount - 1 do begin
     X := ZonePointX[I];
     Y := ZonePointY[I];
@@ -982,41 +904,84 @@ end;
 procedure ZoneMouseTimerTick(HWnd, UMsg, IdEvent, DwTime: LongWord);
 var
   MouseDown: Boolean;
-  DisplayX, DisplayY: Integer;
+  X, Y, I, Nearest, Distance, BestDistance, DX, DY, Opposite: Integer;
 begin
   if (WizardForm.CurPageID <> ZonePage.ID) or (not ZoneFrameReady) then Exit;
   MouseDown := (GetAsyncKeyState(1) and $8000) <> 0;
+
   if MouseDown and (not ZoneDragging) then begin
-    if GetZonePointer(DisplayX, DisplayY, False) then begin
-      ZoneDragging := True;
-      ZoneDragStartX := DisplayX; ZoneDragStartY := DisplayY;
-      ZoneDragCurrentX := DisplayX; ZoneDragCurrentY := DisplayY;
-      SetZoneRectangle(DisplayX, DisplayY, DisplayX, DisplayY);
-      ZoneStatusLabel.Caption := 'Drawing zone. Release the mouse to set the box.';
+    if not GetZonePointer(X, Y, False) then Exit;
+    ZoneDragging := True;
+    ZoneDragStartX := X;
+    ZoneDragStartY := Y;
+    ZoneDragCurrentX := X;
+    ZoneDragCurrentY := Y;
+    ZoneDragMode := 1; { draw }
+
+    if ZonePointCount = 4 then begin
+      Nearest := -1;
+      BestDistance := 999999;
+      for I := 0 to 3 do begin
+        DX := ZonePointX[I] - X;
+        DY := ZonePointY[I] - Y;
+        if DX < 0 then DX := -DX;
+        if DY < 0 then DY := -DY;
+        Distance := DX + DY;
+        if Distance < BestDistance then begin
+          BestDistance := Distance;
+          Nearest := I;
+        end;
+      end;
+      if BestDistance <= 28 then begin
+        ZoneDragMode := 2; { corner resize }
+        ZoneDragPointIndex := Nearest;
+        Opposite := (Nearest + 2) mod 4;
+        ZoneDragStartX := ZonePointX[Opposite];
+        ZoneDragStartY := ZonePointY[Opposite];
+      end else if (X >= ZonePointX[0]) and (X <= ZonePointX[2]) and
+                      (Y >= ZonePointY[0]) and (Y <= ZonePointY[2]) then begin
+        ZoneDragMode := 3; { move }
+        for I := 0 to 3 do begin
+          ZoneMoveBaseX[I] := ZonePointX[I];
+          ZoneMoveBaseY[I] := ZonePointY[I];
+        end;
+      end;
     end;
+    if ZoneDragMode = 1 then SetZoneRectangle(X, Y, X, Y);
     Exit;
   end;
 
   if MouseDown and ZoneDragging then begin
-    if GetZonePointer(DisplayX, DisplayY, True) and
-       ((DisplayX <> ZoneDragCurrentX) or (DisplayY <> ZoneDragCurrentY)) then begin
-      ZoneDragCurrentX := DisplayX; ZoneDragCurrentY := DisplayY;
-      SetZoneRectangle(ZoneDragStartX, ZoneDragStartY, DisplayX, DisplayY);
-    end;
+    if not GetZonePointer(X, Y, True) then Exit;
+    if (X = ZoneDragCurrentX) and (Y = ZoneDragCurrentY) then Exit;
+    ZoneDragCurrentX := X;
+    ZoneDragCurrentY := Y;
+    if ZoneDragMode = 3 then begin
+      DX := X - ZoneDragStartX;
+      DY := Y - ZoneDragStartY;
+      if ZoneMoveBaseX[0] + DX < 0 then DX := -ZoneMoveBaseX[0];
+      if ZoneMoveBaseX[2] + DX > 640 then DX := 640 - ZoneMoveBaseX[2];
+      if ZoneMoveBaseY[0] + DY < 0 then DY := -ZoneMoveBaseY[0];
+      if ZoneMoveBaseY[2] + DY > 360 then DY := 360 - ZoneMoveBaseY[2];
+      for I := 0 to 3 do begin
+        ZonePointX[I] := ZoneMoveBaseX[I] + DX;
+        ZonePointY[I] := ZoneMoveBaseY[I] + DY;
+      end;
+    end else
+      SetZoneRectangle(ZoneDragStartX, ZoneDragStartY, X, Y);
+    RenderZoneDrawing;
     Exit;
   end;
 
   if ZoneDragging then begin
     ZoneDragging := False;
-    if (Abs(ZoneDragCurrentX - ZoneDragStartX) < 8) or
-       (Abs(ZoneDragCurrentY - ZoneDragStartY) < 8) then begin
+    if (ZonePointCount < 4) or
+       (Abs(ZonePointX[2] - ZonePointX[0]) < 8) or
+       (Abs(ZonePointY[2] - ZonePointY[0]) < 8) then begin
       ZonePointCount := 0;
       ZoneStatusLabel.Caption := 'Drag a larger area to create a zone.';
-    end else begin
-      SetZoneRectangle(ZoneDragStartX, ZoneDragStartY,
-        ZoneDragCurrentX, ZoneDragCurrentY);
-      ZoneStatusLabel.Caption := 'Zone ready. Enter a name and click Save Zone.';
-    end;
+    end else
+      ZoneStatusLabel.Caption := 'Zone ready. Drag a corner to resize or drag inside to move.';
     RenderZoneDrawing;
   end;
 end;
@@ -1284,7 +1249,6 @@ begin
   { Keep the native Windows close/minimise controls and the installer cancel path
     operational.  Hiding Cancel also made the title-bar close action appear dead. }
   WizardForm.CancelButton.Visible := False;
-  ApplyWizardBrandFonts;
 
   ExtractTemporaryFile('wizard-sidebar.bmp');
   GlobalSidebar := TBitmapImage.Create(WizardForm);
@@ -1298,80 +1262,378 @@ begin
   GlobalSidebar.Visible := False;
 
   IdentityPage := CreateInputQueryPage(wpSelectDir,
-    'Connect to onetix', 'Enter the connector identity',
-    'Generate a one-time setup code in the onetix dashboard and enter it here.');
-  IdentityPage.Add('Setup code:', False);
-  IdentityPage.Add('Connector name:', False);
-  IdentityPage.Values[1] := 'onetix Store Connector';
-  { Setup code uses mono when brand fonts loaded; otherwise UI fallback. }
-  if BrandFontsLoaded then
-    IdentityPage.Edits[0].Font.Name := '{#BrandFontMono}'
-  else
-    IdentityPage.Edits[0].Font.Name := ActiveBrandFont;
-  IdentityPage.Edits[0].Font.Size := 11;
-  StyleFont(IdentityPage.Edits[1].Font, 9, False);
+    'Connect ONETIX',
+    '',
+    '');
+  IdentityPage.Add('Setup Code:', False);
+  // Match the product setup reference: a wide code field with clear security
+  // guidance, instead of putting all instructions into the page description.
+  IdentityPage.PromptLabels[0].Caption := 'Setup Code';
+  IdentityPage.PromptLabels[0].Font.Size := 10;
+  IdentityPage.PromptLabels[0].Left := ScaleX(16);
+  IdentityPage.PromptLabels[0].Top := ScaleY(166);
+  IdentityPage.Edits[0].Left := ScaleX(16);
+  IdentityPage.Edits[0].Top := ScaleY(192);
+  IdentityPage.Edits[0].Width := ScaleX(560);
+  IdentityPage.Edits[0].Height := ScaleY(34);
+  IdentityHeadingLabel := TNewStaticText.Create(IdentityPage);
+  IdentityHeadingLabel.Parent := IdentityPage.Surface;
+  IdentityHeadingLabel.Left := ScaleX(16);
+  IdentityHeadingLabel.Top := ScaleY(28);
+  IdentityHeadingLabel.Caption := 'Connect ONETIX';
+  IdentityHeadingLabel.Font.Name := 'Segoe UI';
+  IdentityHeadingLabel.Font.Size := 19;
+  IdentityHeadingLabel.Font.Style := [fsBold];
+  IdentityDescriptionLabel := TNewStaticText.Create(IdentityPage);
+  IdentityDescriptionLabel.Parent := IdentityPage.Surface;
+  IdentityDescriptionLabel.Left := ScaleX(16);
+  IdentityDescriptionLabel.Top := ScaleY(90);
+  IdentityDescriptionLabel.Width := ScaleX(580);
+  IdentityDescriptionLabel.AutoSize := False;
+  IdentityDescriptionLabel.Caption :=
+    'Enter the setup code generated from your ONETIX dashboard.';
+  IdentityDescriptionLabel.Font.Size := 11;
+  IdentityDescriptionLabel.Font.Color := $00484848;
+  IdentityKeyLabel := TNewStaticText.Create(IdentityPage);
+  IdentityKeyLabel.Parent := IdentityPage.Surface;
+  IdentityKeyLabel.Left := ScaleX(16);
+  IdentityKeyLabel.Top := ScaleY(244);
+  IdentityKeyLabel.Width := ScaleX(580);
+  IdentityKeyLabel.AutoSize := False;
+  IdentityKeyLabel.Caption :=
+    'The setup code links this connector to your account and stores.';
+  IdentityKeyLabel.Font.Color := $00404040;
+  IdentityKeyLabel.WordWrap := True;
+  IdentityKeyLabel.Height := ScaleY(40);
+  IdentityKeyLabel.Font.Size := 10;
+  IdentityExampleLabel := TNewStaticText.Create(IdentityPage);
+  IdentityExampleLabel.Parent := IdentityPage.Surface;
+  IdentityExampleLabel.Left := ScaleX(16);
+  IdentityExampleLabel.Top := ScaleY(290);
+  IdentityExampleLabel.Caption := 'Example: ABCD-EFGH';
+  IdentityExampleLabel.Font.Color := $00808080;
+  IdentitySecureLabel := TNewStaticText.Create(IdentityPage);
+  IdentitySecureLabel.Parent := IdentityPage.Surface;
+  IdentitySecureLabel.Left := ScaleX(16);
+  IdentitySecureLabel.Top := ScaleY(326);
+  IdentitySecureLabel.Caption := 'Your setup code is encrypted and used only for this connection.';
+  IdentitySecureLabel.Font.Color := $00404040;
+  IdentitySecureLabel.Font.Size := 10;
+  { The approved first page contains only the title, instruction, field and
+    one account-link helper line. }
+  IdentityExampleLabel.Visible := False;
+  IdentitySecureLabel.Visible := False;
 
-  SourcePage := CreateInputOptionPage(IdentityPage.ID,
-    'Camera source', 'Choose the input type',
-    'Choose a source type. Camera and video sources continue to a frame-based zone editor. Choose Skip to install the connector without sources or zones.', True, False);
-  SourcePage.Add('Live camera — RTSP URL(s)');
-  SourcePage.Add('Live camera — ONVIF camera(s)');
-  SourcePage.Add('Video upload — local MP4 file(s)');
-  SourcePage.SelectedValueIndex := -1;
-  SourcePage.CheckListBox.OnClickCheck := @SourceTypeClicked;
+  SourcePage := CreateCustomPage(IdentityPage.ID,
+    'Add Camera Sources',
+    'Connect one or more camera sources for ONETIX monitoring.');
 
-  RtspPage := CreateInputQueryPage(SourcePage.ID,
-    'RTSP cameras', 'Enter one or more RTSP URLs',
-    'Enter one URL per field. Use Add RTSP Link for more cameras.');
-  RtspCount := 1;
-  RtspPage.Add('RTSP URL 1:', False);
-  ConfigureRtspRow(0);
-  AddRtspButton := TNewButton.Create(WizardForm);
-  AddRtspButton.Parent := RtspPage.Surface;
-  AddRtspButton.Caption := '+ Add RTSP Link';
-  AddRtspButton.Left := 0;
-  AddRtspButton.Top := RtspPage.Edits[0].Top + ScaleY(32);
-  AddRtspButton.Width := ScaleX(150);
-  AddRtspButton.Height := ScaleY(26);
-  AddRtspButton.OnClick := @AddRtspField;
+  ContentW := ScaleX(560);
+  CardGap := ScaleX(12);
+  CardW := (ContentW - (CardGap * 2)) div 3;
+  TopY := ScaleY(0);
 
-  OnvifPage := CreateInputQueryPage(RtspPage.ID,
-    'ONVIF cameras', 'Enter one or more ONVIF camera hosts',
-    'Enter each camera separately. Use Add ONVIF Camera for more cameras.');
-  OnvifCount := 1;
-  OnvifPage.Add('Camera 1 host / IP:', False);
-  OnvifPage.Add('Camera 1 port:', False);
-  OnvifPage.Add('Camera 1 username:', False);
-  OnvifPage.Add('Camera 1 password:', True);
-  OnvifPage.Values[1] := '80';
-  OnvifPage.Values[2] := 'admin';
-  ConfigureOnvifRow(0);
-  AddOnvifButton := TNewButton.Create(WizardForm);
-  AddOnvifButton.Parent := OnvifPage.Surface;
-  AddOnvifButton.Caption := '+ Add ONVIF Camera';
-  AddOnvifButton.Left := 0;
-  AddOnvifButton.Top := OnvifRemoveButtons[0].Top + ScaleY(30);
-  AddOnvifButton.Width := ScaleX(150);
-  AddOnvifButton.Height := ScaleY(26);
-  AddOnvifButton.OnClick := @AddOnvifFields;
+  RtspBtn := TNewButton.Create(SourcePage);
+  RtspBtn.Parent := SourcePage.Surface;
+  RtspBtn.Left := 0;
+  RtspBtn.Top := TopY;
+  RtspBtn.Width := CardW;
+  RtspBtn.Height := ScaleY(52);
+  RtspBtn.Caption := 'RTSP Camera';
+  RtspBtn.OnClick := @RtspTypeClicked;
+  RtspCardLabel := TNewStaticText.Create(SourcePage);
+  RtspCardLabel.Parent := SourcePage.Surface;
+  RtspCardLabel.Left := ScaleX(10);
+  RtspCardLabel.Top := TopY + ScaleY(58);
+  RtspCardLabel.Width := CardW - ScaleX(16);
+  RtspCardLabel.AutoSize := False;
+  RtspCardLabel.Height := ScaleY(16);
+  RtspCardLabel.Caption := 'Add one or more RTSP links';
+  RtspCardLabel.Font.Color := $00666666;
 
-  FilePage := CreateInputFilePage(OnvifPage.ID,
-    'Local videos', 'Choose one or more MP4 videos',
-    'Each selected video is copied separately and continuously looped.');
-  VideoCount := 1;
-  FilePage.Add('MP4 video 1:', 'MP4 video (*.mp4)|*.mp4', '.mp4');
-  ConfigureVideoRow(0);
-  AddVideoButton := TNewButton.Create(WizardForm);
-  AddVideoButton.Parent := FilePage.Surface;
-  AddVideoButton.Caption := '+ Add Local Video';
-  AddVideoButton.Left := 0;
-  AddVideoButton.Top := FilePage.Edits[0].Top + ScaleY(32);
-  AddVideoButton.Width := ScaleX(150);
-  AddVideoButton.Height := ScaleY(26);
-  AddVideoButton.OnClick := @AddVideoField;
+  OnvifBtn := TNewButton.Create(SourcePage);
+  OnvifBtn.Parent := SourcePage.Surface;
+  OnvifBtn.Left := CardW + CardGap;
+  OnvifBtn.Top := TopY;
+  OnvifBtn.Width := CardW;
+  OnvifBtn.Height := ScaleY(52);
+  OnvifBtn.Caption := 'ONVIF Camera';
+  OnvifBtn.OnClick := @OnvifTypeClicked;
+  OnvifCardLabel := TNewStaticText.Create(SourcePage);
+  OnvifCardLabel.Parent := SourcePage.Surface;
+  OnvifCardLabel.Left := CardW + CardGap + ScaleX(10);
+  OnvifCardLabel.Top := TopY + ScaleY(58);
+  OnvifCardLabel.Width := CardW - ScaleX(16);
+  OnvifCardLabel.AutoSize := False;
+  OnvifCardLabel.Height := ScaleY(16);
+  OnvifCardLabel.Caption := 'Connect using IP, port and login';
+  OnvifCardLabel.Font.Color := $00666666;
 
-  ZonePage := CreateCustomPage(FilePage.ID,
-    'Camera zones', 'Create monitoring zones for each camera');
+  Mp4Btn := TNewButton.Create(SourcePage);
+  Mp4Btn.Parent := SourcePage.Surface;
+  Mp4Btn.Left := (CardW + CardGap) * 2;
+  Mp4Btn.Top := TopY;
+  Mp4Btn.Width := CardW;
+  Mp4Btn.Height := ScaleY(52);
+  Mp4Btn.Caption := 'Local MP4';
+  Mp4Btn.OnClick := @Mp4TypeClicked;
+  Mp4CardLabel := TNewStaticText.Create(SourcePage);
+  Mp4CardLabel.Parent := SourcePage.Surface;
+  Mp4CardLabel.Left := ((CardW + CardGap) * 2) + ScaleX(10);
+  Mp4CardLabel.Top := TopY + ScaleY(58);
+  Mp4CardLabel.Width := CardW - ScaleX(16);
+  Mp4CardLabel.AutoSize := False;
+  Mp4CardLabel.Height := ScaleY(16);
+  Mp4CardLabel.Caption := 'Upload a test video file';
+  Mp4CardLabel.Font.Color := $00666666;
+
+  { Removed: redundant help text that duplicated the per-card descriptions
+    above and was clipping ("then click Ad") at some DPI settings. }
+
+  RtspUrlLabel := TNewStaticText.Create(SourcePage);
+  RtspUrlLabel.Parent := SourcePage.Surface;
+  RtspUrlLabel.Left := 0;
+  RtspUrlLabel.Top := TopY + ScaleY(100);
+  RtspUrlLabel.Caption := 'RTSP URLs (add one at a time)';
+  RtspUrlLabel.Visible := False;
+  RtspUrlEdit := TNewEdit.Create(SourcePage);
+  RtspUrlEdit.Parent := SourcePage.Surface;
+  RtspUrlEdit.Left := 0;
+  RtspUrlEdit.Top := TopY + ScaleY(124);
+  RtspUrlEdit.Width := ContentW;
+  RtspUrlEdit.Visible := False;
+  RtspHintLabel := TNewStaticText.Create(SourcePage);
+  RtspHintLabel.Parent := SourcePage.Surface;
+  RtspHintLabel.Left := 0;
+  RtspHintLabel.Top := TopY + ScaleY(154);
+  RtspHintLabel.Caption := 'Enter one RTSP link, then click + Add Source.';
+  RtspHintLabel.Font.Color := $00666666;
+  RtspHintLabel.Visible := False;
+
+  OnvifHostLabel := TNewStaticText.Create(SourcePage);
+  OnvifHostLabel.Parent := SourcePage.Surface;
+  OnvifHostLabel.Left := 0;
+  OnvifHostLabel.Top := TopY + ScaleY(100);
+  OnvifHostLabel.Caption := 'IP Address or Hostname';
+  OnvifHostLabel.Visible := False;
+  OnvifHostEdit := TNewEdit.Create(SourcePage);
+  OnvifHostEdit.Parent := SourcePage.Surface;
+  OnvifHostEdit.Left := 0;
+  OnvifHostEdit.Top := TopY + ScaleY(124);
+  OnvifHostEdit.Width := ScaleX(400);
+  OnvifHostEdit.Visible := False;
+
+  OnvifPortLabel := TNewStaticText.Create(SourcePage);
+  OnvifPortLabel.Parent := SourcePage.Surface;
+  OnvifPortLabel.Left := ScaleX(420);
+  OnvifPortLabel.Top := TopY + ScaleY(100);
+  OnvifPortLabel.Caption := 'Port';
+  OnvifPortLabel.Visible := False;
+  OnvifPortEdit := TNewEdit.Create(SourcePage);
+  OnvifPortEdit.Parent := SourcePage.Surface;
+  OnvifPortEdit.Left := ScaleX(420);
+  OnvifPortEdit.Top := TopY + ScaleY(124);
+  OnvifPortEdit.Width := ScaleX(120);
+  OnvifPortEdit.Text := '80';
+  OnvifPortEdit.Visible := False;
+
+  OnvifUserLabel := TNewStaticText.Create(SourcePage);
+  OnvifUserLabel.Parent := SourcePage.Surface;
+  OnvifUserLabel.Left := 0;
+  OnvifUserLabel.Top := TopY + ScaleY(164);
+  OnvifUserLabel.Caption := 'Username';
+  OnvifUserLabel.Visible := False;
+  OnvifUserEdit := TNewEdit.Create(SourcePage);
+  OnvifUserEdit.Parent := SourcePage.Surface;
+  OnvifUserEdit.Left := 0;
+  OnvifUserEdit.Top := TopY + ScaleY(188);
+  OnvifUserEdit.Width := ScaleX(400);
+  OnvifUserEdit.Text := 'admin';
+  OnvifUserEdit.Visible := False;
+
+  OnvifPassLabel := TNewStaticText.Create(SourcePage);
+  OnvifPassLabel.Parent := SourcePage.Surface;
+  OnvifPassLabel.Left := ScaleX(420);
+  OnvifPassLabel.Top := TopY + ScaleY(164);
+  OnvifPassLabel.Caption := 'Password';
+  OnvifPassLabel.Visible := False;
+  OnvifPassEdit := TNewEdit.Create(SourcePage);
+  OnvifPassEdit.Parent := SourcePage.Surface;
+  OnvifPassEdit.Left := ScaleX(420);
+  OnvifPassEdit.Top := TopY + ScaleY(188);
+  OnvifPassEdit.Width := ScaleX(400);
+  OnvifPassEdit.PasswordChar := '*';
+  OnvifPassEdit.Visible := False;
+
+  Mp4PathLabel := TNewStaticText.Create(SourcePage);
+  Mp4PathLabel.Parent := SourcePage.Surface;
+  Mp4PathLabel.Left := 0;
+  Mp4PathLabel.Top := TopY + ScaleY(100);
+  Mp4PathLabel.Caption := 'Upload MP4 File';
+  Mp4PathLabel.Visible := False;
+  Mp4PathEdit := TNewEdit.Create(SourcePage);
+  Mp4PathEdit.Parent := SourcePage.Surface;
+  Mp4PathEdit.Left := 0;
+  Mp4PathEdit.Top := TopY + ScaleY(214);
+  Mp4PathEdit.Width := ContentW;
+  Mp4PathEdit.ReadOnly := True;
+  Mp4PathEdit.Visible := False;
+  Mp4BrowseButton := TNewButton.Create(SourcePage);
+  Mp4BrowseButton.Parent := SourcePage.Surface;
+  Mp4BrowseButton.Left := ScaleX(220);
+  Mp4BrowseButton.Top := TopY + ScaleY(174);
+  Mp4BrowseButton.Width := ScaleX(200);
+  Mp4BrowseButton.Caption := 'Browse Files';
+  Mp4BrowseButton.OnClick := @BrowseMp4Clicked;
+  Mp4BrowseButton.Visible := False;
+  Mp4HintLabel := TNewStaticText.Create(SourcePage);
+  Mp4HintLabel.Parent := SourcePage.Surface;
+  Mp4HintLabel.Left := 0;
+  Mp4HintLabel.Top := TopY + ScaleY(104);
+  Mp4HintLabel.Caption := 'Upload a video file (MP4) to use for monitoring and testing.';
+  Mp4HintLabel.Font.Color := $00666666;
+  Mp4HintLabel.Visible := False;
+  Mp4DropPanel := TPanel.Create(SourcePage);
+  Mp4DropPanel.Parent := SourcePage.Surface;
+  Mp4DropPanel.Left := 0;
+  Mp4DropPanel.Top := TopY + ScaleY(128);
+  Mp4DropPanel.Width := ContentW;
+  Mp4DropPanel.Height := ScaleY(112);
+  Mp4DropPanel.BevelOuter := bvLowered;
+  Mp4DropPanel.Color := $00FAFAFA;
+  Mp4DropPanel.Visible := False;
+  Mp4DropTitle := TNewStaticText.Create(SourcePage);
+  Mp4DropTitle.Parent := Mp4DropPanel;
+  Mp4DropTitle.Left := ScaleX(210);
+  Mp4DropTitle.Top := ScaleY(18);
+  Mp4DropTitle.Caption := 'Drag && drop your video file here';
+  Mp4DropTitle.Font.Size := 10;
+  Mp4DropOrLabel := TNewStaticText.Create(SourcePage);
+  Mp4DropOrLabel.Parent := Mp4DropPanel;
+  Mp4DropOrLabel.Left := ScaleX(310);
+  Mp4DropOrLabel.Top := ScaleY(44);
+  Mp4DropOrLabel.Caption := 'or';
+  Mp4BrowseButton.Parent := Mp4DropPanel;
+  Mp4BrowseButton.Left := ScaleX(220);
+  Mp4BrowseButton.Top := ScaleY(66);
+
+  AddSourceButton := TNewButton.Create(SourcePage);
+  AddSourceButton.Parent := SourcePage.Surface;
+  AddSourceButton.Left := ScaleX(460);
+  AddSourceButton.Top := TopY + ScaleY(232);
+  AddSourceButton.Width := ScaleX(100);
+  AddSourceButton.Height := ScaleY(28);
+  AddSourceButton.Caption := '+ Add';
+  AddSourceButton.OnClick := @AddSourceClicked;
+  AddSourceButton.Visible := False;
+
+  AddedSourcesLabel := TNewStaticText.Create(SourcePage);
+  AddedSourcesLabel.Parent := SourcePage.Surface;
+  AddedSourcesLabel.Left := 0;
+  AddedSourcesLabel.Top := TopY + ScaleY(276);
+  AddedSourcesLabel.Caption := 'Added Sources (0)';
+  AddedSourcesLabel.Font.Style := [fsBold];
+  AddedSourcesLabel.Visible := False;
+
+  SourceList := TNewListBox.Create(SourcePage);
+  SourceList.Parent := SourcePage.Surface;
+  SourceList.Left := 0;
+  SourceList.Top := TopY + ScaleY(300);
+  SourceList.Width := ContentW;
+  SourceList.Height := ScaleY(110);
+  SourceList.Visible := False;
+
+  SourceHeaderName := TNewStaticText.Create(SourcePage);
+  SourceHeaderName.Parent := SourcePage.Surface;
+  SourceHeaderName.SetBounds(ScaleX(8), TopY + ScaleY(300), ScaleX(105), ScaleY(18));
+  SourceHeaderName.Caption := 'Source Name';
+  SourceHeaderName.Font.Style := [fsBold];
+  SourceHeaderName.Visible := False;
+  SourceHeaderType := TNewStaticText.Create(SourcePage);
+  SourceHeaderType.Parent := SourcePage.Surface;
+  SourceHeaderType.SetBounds(ScaleX(118), TopY + ScaleY(300), ScaleX(75), ScaleY(18));
+  SourceHeaderType.Caption := 'Type';
+  SourceHeaderType.Font.Style := [fsBold];
+  SourceHeaderType.Visible := False;
+  SourceHeaderPath := TNewStaticText.Create(SourcePage);
+  SourceHeaderPath.Parent := SourcePage.Surface;
+  SourceHeaderPath.SetBounds(ScaleX(198), TopY + ScaleY(300), ScaleX(190), ScaleY(18));
+  SourceHeaderPath.Caption := 'Source';
+  SourceHeaderPath.Font.Style := [fsBold];
+  SourceHeaderPath.Visible := False;
+  SourceHeaderStatus := TNewStaticText.Create(SourcePage);
+  SourceHeaderStatus.Parent := SourcePage.Surface;
+  SourceHeaderStatus.SetBounds(ScaleX(392), TopY + ScaleY(300), ScaleX(55), ScaleY(18));
+  SourceHeaderStatus.Caption := 'Status';
+  SourceHeaderStatus.Font.Style := [fsBold];
+  SourceHeaderStatus.Visible := False;
+  SourceHeaderActions := TNewStaticText.Create(SourcePage);
+  SourceHeaderActions.Parent := SourcePage.Surface;
+  SourceHeaderActions.SetBounds(ScaleX(458), TopY + ScaleY(300), ScaleX(90), ScaleY(18));
+  SourceHeaderActions.Caption := 'Actions';
+  SourceHeaderActions.Font.Style := [fsBold];
+  SourceHeaderActions.Visible := False;
+  ClearAllSourcesButton := TNewButton.Create(SourcePage);
+  ClearAllSourcesButton.Parent := SourcePage.Surface;
+  ClearAllSourcesButton.SetBounds(ScaleX(470), TopY + ScaleY(270), ScaleX(90), ScaleY(24));
+  ClearAllSourcesButton.Caption := 'Clear All';
+  ClearAllSourcesButton.OnClick := @ClearAllSourcesClicked;
+  ClearAllSourcesButton.Visible := False;
+
+  for I := 0 to 15 do begin
+    SourceRowLabel[I] := TNewStaticText.Create(SourcePage);
+    SourceRowLabel[I].Parent := SourcePage.Surface;
+    SourceRowLabel[I].Left := ScaleX(8);
+    SourceRowLabel[I].Top := TopY + ScaleY(326 + (I * 24));
+    SourceRowLabel[I].Width := ScaleX(105);
+    SourceRowLabel[I].AutoSize := False;
+    SourceRowLabel[I].Height := ScaleY(20);
+    SourceRowLabel[I].Visible := False;
+    SourceRowTypeLabel[I] := TNewStaticText.Create(SourcePage);
+    SourceRowTypeLabel[I].Parent := SourcePage.Surface;
+    SourceRowTypeLabel[I].SetBounds(ScaleX(118), TopY + ScaleY(326 + (I * 24)), ScaleX(75), ScaleY(20));
+    SourceRowTypeLabel[I].Visible := False;
+    SourceRowPathLabel[I] := TNewStaticText.Create(SourcePage);
+    SourceRowPathLabel[I].Parent := SourcePage.Surface;
+    SourceRowPathLabel[I].SetBounds(ScaleX(198), TopY + ScaleY(326 + (I * 24)), ScaleX(190), ScaleY(20));
+    SourceRowPathLabel[I].Visible := False;
+    SourceRowStatusLabel[I] := TNewStaticText.Create(SourcePage);
+    SourceRowStatusLabel[I].Parent := SourcePage.Surface;
+    SourceRowStatusLabel[I].SetBounds(ScaleX(392), TopY + ScaleY(326 + (I * 24)), ScaleX(55), ScaleY(20));
+    SourceRowStatusLabel[I].Font.Color := $00339933;
+    SourceRowStatusLabel[I].Visible := False;
+    SourceRowEditButton[I] := TNewButton.Create(SourcePage);
+    SourceRowEditButton[I].Parent := SourcePage.Surface;
+    SourceRowEditButton[I].Left := ScaleX(450);
+    SourceRowEditButton[I].Top := TopY + ScaleY(322 + (I * 24));
+    SourceRowEditButton[I].Width := ScaleX(38);
+    SourceRowEditButton[I].Height := ScaleY(22);
+    SourceRowEditButton[I].Caption := Chr($E104);
+    SourceRowEditButton[I].Font.Name := 'Segoe MDL2 Assets';
+    SourceRowEditButton[I].Tag := I;
+    SourceRowEditButton[I].OnClick := @EditSourceClicked;
+    SourceRowEditButton[I].Visible := False;
+    SourceRowDeleteButton[I] := TNewButton.Create(SourcePage);
+    SourceRowDeleteButton[I].Parent := SourcePage.Surface;
+    SourceRowDeleteButton[I].Left := ScaleX(498);
+    SourceRowDeleteButton[I].Top := TopY + ScaleY(322 + (I * 24));
+    SourceRowDeleteButton[I].Width := ScaleX(38);
+    SourceRowDeleteButton[I].Height := ScaleY(22);
+    SourceRowDeleteButton[I].Caption := Chr($E107);
+    SourceRowDeleteButton[I].Font.Name := 'Segoe MDL2 Assets';
+    SourceRowDeleteButton[I].Tag := I;
+    SourceRowDeleteButton[I].OnClick := @DeleteSourceClicked;
+    SourceRowDeleteButton[I].Visible := False;
+  end;
+
+  { Match the reference wizard: RTSP is the initial active source card. }
+  SelectSourceType(0);
+
+  ZonePage := CreateCustomPage(SourcePage.ID,
+    'Configure Detection Zones',
+    'Select a source and draw the area you want ONETIX to monitor.');
+  ZonePage.Surface.Left := ScaleX(200);
+  ZonePage.Surface.Width := ScaleX(660);
   ZoneCameraCombo := TNewComboBox.Create(ZonePage);
   ZoneCameraLabel := TNewStaticText.Create(ZonePage);
   ZoneCameraLabel.Parent := ZonePage.Surface;
@@ -1433,7 +1695,7 @@ begin
   ZoneImage.Stretch := True;
   ZoneImage.Cursor := crCross;
   ZoneImage.Visible := False;
-  ZoneMouseTimerId := SetTimer(0, 0, 50, CreateCallback(@ZoneMouseTimerTick));
+  ZoneMouseTimerId := SetTimer(0, 0, 33, CreateCallback(@ZoneMouseTimerTick));
   ZoneList := TNewListBox.Create(ZonePage);
   SavedZonesLabel := TNewStaticText.Create(ZonePage);
   SavedZonesLabel.Parent := ZonePage.Surface;
@@ -1518,27 +1780,84 @@ begin
   ZoneStatusLabel.Width := ScaleX(700);
   ZoneStatusLabel.Caption := 'Select a camera and click Refresh Frame.';
 
-  StyleFont(ZoneCameraLabel.Font, 8, False);
-  StyleFont(ZoneNameLabel.Font, 8, False);
-  StyleFont(ZoneTypeLabel.Font, 8, False);
-  StyleFont(SavedZonesLabel.Font, 8, False);
-  StyleFont(PointCountLabel.Font, 8, False);
-  StyleFont(ZoneStatusLabel.Font, 8, False);
-  ZoneStatusLabel.Font.Color := $6C7178; { muted #78716C BGR }
-  StyleFont(ZoneCameraCombo.Font, 9, False);
-  StyleFont(ZoneTypeCombo.Font, 9, False);
-  StyleFont(ZoneNameEdit.Font, 9, False);
-  StyleFont(ZoneList.Font, 9, False);
-  StyleFont(RefreshFrameButton.Font, 9, False);
-  StyleFont(NewZoneButton.Font, 9, False);
-  StyleFont(EditZoneButton.Font, 9, False);
-  StyleFont(DeleteZoneButton.Font, 9, False);
-  StyleFont(UndoPointButton.Font, 9, False);
-  StyleFont(ClearPointsButton.Font, 9, False);
-  StyleFont(SaveZoneButton.Font, 9, False);
-  StyleFont(AddRtspButton.Font, 9, False);
-  StyleFont(AddOnvifButton.Font, 9, False);
-  StyleFont(AddVideoButton.Font, 9, False);
+  SuccessSummaryLabel := TNewStaticText.Create(WizardForm);
+  SuccessSummaryLabel.Parent := WizardForm;
+  SuccessSummaryLabel.Left := ScaleX(240);
+  SuccessSummaryLabel.Top := ScaleY(150);
+  SuccessSummaryLabel.Width := ScaleX(600);
+  SuccessSummaryLabel.Height := ScaleY(220);
+  SuccessSummaryLabel.AutoSize := False;
+  SuccessSummaryLabel.WordWrap := True;
+  SuccessSummaryLabel.Visible := False;
+  SuccessHeadingLabel := TNewStaticText.Create(WizardForm);
+  SuccessHeadingLabel.Parent := WizardForm;
+  SuccessHeadingLabel.Left := ScaleX(240);
+  SuccessHeadingLabel.Top := ScaleY(46);
+  SuccessHeadingLabel.Caption := 'Installation Successful!';
+  SuccessHeadingLabel.Font.Size := 20;
+  SuccessHeadingLabel.Font.Style := [fsBold];
+  SuccessHeadingLabel.Visible := False;
+  SuccessDescriptionLabel := TNewStaticText.Create(WizardForm);
+  SuccessDescriptionLabel.Parent := WizardForm;
+  SuccessDescriptionLabel.Left := ScaleX(240);
+  SuccessDescriptionLabel.Top := ScaleY(104);
+  SuccessDescriptionLabel.Width := ScaleX(600);
+  SuccessDescriptionLabel.AutoSize := False;
+  SuccessDescriptionLabel.Caption :=
+    'ONETIX Local Connector has been installed and configured successfully.';
+  SuccessDescriptionLabel.Visible := False;
+  SuccessIconLabel := TNewStaticText.Create(WizardForm);
+  SuccessIconLabel.Parent := WizardForm;
+  SuccessIconLabel.Left := ScaleX(200);
+  SuccessIconLabel.Top := ScaleY(45);
+  SuccessIconLabel.Caption := Chr(10003);
+  SuccessIconLabel.Font.Size := 24;
+  SuccessIconLabel.Font.Color := $00389B45;
+  SuccessIconLabel.Visible := False;
+
+  { Custom-page Surface bounds are reset by Inno Setup during navigation.
+    Offset every page control once instead; the 200px brand rail then remains
+    deterministic on all DPI settings and on Back/Next navigation. }
+  for I := 0 to IdentityPage.Surface.ControlCount - 1 do
+    IdentityPage.Surface.Controls[I].Left :=
+      IdentityPage.Surface.Controls[I].Left + ScaleX(160);
+  for I := 0 to SourcePage.Surface.ControlCount - 1 do
+    SourcePage.Surface.Controls[I].Left :=
+      SourcePage.Surface.Controls[I].Left + ScaleX(160);
+  for I := 0 to ZonePage.Surface.ControlCount - 1 do
+    ZonePage.Surface.Controls[I].Left :=
+      ZonePage.Surface.Controls[I].Left + ScaleX(150);
+
+  { A sidebar is a child of each page Surface.  Unlike a form-level overlay,
+    this cannot disappear behind Inno Setup's notebook pages. }
+  IdentitySidebar := TBitmapImage.Create(IdentityPage);
+  IdentitySidebar.Parent := IdentityPage.Surface;
+  IdentitySidebar.SetBounds(0, 0, ScaleX(140), IdentityPage.Surface.Height);
+  IdentitySidebar.Stretch := True;
+  IdentitySidebar.Bitmap.LoadFromFile(ExpandConstant('{tmp}\wizard-sidebar.bmp'));
+  IdentitySidebar.BringToFront;
+  SourceSidebar := TBitmapImage.Create(SourcePage);
+  SourceSidebar.Parent := SourcePage.Surface;
+  SourceSidebar.SetBounds(0, 0, ScaleX(140), SourcePage.Surface.Height);
+  SourceSidebar.Stretch := True;
+  SourceSidebar.Bitmap.LoadFromFile(ExpandConstant('{tmp}\wizard-sidebar.bmp'));
+  SourceSidebar.BringToFront;
+  ZoneSidebar := TBitmapImage.Create(ZonePage);
+  ZoneSidebar.Parent := ZonePage.Surface;
+  ZoneSidebar.SetBounds(0, 0, ScaleX(130), ZonePage.Surface.Height);
+  ZoneSidebar.Stretch := True;
+  ZoneSidebar.Bitmap.LoadFromFile(ExpandConstant('{tmp}\wizard-sidebar.bmp'));
+  ZoneSidebar.BringToFront;
+
+  IdentityPage.Edits[0].OnChange := @SetupCodeChanged;
+  WizardForm.NextButton.Enabled := False;
+  DragAcceptFiles(WizardForm.Handle, True);
+  { Explorer normally runs non-elevated while this service installer is
+    elevated. Allow only the two shell drop messages through Windows UIPI. }
+  ChangeWindowMessageFilterEx(WizardForm.Handle, $0233, 1, 0);
+  ChangeWindowMessageFilterEx(WizardForm.Handle, $0049, 1, 0);
+  OldWizardWndProc := SetWindowLongW(WizardForm.Handle, -4,
+    CreateCallback(@WizardDropWndProc));
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

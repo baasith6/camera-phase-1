@@ -23,6 +23,7 @@ class StoreOrchestrator:
         self.source_fingerprints: Dict[str, tuple] = {}
         self.stop_event = threading.Event()
         self.backend_failures = 0
+        self._paused_pipelines_released = False
 
     def run(self):
         self.state.log("Orchestrator starting. Polling for cameras...")
@@ -30,8 +31,12 @@ class StoreOrchestrator:
             # Stop all backend polling and pipeline management while the local
             # control page is in its managed stopped state.
             if self.state.capture_paused:
+                if not self._paused_pipelines_released:
+                    self._release_pipelines_for_pause()
+                    self._paused_pipelines_released = True
                 time.sleep(0.25)
                 continue
+            self._paused_pipelines_released = False
             try:
                 cams = self.client.get_cameras()
             except Exception as e:
@@ -119,6 +124,14 @@ class StoreOrchestrator:
                     )
                     
                     def on_clip(path: str, duration: float, trigger: str, _cid=cid):
+                        # A clip encode may have been queued immediately before
+                        # Stop was pressed. Never enqueue/upload that stale event.
+                        if self.state.capture_paused:
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
+                            return
                         self.store.enqueue(path, _cid, duration, trigger)
                         self.state.queue_depth = self.store.pending_count()
 
@@ -175,3 +188,16 @@ class StoreOrchestrator:
         self.pipelines.clear()
         self.threads.clear()
         self.source_fingerprints.clear()
+
+    def _release_pipelines_for_pause(self) -> None:
+        """Hard-stop camera work while keeping cached/reference frames visible."""
+        for camera_id, pipeline in list(self.pipelines.items()):
+            pipeline.stop()
+            thread = self.threads.get(camera_id)
+            if thread is not None:
+                thread.join(timeout=3.0)
+            self.state.remove_camera(camera_id, preserve_frame=True)
+        self.pipelines.clear()
+        self.threads.clear()
+        self.source_fingerprints.clear()
+        self.state.log("All capture pipelines stopped; saved zone frames remain available")

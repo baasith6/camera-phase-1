@@ -86,7 +86,7 @@ if (-not $SkipInstaller) {
   if ($PythonPath) { $installerArgs.PythonPath = $PythonPath }
   if ($IsccPath) { $installerArgs.IsccPath = $IsccPath }
   & (Join-Path $root "scripts\build-installer.ps1") @installerArgs
-  $installerExe = Get-ChildItem (Join-Path $root "connector\dist\ONEVO-Connector-Setup-*.exe") |
+  $installerExe = Get-ChildItem (Join-Path $root "connector\dist\ONETIX-Connector-Setup-*.exe") |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
   if (-not $installerExe) { throw "Installer EXE not found after build" }
   Invoke-Checked "SCP installer" { scp @sshArgs $installerExe.FullName "${VmUser}@${VmHost}:/tmp/$($installerExe.Name)" }

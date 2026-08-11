@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 import requests
 
 from .baked_config import BAKED_BACKEND_URL
+from . import baked_config
 from .instance_lock import InstanceLock
 from .paths import default_state_dir, install_dir, pause_marker_path
 from .store import LocalStore
@@ -25,7 +26,10 @@ HEALTH_URL = "http://127.0.0.1:8099/health"
 TRAY_LOCK = "tray.lock"
 TRAY_EXIT_SIGNAL = "tray.exit"
 STARTUP_VALUE = "ONEVO Connector Tray"
-CURRENT_VERSION = "1.1.20"
+# Single source of truth: version.json, baked into baked_config.py by the
+# build pipeline (docker-entrypoint.sh / build.ps1). The literal below is
+# only a fallback for an unbuilt dev checkout.
+CURRENT_VERSION = getattr(baked_config, "BAKED_VERSION", None) or "1.1.20"
 UPDATE_MANIFEST_URL = os.getenv(
     "CONNECTOR_UPDATE_MANIFEST_URL",
     f"{BAKED_BACKEND_URL.rstrip('/')}/api/connectors/updates/latest",

@@ -4,7 +4,8 @@
 # Before launch:
 # 1. Copy .env.example to .env and set strong secrets + SMTP + public URLs
 # 2. Set BACKEND_PUBLIC_URL to your HTTPS API URL
-# 3. Build installer: .\scripts\build-installer.ps1 -BackendUrl https://api.yourdomain.example
+# 3. Set CONNECTOR_BUILD_BACKEND_URL to the public HTTPS backend URL. The
+#    installer-builder service builds/validates the Windows installer before backend startup.
 # 4. Optionally add GPU: -f docker-compose.gpu.yml
 
 services:

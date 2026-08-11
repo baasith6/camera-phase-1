@@ -524,8 +524,11 @@ public class ConnectorsController : ControllerBase
         var connector = await _connectorAuth.AuthenticateAsync(
             Request, HttpContext.RequestAborted);
         if (connector is null) return Unauthorized();
-        if (!_installer.TryGetInfo(out var path, out _, out _))
+        if (!_installer.TryGetInfo(out var path, out _, out var sha))
             return NotFound(new { error = "Installer not found" });
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.ETag = $"\"{sha}\"";
         return PhysicalFile(path, "application/octet-stream", _installer.FileName);
     }
 
@@ -537,7 +540,7 @@ public class ConnectorsController : ControllerBase
         if (!_installer.TryGetPublishedInfo(out var version, out var fileName, out var size, out var sha, out var downloadUrl))
             return NotFound(new {
                 error = "installer_not_built",
-                message = "Run .\\scripts\\dev-up.ps1 to build the Windows installer before starting the stack."
+                message = "Run docker compose up -d --build to build the Windows installer and start the stack."
             });
 
         return new InstallerInfoResponse(
@@ -553,11 +556,14 @@ public class ConnectorsController : ControllerBase
     [HttpGet("installer/download")]
     public IActionResult DownloadInstaller()
     {
-        if (!_installer.TryGetInfo(out var path, out _, out _))
+        if (!_installer.TryGetInfo(out var path, out _, out var sha))
             return NotFound(new {
                 error = "installer_not_built",
-                message = "Run .\\scripts\\dev-up.ps1 to build the Windows installer."
+                message = "Run docker compose up -d --build to build the Windows installer."
             });
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.ETag = $"\"{sha}\"";
         return PhysicalFile(path, "application/octet-stream", _installer.FileName);
     }
 }

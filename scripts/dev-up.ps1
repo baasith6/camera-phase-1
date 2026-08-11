@@ -65,7 +65,7 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 $version = Read-InstallerVersion
-$installerPath = Join-Path $distDir "ONETIX-Connector-Setup-$version-rev18.exe"
+$installerPath = Join-Path $distDir "ONETIX-Connector-Setup-$version.exe"
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 $fingerprint = Get-BuildFingerprint $BackendUrl
 $needsBuild = $ForceInstallerBuild -or -not (Installer-IsCurrent $installerPath $fingerprint)
@@ -78,13 +78,13 @@ if ($SkipInstallerBuild) {
 } elseif ($needsBuild) {
   Write-Host "==> Installer is missing or stale; preparing build tools..."
   & (Join-Path $PSScriptRoot "ensure-installer-tools.ps1")
-  if ($LASTEXITCODE -ne 0) { throw "Installer tool preparation failed (exit $LASTEXITCODE)" }
+  if (-not $?) { throw "Installer tool preparation failed" }
   $buildArgs = @{ BackendUrl = $BackendUrl }
   if ($PythonPath) { $buildArgs.PythonPath = $PythonPath }
   if ($IsccPath) { $buildArgs.IsccPath = $IsccPath }
   if ($AllowHttp -or $BackendUrl -match '^http://(localhost|127\.0\.0\.1)(:\d+)?') { $buildArgs.AllowHttp = $true }
   & (Join-Path $PSScriptRoot "build-installer.ps1") @buildArgs
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $installerPath)) {
+  if (-not $? -or -not (Test-Path -LiteralPath $installerPath)) {
     throw "Installer build did not produce $installerPath"
   }
   $installerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath).Hash.ToLowerInvariant()

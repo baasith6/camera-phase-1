@@ -1,0 +1,21 @@
+# Shell scripts are executed inside Linux Docker containers. If Windows
+# checks these out with CRLF line endings (common default: core.autocrlf=true),
+# the shebang line becomes "#!/bin/sh\r" and the container fails with
+# "exec ...: no such file or directory" - a line-ending bug, not a missing
+# file. Force LF for these regardless of the cloning machine's git config.
+*.sh text eol=lf
+*.py text eol=lf
+
+# Windows-only scripts should keep CRLF (harmless either way, but explicit).
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never text-convert binary assets.
+*.bmp binary
+*.ico binary
+*.ttf binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.jpeg binary
