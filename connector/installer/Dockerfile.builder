@@ -4,11 +4,22 @@ ARG WINDOWS_PYTHON_VERSION=3.11.9
 ARG INNO_SETUP_VERSION=6.7.3
 ARG WINSW_VERSION=2.12.0
 
+# Wine does not implement the Win32 NUMA-topology API
+# (GetNumaNodeProcessorMaskEx). Intel's OpenMP runtime - pulled in by
+# numpy/ultralytics - calls it at import time to plan thread affinity,
+# treats the "not implemented" result as fatal, and aborts the process
+# (PyInstaller then sees "SubprocessDiedError ... exit code 3" while
+# scanning ultralytics's binary dependencies). These variables tell
+# OpenMP to skip hardware topology detection entirely instead of
+# probing an API Wine can't answer.
 ENV DEBIAN_FRONTEND=noninteractive \
     WINEARCH=win64 \
     WINEPREFIX=/opt/wine \
     WINEDEBUG=-all \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    KMP_AFFINITY=disabled \
+    KMP_TOPOLOGY_METHOD=flat \
+    OMP_NUM_THREADS=1
 
 RUN dpkg --add-architecture i386 \
     && apt-get update && apt-get install -y --no-install-recommends \
