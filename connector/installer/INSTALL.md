@@ -1,7 +1,7 @@
 # onetix Connector — Installer Build Guide
 
 Connector runtime already works. This packages it into
-`ONEVO-Connector-Setup-1.1.18.exe` (filename keeps ONEVO for backend download APIs).
+`ONETIX-Connector-Setup-1.1.20.exe` (canonical backend-served installer).
 
 **Brand note:** The wizard shows **onetix** (fonts, logo, labels). Install
 paths, AppId, and the Windows service name stay **ONEVO** so existing shops
@@ -69,7 +69,7 @@ sees or enters it.
 Output:
 
 ```
-connector/dist/ONEVO-Connector-Setup-1.1.18.exe
+connector/dist/ONETIX-Connector-Setup-1.1.20.exe
 ```
 
 ## 3. What the installer does on a shop PC
@@ -96,8 +96,8 @@ If activation fails, the service **still** keeps the admin UI running at `http:/
 
 | File | Field |
 |---|---|
-| `connector/installer/onevo-connector.iss` | `#define AppVersion "1.1.18"` |
-| `connector/app/config.py` | `version="1.1.18"` |
+| `connector/installer/onevo-connector.iss` | `#define AppVersion "1.1.20"` |
+| `connector/app/config.py` | `version="1.1.20"` |
 | Backend env (`docker-compose.yml` / `.env`) | `ConnectorInstaller__Version` / `CONNECTOR_INSTALLER_VERSION` |
 
 Mismatch = backend looks for a filename that doesn't exist =

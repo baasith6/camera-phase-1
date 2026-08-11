@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Onevo.Api.Services;
 
@@ -15,6 +16,7 @@ public class ConnectorInstallerService
     private DateTime _cachedWriteUtc;
     private long _cachedSize;
     private string? _cachedSha;
+    private string? _cachedVersionFromFile;
 
     public ConnectorInstallerService(IConfiguration cfg, ILogger<ConnectorInstallerService> log)
     {
@@ -22,11 +24,47 @@ public class ConnectorInstallerService
         _log = log;
     }
 
-    public string Version =>
-        _cfg["ConnectorInstaller:Version"] ?? "1.1.20";
+    // Single source of truth: version.json at the repo root (mounted read-only
+    // into this container). An explicit ConnectorInstaller:Version config value
+    // always wins if set, but the normal path is to never set it and let this
+    // always match whatever docker-entrypoint.sh / build.ps1 just built - so
+    // "the build says 1.1.20 but the backend still looks for 1.1.18" can't happen.
+    public string Version
+    {
+        get
+        {
+            var configured = _cfg["ConnectorInstaller:Version"];
+            if (!string.IsNullOrWhiteSpace(configured)) return configured;
+
+            lock (_gate)
+            {
+                if (_cachedVersionFromFile is not null) return _cachedVersionFromFile;
+                try
+                {
+                    var path = _cfg["ConnectorInstaller:VersionFile"] ?? "/app/version.json";
+                    if (File.Exists(path))
+                    {
+                        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                        if (doc.RootElement.TryGetProperty("connector", out var v) &&
+                            v.GetString() is { Length: > 0 } value)
+                        {
+                            _cachedVersionFromFile = value;
+                            return value;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Could not read connector version from version.json, falling back to default");
+                }
+                _cachedVersionFromFile = "1.1.20";
+                return _cachedVersionFromFile;
+            }
+        }
+    }
 
     public string FileName =>
-        $"ONETIX-Connector-Setup-{Version}-rev18.exe";
+        $"ONETIX-Connector-Setup-{Version}.exe";
 
     public string? ResolvePath()
     {

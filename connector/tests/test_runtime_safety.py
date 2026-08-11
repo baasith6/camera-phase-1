@@ -77,9 +77,13 @@ class LocalStoreConcurrencyTests(unittest.TestCase):
 
     def test_managed_stop_preserves_local_control_state(self):
         state = RuntimeState()
+        state.cache_frame("camera-1", b"last-live-frame")
+        state.cache_reference_frame("camera-1", b"saved-zone-frame")
         state.set_paused(True)
         self.assertTrue(state.capture_paused)
         self.assertEqual(state.snapshot()["monitoringState"], "stopped")
+        self.assertEqual(state.get_frame("camera-1"), b"last-live-frame")
+        self.assertEqual(state.get_reference_frame("camera-1"), b"saved-zone-frame")
         stopped = threading.Event()
         stopped.set()
         self.assertFalse(state.wait_until_running(stopped, timeout=0.001))
@@ -87,6 +91,19 @@ class LocalStoreConcurrencyTests(unittest.TestCase):
         state.set_paused(False)
         self.assertEqual(state.snapshot()["monitoringState"], "running")
         self.assertTrue(state.wait_until_running(threading.Event(), timeout=0.001))
+        state.shutdown_workers()
+
+    def test_managed_stop_rejects_queued_event_analysis_and_clip_work(self):
+        state = RuntimeState()
+        state.set_paused(True)
+        called = []
+
+        event = state.submit_event(lambda: called.append("event"))
+        self.assertIsNone(event.result(timeout=1))
+        self.assertIsNone(state.run_analysis(lambda: called.append("analysis")))
+        self.assertTrue(state.submit_clip_job(lambda: called.append("clip")))
+        state.shutdown_workers()
+        self.assertEqual(called, [])
 
     def test_monitoring_pause_setting_survives_reopen(self):
         with tempfile.TemporaryDirectory() as temp:

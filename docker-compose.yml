@@ -1,4 +1,15 @@
 services:
+  installer-builder:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: connector/installer/Dockerfile.builder
+    environment:
+      CONNECTOR_BUILD_BACKEND_URL: ${CONNECTOR_BUILD_BACKEND_URL:-http://localhost:8081}
+    volumes:
+      - ./connector/dist:/output
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -59,6 +70,8 @@ services:
   backend:
     build: ./backend
     depends_on:
+      installer-builder:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -82,8 +95,12 @@ services:
       Seed__AdminEmail: ${SEED_ADMIN_EMAIL}
       Seed__AdminPassword: ${SEED_ADMIN_PASSWORD}
       Seed__ConnectorBootstrapKey: ${CONNECTOR_BOOTSTRAP_KEY}
+      CloudAi__ServiceKey: ${CLOUD_AI_SERVICE_KEY}
       Pilot__AlertVisibilityMode: ${ALERT_VISIBILITY_MODE}
-      ConnectorInstaller__Version: ${CONNECTOR_INSTALLER_VERSION:-1.1.20}
+      # No ConnectorInstaller__Version here on purpose: version.json (mounted
+      # below) is the single source of truth, so a version bump there is
+      # picked up automatically without needing this env var edited too.
+      ConnectorInstaller__VersionFile: /app/version.json
       ConnectorInstaller__Path: /app/connector-dist
       Smtp__Enabled: ${SMTP_ENABLE:-false}
       Smtp__Host: ${SMTP_HOST:-smtp.gmail.com}
@@ -99,6 +116,7 @@ services:
       - "8081:8080"
     volumes:
       - ./connector/dist:/app/connector-dist:ro
+      - ./version.json:/app/version.json:ro
 
   cloud-ai:
     build: ./cloud-ai
@@ -121,7 +139,7 @@ services:
       CLOUD_AI_MODEL: ${CLOUD_AI_MODEL}
       CLOUD_AI_DEVICE: ${CLOUD_AI_DEVICE}
       CLOUD_AI_YOLOE_PROMPTS: ${CLOUD_AI_YOLOE_PROMPTS}
-      CONNECTOR_BOOTSTRAP_KEY: ${CONNECTOR_BOOTSTRAP_KEY}
+      CLOUD_AI_SERVICE_KEY: ${CLOUD_AI_SERVICE_KEY}
 
   # Angular dashboard â€” served by nginx, proxies /api â†’ backend
   dashboard:

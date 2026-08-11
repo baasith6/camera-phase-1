@@ -407,17 +407,40 @@ class CapturePipeline:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(raw_path, fourcc, fps, (w, h))
         for f in frames:
+            if self._stop or self.state.capture_paused:
+                writer.release()
+                if os.path.exists(raw_path):
+                    os.remove(raw_path)
+                return None
             writer.write(f)
         writer.release()
 
         try:
             from .paths import resolve_ffmpeg
             ffmpeg_bin = resolve_ffmpeg()
-            subprocess.run(
+            process = subprocess.Popen(
                 [ffmpeg_bin, "-y", "-i", raw_path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
                  "-movflags", "+faststart", "-loglevel", "error", path],
-                check=True, timeout=60,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
+            deadline = time.monotonic() + 60
+            while process.poll() is None:
+                if self._stop or self.state.capture_paused:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    if os.path.exists(path):
+                        os.remove(path)
+                    return None
+                if time.monotonic() >= deadline:
+                    process.kill()
+                    raise subprocess.TimeoutExpired(process.args, 60)
+                time.sleep(0.1)
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, process.args)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
             self.state.log(f"WARNING: H.264 transcode failed ({exc}); uploading raw clip instead")
             os.replace(raw_path, path)
@@ -551,6 +574,9 @@ class CapturePipeline:
                 # Collect post-event frames.
                 post_frames: list = []
                 for _ in range(post_len):
+                    if self._stop or self.state.capture_paused:
+                        post_frames.clear()
+                        break
                     ok2, f2 = cap.read()
                     if not ok2:
                         if self._is_rtsp:
@@ -583,7 +609,7 @@ class CapturePipeline:
                     except Exception as exc:  # noqa: BLE001
                         self.state.log(f"ERROR: clip worker failed: {exc}")
                         return
-                    if path:
+                    if path and not self._stop and not self.state.capture_paused:
                         self.state.clips_created += 1
                         on_clip(path, _duration, _reason)
 

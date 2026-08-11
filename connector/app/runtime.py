@@ -178,7 +178,11 @@ class RuntimeState:
 
     def submit_event(self, callback, *args):
         """Run short I/O event work on the shared bounded executor."""
-        return self._event_executor.submit(callback, *args)
+        def run():
+            if self.capture_paused:
+                return None
+            return callback(*args)
+        return self._event_executor.submit(run)
 
     def run_analysis(self, callback, *args, timeout: float = 3.0):
         """Run CPU analysis on the shared bounded pool.
@@ -198,6 +202,8 @@ class RuntimeState:
                 self.analysis_queue_depth -= 1
                 self.analysis_active += 1
             try:
+                if self.capture_paused:
+                    return None
                 return callback(*args)
             finally:
                 with self._lock:
@@ -226,6 +232,8 @@ class RuntimeState:
                 self.clip_queue_depth -= 1
                 self.ffmpeg_active += 1
             try:
+                if self.capture_paused:
+                    return None
                 return callback(*args)
             finally:
                 with self._lock:

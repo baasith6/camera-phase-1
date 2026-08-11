@@ -1133,8 +1133,8 @@ def build_app(
   </div>
   <script>
     const RUNTIME_FIELDS = [
-      ['monitoringState','Monitoring'],['diskFreePct','Disk free %'],
-      ['queueDepth','Queue depth'],['uptimeSec','Uptime (s)'],
+      ['monitoringState','Monitoring'],['queueDepth','Queue depth'],
+      ['uptimeSec','Uptime (s)'],
       ['rtspReconnects','RTSP reconnects'],['clipQueueDepth','Clips in queue'],
       ['degradedReason','Degraded'],['lastClipAt','Last clip'],
     ];
@@ -1838,15 +1838,6 @@ def build_app(
       const logs = (s.logs || []).join('\\n');
       const uploadStuck = (s.queueDepth > 0 || s.uploadsFailed > 0) &&
         /ConnectTimeoutError|:9000|Upload FAILED|Upload error/i.test(logs);
-      if (reason.startsWith('disk_critical') || reason.startsWith('disk_warning')) {{
-        return {{
-          title: 'Low disk space',
-          text: reason + '. Free space on the Windows drive (target >20% free). '
-            + 'Stop the service and clear C:\\\\ProgramData\\\\ONEVO\\\\Connector\\\\data\\\\clips if test clips piled up.',
-          setup: false,
-          style: 'border-color:#5a4030;background:#2a2218',
-        }};
-      }}
       if (uploadStuck) {{
         return {{
           title: 'Clip upload blocked',
@@ -1870,8 +1861,11 @@ def build_app(
             text: 'The connector cannot reach the local backend. Start the backend service and retry setup.',
             setup: false, style: 'border-color:#5a4030;background:#2a2218' }};
         }}
-        return {{ title: 'Connector degraded', text: reason, setup: false,
-          style: 'border-color:#5a4030;background:#2a2218' }};
+        // A raw degraded reason is already available in Logs/Settings. Do not
+        // duplicate it as a generic dashboard banner. Specific actionable
+        // alerts above (upload blocked, incomplete setup, backend unavailable)
+        // remain visible.
+        return null;
       }}
       return null;
     }}

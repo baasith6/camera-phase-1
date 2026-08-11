@@ -84,7 +84,7 @@ AI events; the backend Risk Engine scores them and (for score >= 40) creates an 
 
 ### Windows installer (shop PC)
 
-Current Windows connector release: `ONEVO-Connector-Setup-1.1.18.exe`
+Current Windows connector release: `ONETIX-Connector-Setup-1.1.20.exe`
 (PyInstaller + Inno Setup + WinSW).
 Full steps: [`connector/installer/INSTALL.md`](connector/installer/INSTALL.md).
 
