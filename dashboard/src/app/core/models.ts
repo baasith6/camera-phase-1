@@ -201,6 +201,23 @@ export interface ClipAiEvent {
   startTs: string;
   endTs: string;
   modelVersion: string;
+  trackId: number;
+}
+
+export interface TrackOverlayBox {
+  trackId: number;
+  cue: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  conf: number;
+}
+
+export interface TrackOverlay {
+  fps: number;
+  stride: number;
+  frames: TrackOverlayBox[][];
 }
 
 export interface ClipDetail {
@@ -222,6 +239,7 @@ export interface ClipDetail {
   modelVersion?: string | null;
   analysisNote?: string | null;
   aiEvents: ClipAiEvent[];
+  trackOverlayJson?: string | null;
 }
 
 export interface PipelineHealth {

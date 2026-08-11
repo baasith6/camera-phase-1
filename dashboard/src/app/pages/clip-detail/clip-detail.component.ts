@@ -1,9 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
-import { ClipDetail } from '../../core/models';
+import { ClipDetail, TrackOverlay } from '../../core/models';
 import { ConfirmDialogService } from '../../shared/confirm-dialog.service';
 import { PageContainerComponent, PageHeaderComponent, ErrorBannerComponent, SkeletonListComponent } from '../../shared/ui-components';
 import { StatusBadgeComponent } from '../../shared/status-badge.component';
@@ -34,7 +34,19 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
             <div class="card !mb-0">
               <h3>Video</h3>
               @if (clip.clipUrl) {
-                <video class="rounded-[6px] border border-border-strong" [src]="clip.clipUrl" controls width="100%"></video>
+                <div class="video-shell" #videoShell>
+                  <video
+                    #clipVideo
+                    class="clip-video"
+                    [src]="clip.clipUrl"
+                    controls
+                    (loadedmetadata)="onVideoMeta()"
+                    (timeupdate)="onTimeUpdate()"
+                    (seeked)="onTimeUpdate()"
+                    (play)="onTimeUpdate()"
+                  ></video>
+                  <canvas #trackCanvas class="track-overlay" aria-hidden="true"></canvas>
+                </div>
               } @else {
                 <div class="px-4 py-6 text-center">
                   <p class="muted">Clip not available yet — it may still be uploading or processing.</p>
@@ -51,6 +63,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                   <thead>
                     <tr>
                       <th>Type</th>
+                      <th>Track</th>
                       <th>Zone</th>
                       <th>Confidence</th>
                       <th>Value</th>
@@ -61,6 +74,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
                     @for (e of clip.aiEvents; track $index) {
                       <tr>
                         <td>{{ e.eventType }}</td>
+                        <td>{{ e.trackId > 0 ? ('ID ' + e.trackId) : '—' }}</td>
                         <td>{{ e.zoneName || '—' }}</td>
                         <td>{{ e.confidence | number:'1.0-2' }}</td>
                         <td>{{ e.value | number:'1.0-1' }}</td>
@@ -133,13 +147,41 @@ import { StatusBadgeComponent } from '../../shared/status-badge.component';
     .detail-item:last-child { border-bottom: none; }
     .dk { color: var(--text-muted); font-size: 0.8rem; }
     .table.compact th, .table.compact td { font-size: 0.82rem; padding: 0.35rem 0.5rem; }
+    .video-shell {
+      position: relative;
+      width: 100%;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border-strong, var(--border));
+      background: #0b0b0b;
+    }
+    .clip-video {
+      display: block;
+      width: 100%;
+      vertical-align: top;
+    }
+    .track-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
   `],
 })
-export class ClipDetailComponent implements OnInit {
+export class ClipDetailComponent implements OnInit, AfterViewChecked, OnDestroy {
+  @ViewChild('clipVideo') videoRef?: ElementRef<HTMLVideoElement>;
+  @ViewChild('trackCanvas') canvasRef?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('videoShell') shellRef?: ElementRef<HTMLDivElement>;
+
   clip?: ClipDetail;
   error = '';
   deleting = false;
   loading = true;
+  trackOverlay: TrackOverlay | null = null;
+
+  private resizeObserver?: ResizeObserver;
+  private viewBound = false;
 
   constructor(
     private route: ActivatedRoute,
@@ -154,6 +196,7 @@ export class ClipDetailComponent implements OnInit {
     this.api.getClip(id).subscribe({
       next: (c) => {
         this.clip = c;
+        this.trackOverlay = this.parseOverlay(c.trackOverlayJson);
         this.loading = false;
       },
       error: (e) => {
@@ -161,6 +204,93 @@ export class ClipDetailComponent implements OnInit {
         this.error = e?.error?.error || 'Failed to load clip';
       },
     });
+  }
+
+  ngAfterViewChecked(): void {
+    if (this.viewBound || !this.shellRef?.nativeElement) return;
+    this.viewBound = true;
+    this.resizeObserver = new ResizeObserver(() => this.drawOverlay());
+    this.resizeObserver.observe(this.shellRef.nativeElement);
+    this.drawOverlay();
+  }
+
+  ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
+  }
+
+  onVideoMeta(): void {
+    this.drawOverlay();
+  }
+
+  onTimeUpdate(): void {
+    this.drawOverlay();
+  }
+
+  private parseOverlay(raw?: string | null): TrackOverlay | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as TrackOverlay;
+      if (!parsed?.frames || !Array.isArray(parsed.frames)) return null;
+      return {
+        fps: Number(parsed.fps) || 10,
+        stride: Math.max(1, Number(parsed.stride) || 1),
+        frames: parsed.frames,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private drawOverlay(): void {
+    const video = this.videoRef?.nativeElement;
+    const canvas = this.canvasRef?.nativeElement;
+    if (!video || !canvas) return;
+
+    const w = video.clientWidth;
+    const h = video.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const overlay = this.trackOverlay;
+    if (!overlay || overlay.frames.length === 0) return;
+
+    const fps = overlay.fps || 10;
+    const stride = overlay.stride || 1;
+    const sourceFrame = Math.max(0, Math.floor(video.currentTime * fps));
+    const overlayIdx = Math.min(
+      overlay.frames.length - 1,
+      Math.floor(sourceFrame / stride),
+    );
+    const boxes = overlay.frames[overlayIdx] || [];
+
+    ctx.lineWidth = 2;
+    ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif';
+    for (const box of boxes) {
+      const x = box.x1 * w;
+      const y = box.y1 * h;
+      const bw = Math.max(1, (box.x2 - box.x1) * w);
+      const bh = Math.max(1, (box.y2 - box.y1) * h);
+      const color = trackColor(box.trackId);
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.strokeRect(x, y, bw, bh);
+      const label = `ID ${box.trackId}`;
+      const tw = ctx.measureText(label).width + 8;
+      const th = 16;
+      const ly = Math.max(0, y - th);
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x, ly, tw, th);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, x + 4, ly + 12);
+    }
   }
 
   async deleteClip(): Promise<void> {
@@ -181,4 +311,9 @@ export class ClipDetailComponent implements OnInit {
       },
     });
   }
+}
+
+function trackColor(trackId: number): string {
+  const hue = ((Math.max(0, trackId) * 47) % 360);
+  return `hsl(${hue} 78% 52%)`;
 }

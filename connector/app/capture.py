@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 from .config import Config
+from .live_tracker import try_build_live_tracker
 from .runtime import RuntimeState
 
 # OpenCV environment hints for lower-latency RTSP (set before any VideoCapture).
@@ -110,9 +111,27 @@ class CapturePipeline:
         self._reference_frame_publisher = reference_frame_publisher
         self._reference_frame_pending = False
         self._reference_frame_inflight = False
+        self._live_tracker = try_build_live_tracker(
+            enabled=cfg.live_track,
+            model_path=cfg.live_track_model,
+            device=cfg.live_track_device,
+            stride=cfg.live_track_stride,
+        )
         if cfg.use_person_filter:
             self._person_hog = cv2.HOGDescriptor()
             self._person_hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+    def _update_live_tracks(self, frame) -> None:
+        if self._live_tracker is None or not self.cfg.camera_id:
+            return
+        try:
+            tracks = self._live_tracker.update(frame)
+            self.state.publish_tracks(
+                self.cfg.camera_id,
+                [t.as_dict() for t in tracks],
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.state.log(f"live-tracker update failed: {exc}")
 
     def stop(self) -> None:
         self._stop = True
@@ -464,9 +483,10 @@ class CapturePipeline:
         last_trigger = 0.0
         reconnect_attempt = 0
         self.state.capturing = True
+        track_note = "live-track=on" if self._live_tracker is not None else "live-track=off"
         self.state.log(
             f"Capture started  source={'RTSP' if self._is_rtsp else 'file'} "
-            f"fps={fps:.1f} pre={pre_len}f post={post_len}f"
+            f"fps={fps:.1f} pre={pre_len}f post={post_len}f {track_note}"
         )
 
         while not self._stop:
@@ -532,6 +552,7 @@ class CapturePipeline:
                 rolling = deque(list(rolling)[-pre_len:], maxlen=pre_len)
             post_len = new_post
 
+            self._update_live_tracks(frame)
             self._publish_preview(frame, now, self._source_fps)
 
             manual_trigger = self._consume_trigger()
@@ -576,6 +597,7 @@ class CapturePipeline:
                         )
                     f2 = self._processing_frame(f2)
                     post_frames.append(f2.copy())
+                    self._update_live_tracks(f2)
                     self._publish_preview(f2, time.time(), self._source_fps)
                     reconnect_attempt = 0
 

@@ -745,6 +745,11 @@ def build_app(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not load camera zones: {exc}") from exc
 
+    @app.get("/live/cameras/{camera_id}/tracks")
+    def live_camera_tracks(camera_id: str):
+        """Latest person track boxes + ByteTrack IDs for the live preview overlay."""
+        return state.get_tracks(camera_id)
+
     @app.get("/live/cameras/{camera_id}/stream.mjpg")
     def live_camera_stream(camera_id: str):
         def frames():
@@ -1081,6 +1086,7 @@ def build_app(
     <div class="camera-visual">
       <img id="focus-stream" alt="Selected live camera">
       <canvas id="focus-zone-overlay" class="zone-overlay"></canvas>
+      <canvas id="focus-track-overlay" class="track-overlay"></canvas>
     </div>
   </div>
 
@@ -1398,10 +1404,20 @@ def build_app(
         const overlay = document.createElement('canvas');
         overlay.className = 'zone-overlay';
         overlay.dataset.cameraId = source.cameraId;
-        img.addEventListener('load', () => redrawZoneOverlay(source.cameraId, overlay));
-        new ResizeObserver(() => redrawZoneOverlay(source.cameraId, overlay)).observe(visual);
-        visual.append(img, overlay);
+        const trackOverlay = document.createElement('canvas');
+        trackOverlay.className = 'track-overlay';
+        trackOverlay.dataset.cameraId = source.cameraId;
+        img.addEventListener('load', () => {{
+          redrawZoneOverlay(source.cameraId, overlay);
+          redrawTrackOverlay(source.cameraId, trackOverlay);
+        }});
+        new ResizeObserver(() => {{
+          redrawZoneOverlay(source.cameraId, overlay);
+          redrawTrackOverlay(source.cameraId, trackOverlay);
+        }}).observe(visual);
+        visual.append(img, overlay, trackOverlay);
         loadZoneOverlay(source.cameraId, overlay);
+        loadTrackOverlay(source.cameraId, trackOverlay);
         const meta = document.createElement('div');
         meta.className = 'meta';
         const name = document.createElement('strong');
@@ -1414,6 +1430,7 @@ def build_app(
       }});
     }}
     const zoneOverlayCache = new Map();
+    const trackOverlayCache = new Map();
     function zoneColor(zone) {{
       const type = zone.zoneType || zone.ZoneType || '';
       if (type === 'HighValue') return ['rgba(255,120,120,.30)', '#ff7878'];
@@ -1421,6 +1438,10 @@ def build_app(
       if (type === 'BlindSpot') return ['rgba(180,120,255,.28)', '#b478ff'];
       if (type === 'Checkout') return ['rgba(92,219,127,.27)', '#5cdb7f'];
       return ['rgba(120,160,255,.28)', '#78a0ff'];
+    }}
+    function trackColor(trackId) {{
+      const hue = ((Math.max(0, Number(trackId) || 0) * 47) % 360);
+      return `hsl(${{hue}} 78% 52%)`;
     }}
     function zonePoints(zone) {{
       try {{
@@ -1474,6 +1495,10 @@ def build_app(
       if (canvas.width !== backingWidth || canvas.height !== backingHeight) {{
         canvas.width = backingWidth; canvas.height = backingHeight;
       }}
+      return {{ width, height }};
+    }}
+    function drawZoneOverlay(canvas, zones) {{
+      const {{ width, height }} = sizeOverlayCanvas(canvas);
       const ctx = canvas.getContext('2d');
       ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       ctx.clearRect(0, 0, width, height);
@@ -1492,8 +1517,39 @@ def build_app(
         ctx.fill(); ctx.stroke();
       }});
     }}
+    function drawTrackOverlay(canvas, tracks) {{
+      const {{ width, height }} = sizeOverlayCanvas(canvas);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+      ctx.lineWidth = 2;
+      ctx.font = '600 12px Inter,ui-sans-serif,system-ui,sans-serif';
+      (tracks || []).forEach(track => {{
+        const x1 = Number(track.x1), y1 = Number(track.y1);
+        const x2 = Number(track.x2), y2 = Number(track.y2);
+        if (![x1,y1,x2,y2].every(Number.isFinite)) return;
+        const x = x1 * width, y = y1 * height;
+        const bw = Math.max(1, (x2 - x1) * width);
+        const bh = Math.max(1, (y2 - y1) * height);
+        const color = trackColor(track.trackId);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.strokeRect(x, y, bw, bh);
+        const label = 'ID ' + track.trackId;
+        const tw = ctx.measureText(label).width + 8;
+        const th = 16;
+        const ly = Math.max(0, y - th);
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(x, ly, tw, th);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, x + 4, ly + 12);
+      }});
+    }}
     function redrawZoneOverlay(cameraId, canvas) {{
       drawZoneOverlay(canvas, zoneOverlayCache.get(cameraId) || []);
+    }}
+    function redrawTrackOverlay(cameraId, canvas) {{
+      drawTrackOverlay(canvas, trackOverlayCache.get(cameraId) || []);
     }}
     async function loadZoneOverlay(cameraId, canvas) {{
       try {{
@@ -1508,6 +1564,15 @@ def build_app(
         redrawZoneOverlay(cameraId, canvas);
       }} catch (_) {{}}
     }}
+    async function loadTrackOverlay(cameraId, canvas) {{
+      try {{
+        const response = await fetch(`/live/cameras/${{encodeURIComponent(cameraId)}}/tracks`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        trackOverlayCache.set(cameraId, Array.isArray(payload.tracks) ? payload.tracks : []);
+        redrawTrackOverlay(cameraId, canvas);
+      }} catch (_) {{}}
+    }}
     function openCameraFocus(source) {{
       if (!ownsLivePreview) return;
       stopLivePreviews();
@@ -1517,21 +1582,28 @@ def build_app(
       stream.src =
         `/live/cameras/${{encodeURIComponent(source.cameraId)}}/stream.mjpg?t=${{Date.now()}}`;
       const overlay = document.getElementById('focus-zone-overlay');
-      overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+      const trackOverlay = document.getElementById('focus-track-overlay');
       overlay.dataset.cameraId = source.cameraId;
-      document.getElementById('camera-focus').classList.remove('hidden');
-      stream.onload = () => requestAnimationFrame(() =>
-        redrawZoneOverlay(source.cameraId, overlay));
+      trackOverlay.dataset.cameraId = source.cameraId;
+      stream.onload = () => {{
+        redrawZoneOverlay(source.cameraId, overlay);
+        redrawTrackOverlay(source.cameraId, trackOverlay);
+      }};
       loadZoneOverlay(source.cameraId, overlay);
-      requestAnimationFrame(() => redrawZoneOverlay(source.cameraId, overlay));
-      new ResizeObserver(() => redrawZoneOverlay(source.cameraId, overlay))
-        .observe(document.getElementById('camera-focus').querySelector('.camera-visual'));
+      loadTrackOverlay(source.cameraId, trackOverlay);
+      document.getElementById('camera-focus').classList.remove('hidden');
+      new ResizeObserver(() => {{
+        redrawZoneOverlay(source.cameraId, overlay);
+        redrawTrackOverlay(source.cameraId, trackOverlay);
+      }}).observe(document.getElementById('camera-focus').querySelector('.camera-visual'));
     }}
     function closeCameraFocus() {{
       document.getElementById('camera-focus').classList.add('hidden');
       document.getElementById('focus-stream').removeAttribute('src');
       const overlay = document.getElementById('focus-zone-overlay');
+      const trackOverlay = document.getElementById('focus-track-overlay');
       overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+      trackOverlay.getContext('2d').clearRect(0, 0, trackOverlay.width, trackOverlay.height);
       loadSources();
     }}
     async function removeSavedSource(sourceKey) {{
@@ -2024,6 +2096,9 @@ def build_app(
       document.querySelectorAll('.zone-overlay').forEach(overlay => {{
         if (overlay.dataset.cameraId) redrawZoneOverlay(overlay.dataset.cameraId, overlay);
       }});
+      document.querySelectorAll('.track-overlay').forEach(overlay => {{
+        if (overlay.dataset.cameraId) redrawTrackOverlay(overlay.dataset.cameraId, overlay);
+      }});
     }});
     setInterval(tick, 1500);
     setInterval(refreshLogRows, 1500);
@@ -2036,6 +2111,11 @@ def build_app(
         loadZoneOverlay(overlay.dataset.cameraId, overlay)
       );
     }}, 5000);
+    setInterval(() => {{
+      document.querySelectorAll('.track-overlay[data-camera-id]').forEach(overlay =>
+        loadTrackOverlay(overlay.dataset.cameraId, overlay)
+      );
+    }}, 250);
     tick();
     loadSources();
     showView(window.location.hash.slice(1) || 'dashboard');

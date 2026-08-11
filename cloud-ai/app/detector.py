@@ -54,6 +54,11 @@ class Detection:
     cy: float   # normalized center y (0..1)
     conf: float
     embedding: list[float] = None
+    # Normalized bounding box (0..1); used for track overlays / Re-ID crops.
+    x1: float = 0.0
+    y1: float = 0.0
+    x2: float = 0.0
+    y2: float = 0.0
 
 
 class DetectorBackend(Protocol):
@@ -62,13 +67,24 @@ class DetectorBackend(Protocol):
     def track_clip(self, clip_path: str, reid_extractor=None) -> tuple[float, list[list["Detection"]]]: ...
 
 
+def _clip_fps(clip_path: str) -> float:
+    """Read container FPS from the clip; fall back to 10 if missing/invalid."""
+    import cv2
+    cap = cv2.VideoCapture(clip_path)
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    finally:
+        cap.release()
+    return fps if fps > 1e-3 else 10.0
+
+
 def _ultralytics_results_to_frames(
     results, index_to_cue: Callable[[int], str | None],
-    reid_extractor=None
+    reid_extractor=None,
+    fps: float = 10.0,
 ) -> tuple[float, list[list[Detection]]]:
     """Shared conversion for Ultralytics streaming track results."""
     frames: list[list[Detection]] = []
-    fps = 10.0
     for res in results:
         h, w = res.orig_shape if hasattr(res, "orig_shape") else (1, 1)
         orig_img = res.orig_img if hasattr(res, "orig_img") else None
@@ -85,13 +101,16 @@ def _ultralytics_results_to_frames(
                 if cue is None:
                     continue
                 x1, y1, x2, y2 = xyxy[i]
-                
+                nx1 = float(x1 / max(1, w))
+                ny1 = float(y1 / max(1, h))
+                nx2 = float(x2 / max(1, w))
+                ny2 = float(y2 / max(1, h))
+                cx = float(((x1 + x2) / 2.0) / max(1, w))
+                cy = float(((y1 + y2) / 2.0) / max(1, h))
+
                 embedding = None
                 if cue == "person" and reid_extractor is not None and orig_img is not None:
                     try:
-                        # Convert to normalized width/height logic for extraction
-                        cx = ((x1 + x2) / 2.0) / max(1, w)
-                        cy = ((y1 + y2) / 2.0) / max(1, h)
                         box_w = (x2 - x1) / max(1, w)
                         box_h = (y2 - y1) / max(1, h)
                         embedding = reid_extractor.extract(orig_img, cx, cy, box_w, box_h)
@@ -101,10 +120,14 @@ def _ultralytics_results_to_frames(
                 dets.append(Detection(
                     cue=cue,
                     track_id=int(ids[i]) if i < len(ids) else -1,
-                    cx=float(((x1 + x2) / 2.0) / max(1, w)),
-                    cy=float(((y1 + y2) / 2.0) / max(1, h)),
+                    cx=cx,
+                    cy=cy,
                     conf=float(confs[i]) if i < len(confs) else 0.0,
                     embedding=embedding,
+                    x1=nx1,
+                    y1=ny1,
+                    x2=nx2,
+                    y2=ny2,
                 ))
         frames.append(dets)
     return fps, frames
@@ -124,11 +147,14 @@ class YoloBackend:
         return f"yolo:{self.model_path}"
 
     def track_clip(self, clip_path: str, reid_extractor=None):
+        fps = _clip_fps(clip_path)
         results = self.model.track(
             source=clip_path, stream=True, persist=True, tracker="bytetrack.yaml",
             classes=list(COCO_TO_CUE.keys()), device=self.device, verbose=False,
         )
-        return _ultralytics_results_to_frames(results, lambda c: COCO_TO_CUE.get(c), reid_extractor=reid_extractor)
+        return _ultralytics_results_to_frames(
+            results, lambda c: COCO_TO_CUE.get(c), reid_extractor=reid_extractor, fps=fps,
+        )
 
 
 class YoloeBackend:
@@ -154,11 +180,14 @@ class YoloeBackend:
         return None
 
     def track_clip(self, clip_path: str, reid_extractor=None):
+        fps = _clip_fps(clip_path)
         results = self.model.track(
             source=clip_path, stream=True, persist=True, tracker="bytetrack.yaml",
             device=self.device, verbose=False,
         )
-        return _ultralytics_results_to_frames(results, self._index_to_cue, reid_extractor=reid_extractor)
+        return _ultralytics_results_to_frames(
+            results, self._index_to_cue, reid_extractor=reid_extractor, fps=fps,
+        )
 
 
 class RfDetrBackend:
@@ -201,6 +230,10 @@ class RfDetrBackend:
                     cx=float(((x1 + x2) / 2.0) / max(1, w)),
                     cy=float(((y1 + y2) / 2.0) / max(1, h)),
                     conf=float(confs[i]) if i < len(confs) else 0.0,
+                    x1=float(x1 / max(1, w)),
+                    y1=float(y1 / max(1, h)),
+                    x2=float(x2 / max(1, w)),
+                    y2=float(y2 / max(1, h)),
                 ))
             frames.append(dets)
         cap.release()

@@ -9,3 +9,5 @@ wsdiscovery>=2.0
 python-multipart>=0.0.9,<1
 pystray>=0.19.5,<1
 Pillow>=10,<13
+# Live person track overlay (ByteTrack). Disable with CONNECTOR_LIVE_TRACK=false.
+ultralytics>=8.2,<9

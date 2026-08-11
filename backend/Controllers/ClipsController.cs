@@ -243,8 +243,10 @@ public class ClipsController : ControllerBase
                 e.Confidence,
                 e.StartTs,
                 e.EndTs,
-                e.ModelVersion
-            )).ToList()
+                e.ModelVersion,
+                e.TrackId
+            )).ToList(),
+            row.clip.TrackOverlayJson
         ));
     }
 

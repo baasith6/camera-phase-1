@@ -110,6 +110,8 @@ public class Clip
     public string TriggerReason { get; set; } = "motion";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? AnalyzedAt { get; set; }
+    /// <summary>JSON track overlay from cloud-ai (person boxes + ByteTrack IDs).</summary>
+    public string? TrackOverlayJson { get; set; }
 }
 
 public class AiEvent
